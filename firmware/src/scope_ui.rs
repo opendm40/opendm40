@@ -349,6 +349,8 @@ pub struct Model {
     /// first start): the DMM block.
     pub ch2_on: bool,
     pub ch2_txt: Txt,
+    /// The CH2 trace's zero row - 140 (its '2' level marker, `CH2_LEVEL`).
+    pub ch2_pos: i16,
     /// The GEN trace shown and its V/div: the GEN block.
     pub gen_on: bool,
     pub gen_txt: Txt,
@@ -437,6 +439,7 @@ impl Model {
         tsrc: 0,
         ch2_on: false,
         ch2_txt: Txt::EMPTY,
+        ch2_pos: 0,
         gen_on: false,
         gen_txt: Txt::EMPTY,
         wave: false,
@@ -1295,8 +1298,11 @@ impl MarkInk {
 }
 
 /// Level-item slots (CH1, trigger level, math offset, runt level, Y
-/// cursors).
-pub const NSTRIP: usize = 6;
+/// cursors, CH2).
+pub const NSTRIP: usize = 7;
+/// Level-item id of the CH2 (DMM) zero row: a '2' marker in the CH2
+/// colour while CH2 is shown, dragged up / down as CH1's.
+pub const CH2_LEVEL: u8 = 6;
 /// Level-item id of the trigger level.
 const TRIG_LEVEL: u8 = 1;
 /// x of the trigger-level marker: inside the graph at its right edge (x
@@ -1363,6 +1369,10 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     }
     if let Some(r) = m.runt_row {
         out[n] = (5, level(if r > 280 { 281 } else { r }, FAM_T, m.sel_v == 5, C_ORANGE));
+        n += 1;
+    }
+    if m.ch2_on {
+        out[n] = (CH2_LEVEL, level(off_row(m.ch2_pos), FAM_2, m.sel_v == CH2_LEVEL, C_CH2));
         n += 1;
     }
     if let Some(yc) = m.ycur {

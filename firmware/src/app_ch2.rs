@@ -28,6 +28,9 @@ pub struct Ch2 {
     /// stream): restart it at the next RUN (the samples in between were
     /// thrown away).
     pub frozen: bool,
+    /// Vertical position: the zero row - 140 (rows of the 280-row model,
+    /// as CH1's `Settings::pos`; the '2' marker, scope_ui::CH2_LEVEL).
+    pub pos: i16,
 }
 
 /// CH2's highest stream rate (S/s): the 38 400 rung at 2 ms/div and
@@ -40,7 +43,7 @@ pub struct Ch2 {
 pub const CH2_MAX_FS: u32 = 38_400;
 
 impl Ch2 {
-    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false };
+    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, pos: 0 };
 }
 
 impl crate::pack10::Src for scope_ch2::MeasSrc<'_> {
@@ -260,7 +263,8 @@ impl App {
         }
         let st = scope_ch2::store();
         let k = 141.0 / (4.0 * self.ch2.vdiv);
-        let row = |v: f32| (140.0 - v * k).clamp(-30000.0, 30000.0) as i16;
+        let z = 140.0 + self.ch2.pos as f32;
+        let row = |v: f32| (z - v * k).clamp(-30000.0, 30000.0) as i16;
         // Columns left to right (rising times): one anchor search per frame
         // and f32 maths per column (`Store::span_run`).
         let mut run = st.run();

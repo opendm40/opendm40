@@ -1,6 +1,6 @@
 [package]
 name = "opendm40"
-version = "0.4.1-sk1"
+version = "0.4.2-sk1"
 edition = "2021"
 description = "Replacement firmware for the Alientek DM40 (GD32F427)"
 
