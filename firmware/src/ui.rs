@@ -1285,7 +1285,7 @@ fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
     if null && mode == 10 && !exp {
         let w = sf::text_width(sf::F14, t.as_str(), 1);
-        sf::label(sf::F14, rect(OHM_I_RECT.x + w + 8, OHM_I_RECT.y, OHM_I_RECT.w - w - 8, OHM_I_RECT.h), "NULL", VALUE, BG, 1, 1);
+        sf::label(sf::F14, rect(OHM_I_RECT.x + w + 12, OHM_I_RECT.y, OHM_I_RECT.w - w - 12, OHM_I_RECT.h), "NULL", VALUE, BG, 1, 1);
     }
 }
 
