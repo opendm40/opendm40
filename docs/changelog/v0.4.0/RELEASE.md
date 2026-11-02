@@ -12,61 +12,61 @@ GEN and MATH, each with its V/div and zoom-in / zoom-out magnifiers; a tap
 on the title opens the channel or switches it on and off. The graph reaches
 the left edge of the screen.
 
-![Before and after: the scope page](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/scope-panel.png)
+![Before and after: the scope page](scope-panel.png)
 
 **The multimeter and the generator on the scope.** CH2 (DMM) draws the
 multimeter's input over CH1 on the same time axis; the GEN trace shows the
 generator's output on its own V/div. **Source GEN** triggers on the
 generator with no wire.
 
-![All four channels: CH1, DMM, GEN and ABS math](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/channels.png)
+![All four channels: CH1, DMM, GEN and ABS math](channels.png)
 
 **Protocol decoder.** UART (RS-232, RS-485, with Modbus RTU frames found by
 their CRC) and DALI, decoded under the trace, also in the Wave view.
 
-![The decoder band: UART and Modbus RTU](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/decoder.png)
+![The decoder band: UART and Modbus RTU](decoder.png)
 
 **Decoder Mode Log** lists every frame of a running stream; a tap on a
 frame shows its waveform.
 
-![Mode Log and a frame's waveform](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/decode-log.png)
+![Mode Log and a frame's waveform](decode-log.png)
 
 **Scope: 5 and 2 mV/div,** a digital zoom of 10 mV/div for small signals.
 
-![2 mV/div](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/mv-div.png)
+![2 mV/div](mv-div.png)
 
 **Drag as on a Rigol DHO800/900.** Drag a marker to move it; anywhere else,
 sideways moves the trigger position and up / down the selected item.
 
-![Drag zones on the scope page](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/drag.png)
+![Drag zones on the scope page](drag.png)
 
 **Extra digit at full size.** The reading starts further left, so the
 other digits stay put when the sixth digit comes or goes.
 
-![Before and after: the extra digit](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/extra-digit.png)
+![Before and after: the extra digit](extra-digit.png)
 
 **Wave chip and σ.** In V and A the **Wave** chip on the trend chart opens
 the scope on the multimeter inputs; the statistics column adds the standard
 deviation.
 
-![The Wave chip and the σ row](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/wave-sigma.png)
+![The Wave chip and the σ row](wave-sigma.png)
 
 **Settings in tabs:** Display, Alerts, Power, Multimeter, Scope, Other.
 
-![Before and after: Settings](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/settings.png)
+![Before and after: Settings](settings.png)
 
 **600 MΩ range,** experimental, on the range page only.
 
-![The 600 MΩ range page and reading](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/ohm-600m.png)
+![The 600 MΩ range page and reading](ohm-600m.png)
 
 **Continuity: a green SHORT band** and green digits while the beeper
 sounds, also at volume 0 %.
 
-![Continuity before and with a short](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/cont-short.png)
+![Continuity before and with a short](cont-short.png)
 
 **Record button on the range pages:** MF, then **Record**.
 
-![Before and after: the current range page](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/record-button.png)
+![Before and after: the current range page](record-button.png)
 
 Also new: each function button remembers its sub-mode, **Mode Remember**
 restores the multimeter and the scope after a power-off, a longer scope
