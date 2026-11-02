@@ -51,7 +51,13 @@ SCEN = [
     # Absorption on a capacitor inside 600 uF: its early slope reads it over the range (the
     # chip options stay set: capcmpw / capvavg back to their defaults).
     ('470uF-da', 'c:470e-6;capcmpw:1;capvavg:0;capda:0.6;capdatau:1', 18, 470e-6, 9),
-    ('open', 'open', 8, 'small', 1),
+    # Mains ripple on the ramp node (capnoise, peak V at the node; a user's 470 uF hunted
+    # 600 uF <-> 60 uF with "Discharging..." while a laptop charger fed the USB host).
+    ('470uF', 'c:470e-6;capda:0;capnoise:0', 14, 470e-6, 9),
+    ('470uF-50Hz', 'c:470e-6;capda:0;capnoise:0.02;capnoisehz:50', 20, 470e-6, 12),
+    ('470uF-60Hz', 'c:470e-6;capda:0;capnoise:0.02;capnoisehz:60', 20, 470e-6, 12),
+    ('470uF-50Hz-big', 'c:470e-6;capda:0;capnoise:0.1;capnoisehz:50', 20, 470e-6, 12),
+    ('open', 'open;capnoise:0', 8, 'small', 1),
     # Open leads entered from a 1 mF value's range (AUTO starts on 6 mF: discharge, ramp).
     ('open-1mF', 'open', 10, 'small', 8, ('c:1000e-6', 9)),
     # A resistor (capdowntest r50-dcv: the device's 34 mV on the node, forced; the emulator's
@@ -159,9 +165,10 @@ try:
             r = int(num(cap[0])) if cap and not math.isnan(num(cap[0])) else -1
             if not ranges or ranges[-1] != r:
                 ranges.append(r)
-            if A.verbose and (kind, ro[2], r) != last:
-                print('       %s %6.2f r%d %s %s' % (name, s, r, kind, ro[2]), flush=True)
-            last = (kind, ro[2], r)
+            ph = cap[2] if len(cap) > 2 else '?'
+            if A.verbose and (kind, ro[2], r, ph) != last:
+                print('       %s %6.2f r%d %s %s ph%s' % (name, s, r, kind, ro[2], ph[:5]), flush=True)
+            last = (kind, ro[2], r, ph)
             if kind == 'G' and t_g is None and not math.isnan(v):
                 t_g = s
             if kind == 'F':

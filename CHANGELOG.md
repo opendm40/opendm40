@@ -5,6 +5,17 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## Unreleased
+
+### Fixed
+
+- **Capacitance: large capacitors (about 50–600 µF) with a laptop charger on
+  the USB cable.** The range no longer goes back and forth with
+  "Discharging..." between readings. After two such round trips the meter
+  stays on the large ranges, and the aux row shows "Unstable: unplug USB?"
+  until a value comes. A step between the 600 µF, 6 mF and 60 mF ranges no
+  longer discharges the capacitor again.
+
 ## v0.4.0 (2026-11-02)
 
 ### New
