@@ -5,6 +5,8 @@
 !stock/vendor/dm40_v_2_6.bin
 *.apk
 *.zip
+# Vendor update packages downloaded for analysis (bin/<meter>/)
+bin/
 
 # Build outputs (dist/: memrw kit built by stock/patch/kit/mkkit.sh)
 dist/

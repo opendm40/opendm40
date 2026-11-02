@@ -347,6 +347,25 @@ What waits for the owner; each line links to the material.
 - [ ] **Docs, owner decision:** the AI-contribution policy for CONTRIBUTING.md (whether AI-written
       contributions are accepted, and how they are marked and reviewed).
 
+## Next release (after 0.4.0)
+
+- [ ] Generator: a swipe gesture turns the output off (owner 2026-11-01).
+- [ ] Mode icons: on the combined Diode / Cont-Resist icon (and similar), the sub-icon a tap opens comes first, so
+  it shows which one you get from another mode (user request, owner 2026-11-01).
+
+## AD1 offset with AD2 / AD3 on: measure, then maybe compensate (owner 2026-11-01)
+
+AD2 / AD3 converting next to AD1 shifts AD1 (DS 13.1 note 7; [acdc-approaches](docs/acdc-approaches.md)
+"AD1 offset with AD2/AD3 on"). #179's AD2 on PB1 in DC V moved a user's -4 V reading by ~0.7 mV; the rule is
+now: no AD2 / AD3 in a row whose AD1 value is shown. Owner: measure the effect, it may be compensable.
+- [ ] Device, calibrator on V-COM: per DC V / DC mV / ohm range, AD1 with AD2 (and AD3, RMS, peak hold) off vs
+  on, in alternating blocks (calibrator drift); levels 0, +-10 %, +-50 %, +-90 % of the range, both polarities.
+  A/B switch: `DBG:SENT:VAR 128` while #179's rows exist, else a DBG row variant.
+- [ ] Is the shift an offset, a gain, or level / polarity dependent? Does it repeat over power cycles, warm-up,
+  units (only one meter here: say so), and AD2's input node (PB1 vs OP1O vs AGND)?
+- [ ] If stable: a per-range correction (offset / gain) applied only while AD2 / AD3 run, measured at first entry
+  (as method C's zero) or fixed per range; then re-allow the A-jack negative leg and similar AD2 uses.
+
 ## Next up (groomed 2026-10-14)
 
 Replaced by [Open, by kind](#open-by-kind-2026-10-27) (2026-10-27). Its entries are items of their own below:
@@ -3600,6 +3619,9 @@ Emulator (emu/):
       **Device 8e5ca2d full set + 9f36bbe confirmation (§10.15): PASS**: 6 V 0 V -0.34..+0.09 mV in 9 of 9
       e8s, gsrc 1 throughout on 6 V, 60 V gsrc 3 every session; e8up, e8, e5, e11, e10, e9 pass. C meets the
       decision rule; A stays the default (owner, next item).
+- [ ] AC+DC: decide the final method (owner, 2026-10-31). Release builds run only the stock method A;
+      B and C are behind the `acdc-meth` build feature (#196). Either make C the default (item below) and drop
+      A's alternation and B, or drop B and C.
 - [ ] Make method C the AC+DC default, after a device check of C on the A / mA / µA ranges with real current
       (owner, 2026-10-23). Plan: acdc-approaches.md §10.16 (i8 / i8up e8-style levels per range, imix DC + 50 Hz
       AC, iauto CURR:COUP AUTO, ie5 drift; bench supply + load, a second meter in series as the reference; an
