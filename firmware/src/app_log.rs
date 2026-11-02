@@ -471,6 +471,9 @@ impl App {
             Some("Decode log: scope record in use")
         } else if self.view == View::Inrush {
             Some("Decode log: inrush page open")
+        } else if self.view == View::PWave {
+            // Power Wave's capture is in BUF; closing it returns BUF.
+            Some("Decode log: Power Wave open")
         } else if crate::decode::is_dali(ds().cfg.proto) {
             // The log decodes UART / Modbus only.
             Some("Decode log: no DALI")

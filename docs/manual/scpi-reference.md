@@ -509,6 +509,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `[SENSe:]POWer:PHASe[?]` | `-127` .. `127` | `0` | both |
 | `[SENSe:]POWer:PHASe:CALibrate[?]` | `[REACtive]` | `NONE`, `RUN`, `OK`, `FLAT`, `NOTREACTIVE` or `RANGE`, then the phase setting: `OK,-3` | both |
 | `[SENSe:]POWer:CYCle?` | | `<discarded>,<P period ms>,<full cycle ms>`: `2,642,1284` | both |
+| `[SENSe:]POWer:WAVE[:STATe][?]` | `ON` or `OFF` | `<open 1/0>,<frames>,<Urms>,<Irms>,<P>,<F>,<points per channel>,<repeated reads>,<unreadable points>,<I zero A>,<I gain>,<checked I A>,<on the rail 1/0>,<closed by: 0 -, 1 above 10 A, 2 over range, 3 current limit>` | both |
 | `[SENSe:]POWer:ZERO[?]` | none (start) or `CLEar` | `<result>,SET\|NONE,<V zero>,<6 current zeros>,<6 DC zeros>` | both |
 | `[SENSe:]POWer:VOLTage:CALibrate[?]` | none (start) or `DEFault` | `<result>,<V range>,<gain>,SELF\|FACT` | both |
 | `[SENSe:]POWer:VOLTage:GAIN?` | | the four V range gains | both |
@@ -537,6 +538,13 @@ and `MEASure:POWer?` then give the real power P in W.
 - `ZERO` (leads open, nothing in A, about 12 s) measures the zero offsets;
   `ZERO CLEar` removes them. Results: `RUN`, `OK`, `SIGNAL`, `SMALL`, `BIG`,
   `UNSTABLE`, `RANGE`, `ABORT`, `METHOD`, `NONE`.
+- `WAVE ON` opens the [Power Wave](README.md#power-wave) page (`OFF`
+  closes it); refused with `METHod ALTernate` or during `ZERO` /
+  `VOLTage:CALibrate`. The query gives the last picture's values (RMS over
+  its whole cycles; `+9.91E37` when none), the read counters and what was taken from the DC coupling's current
+  reading: a zero in A (0: none; without `POW:ZERO`) or a gain (1: none;
+  with it), then the page's last current check and why it closed the page.
+  While the page is open the power meter does not measure.
 - `VOLTage:CALibrate` (a steady AC or DC voltage of 10 .. 70 % of the range
   on V/COM) matches the V channel's gain on the present range to the meter's
   voltmeter; `DEFault` returns to the factory-derived gain.
@@ -655,7 +663,7 @@ UART (Modbus RTU frames recognised in it) and DALI on the scope page ([the decod
   numbers every frame; a gap in `seq` means frames the list dropped
   (oldest first when full) before they were read. `lost`: times the
   decoder fell behind the input (samples skipped). `LOG` in the Wave view
-  or while a DMM logger session streams (`LOG:STATe ON`): `Settings
+  or the Power Wave page, or while a DMM logger session streams (`LOG:STATe ON`): `Settings
   conflict`; so is `LOG:STATe ON` while the frame log is open.
 - With too few samples per bit (fewer than 4: a slow timebase, the Wave
   view above 4800 baud) nothing is decoded; `DECode:RATE?` gives `0` with

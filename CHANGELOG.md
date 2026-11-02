@@ -9,6 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Power Wave:** the power meter's voltage and current as two waveforms
+  with their own scales, U, I, P and f of the picture (Power Settings >
+  Wave, SCPI `POW:WAVE`; [manual](docs/manual/README.md#power-wave)).
 - **Wave button on the multimeter page:** in V and A (DC or AC), a
   **Wave** chip in the trend chart's lower left corner opens the
   [Wave view](docs/manual/README.md#wave-view-the-scope-on-the-multimeter-inputs).

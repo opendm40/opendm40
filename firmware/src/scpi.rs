@@ -1383,6 +1383,8 @@ pub enum Pow {
     /// :VOLTage:CALibrate DEFault (1: the factory-derived gain again),
     /// :VOLTage:CALibrate? (2). :VOLTage:GAIN? (3): the 4 gains in force.
     VCal(u8),
+    /// :WAVE[:STATe] ON|OFF / ? (Power Wave, app_pwave.rs).
+    Wave(Option<bool>),
     DbgRow,
     DbgPoke(u8, u8),
     DbgStat(u8),
@@ -1579,6 +1581,9 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
     }
     if kw(l0, "CYCle") && query {
         return Ok(Pow::Cycle);
+    }
+    if kw(l0, "WAVE") && l1.map_or(true, |p| kw(p, "STATe")) {
+        return state(query).map(Pow::Wave);
     }
     if kw(l0, "METHod") {
         return if query {

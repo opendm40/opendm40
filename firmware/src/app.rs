@@ -43,6 +43,10 @@ mod app_ch2;
 mod app_inrush;
 #[path = "app_inrush_live.rs"]
 mod app_inrush_live;
+/// Power Wave: the power meter's U and I waveforms (View::PWave).
+#[path = "app_pwave.rs"]
+mod app_pwave;
+pub use app_pwave::pwave_on;
 /// The touch test page (region C).
 #[path = "app_touchtest.rs"]
 mod app_touchtest;
@@ -165,6 +169,7 @@ fn is_page(v: View) -> bool {
             | View::Gallery
             | View::Help
             | View::Inrush
+            | View::PWave
             | View::TouchTest
             | View::Decode
     )
@@ -836,6 +841,10 @@ impl App {
                 // function's settings come back (app_inrush.rs).
                 self.inrush_close(clk);
             }
+            if self.view == View::PWave {
+                // Leaving Power Wave: the power row comes back (main.rs).
+                self.pwave_close();
+            }
             if self.view == View::Decode {
                 // Leaving the decoder's frame log: it ends, the scope gets
                 // its record buffer back (app_log.rs).
@@ -879,6 +888,7 @@ impl App {
             View::Scope if self.scope.wave_on() => (true, false),
             // The inrush page: the DMM side (the AD2 stream, then the DMM).
             View::Inrush => (true, false),
+            View::PWave => (true, false),
             // The decoder's frame log: the scope input; the DMM as it was.
             View::Decode => (self.scope.dmm_rail(), true),
             View::Scope | View::Gen | View::Keypad => (false, true),
@@ -958,6 +968,7 @@ impl App {
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
+            View::PWave => self.pwave_draw(true),
             View::Decode => self.log_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {
@@ -1916,6 +1927,11 @@ impl App {
         // The inrush page: its state line / button (app_inrush_live.rs).
         if self.view == View::Inrush {
             self.inrush_tick(now);
+            return;
+        }
+        // Power Wave: a frame when due (app_pwave.rs).
+        if self.view == View::PWave {
+            self.pwave_tick(clk);
             return;
         }
         // The decoder's frame log: changed rows and counters (app_log.rs).
@@ -3523,6 +3539,8 @@ impl App {
             Some("Settings conflict: Wave view")
         } else if self.view == View::Inrush {
             Some("Settings conflict: inrush page")
+        } else if self.view == View::PWave {
+            Some("Settings conflict: Power Wave")
         } else {
             None
         }
@@ -3609,7 +3627,7 @@ impl App {
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => self.rec_back,
                     View::Limits => self.limits_back(),
-                    View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
+                    View::Menu | View::Range | View::Keypad | View::Inrush | View::PWave => self.back_view,
                     _ => View::Menu,
                 };
                 self.show(v, clk);
@@ -3617,6 +3635,8 @@ impl App {
             1 => match self.view {
                 // The inrush page: RUN = Arm / Cancel.
                 View::Inrush => self.inrush_button(clk),
+                // Power Wave: RUN = RUN / STOP.
+                View::PWave => self.pwave_run(now),
                 View::Gen => {
                     let mut st = self.gen.s;
                     st.on = !st.on;
@@ -3634,7 +3654,7 @@ impl App {
                 }
             },
             // The inrush page holds the 10 A range: no autorange.
-            2 if self.view == View::Inrush => self.beep(now, 300),
+            2 if matches!(self.view, View::Inrush | View::PWave) => self.beep(now, 300),
             // The generator's Signal page (and its keypad) has no AUTO
             // function: the key does nothing there (it used to set the
             // DMM's autorange).
@@ -3659,7 +3679,7 @@ impl App {
                 // No range page (continuity / diode, frequency): the Hold &
                 // Limits page.
                 View::Dmm | View::DmmScope => self.show(View::Limits, clk),
-                View::Range | View::Limits | View::Record | View::Inrush => {
+                View::Range | View::Limits | View::Record | View::Inrush | View::PWave => {
                     let v = self.back_view;
                     self.show(v, clk)
                 }
@@ -3749,6 +3769,7 @@ impl App {
             // Gestures go to app_touchtest.rs (App::gesture).
             View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
+            View::PWave => self.pwave_tap(clk, x, y),
             // (The frame log handles its own taps: app_log.rs.)
             View::Decode => {}
             View::Device => {

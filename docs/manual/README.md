@@ -2003,6 +2003,7 @@ voltage: small voltages read on the 6 V range.
 | **Zero** | Measures and stores the zero offsets. Disconnect the leads and nothing in A; takes about 12 s. Refused if a signal is present. |
 | **V cal** | Calibrates the power meter's voltage against the multimeter's own DC V or AC V on the current range: apply a steady voltage of 10 % to 70 % of the range (DC: up to 100 %); takes about 8 s. |
 | **DC / AC / AC+DC** | The coupling; the help line explains the chosen one. |
+| **Wave** | Opens [Power Wave](#power-wave): the voltage and current waveforms. |
 | **Reset Wh** | Resets Wh, VAh and the time at once. |
 | **Wiring** | Shows the wiring picture. |
 | **Limits** | Hold & Limits for the power: AutoHold, upper and lower limits in W, fail beep. |
@@ -2015,6 +2016,30 @@ in use and whether a zero is stored.
 The meter's own drop used by **At load** and **Vb** is the current shunt
 alone (10 mΩ, 0.5 Ω or 47.5 Ω); the fuse and the wiring add a little. It can
 be changed over SCPI ([`POW:BURD`](scpi-reference.md#power-meter)).
+
+### Power Wave
+
+![Power Wave: mains through a load at PF 0.5](img/power-wave.png)
+
+*Power Wave: mains through a load at PF 0.5.*
+
+The voltage **U** (yellow) and the current **I** (cyan) as waveforms, each
+with its own scale; above them U and I (RMS), P and f of the picture.
+
+- **-ms/div** / **+ms/div**: 2 to 20 ms/div. **STOP** / **RUN** (or the
+  RUN key) holds the picture.
+- **CSV** stops the page and saves the picture as `SCOPE/SCOPnnn.CSV`
+  (time, volts, amperes; one row per point, U and I in turn).
+- U and I are converted at the same time and read in turn, 3200 points
+  per second each.
+- In DC coupling the current trace is matched to the meter's current when
+  the page opens. Run **Zero** first (leads open) so that it is also
+  right at other currents and for AC.
+- While the page is open the power meter does not measure (no readings
+  or energy). **Back**, **MENU** or **MF** return to it.
+- The page still watches the current: above 10 A, above the range, or at
+  the end of the [current limit](#current-limit) it returns to the power
+  meter, which then sounds its alarm or changes the range.
 
 ### Current limit
 

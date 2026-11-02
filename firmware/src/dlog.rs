@@ -10,7 +10,8 @@
 //! only the chunk being written and the CSV export can seek without decoding.
 //!
 //!   file header (24 + hl bytes): "DLG1", kind (1 DMM, 2 scope record, 3 fast
-//!       logger stream: section "fast log" below), unit
+//!       logger stream: section "fast log" below, 4 Power Wave frame:
+//!       section "power wave"), unit
 //!       length, u16 hl, u32 CRC-32 of bytes 12.., unit[12], the CSV header text
 //!   chunk (28 + pl bytes): "DC", u16 pl, u32 CRC-32 of bytes 8.., u32 first
 //!       row, u32 CSV offset, u32 CSV bytes, u32 t0 ms, u16 rows, u8 flags at
@@ -963,6 +964,53 @@ pub fn scope_row(a: f32, b: f32, dt: f32, t0: u32, i: usize, code: u16, out: &mu
     out[25] = b'\n';
 }
 
+// ------------------------------------------------------------- power wave
+
+/// Kind 4 (a Power Wave frame, app_pwave.rs "CSV"; written as a scope
+/// record SCOPnnn.DLG, so the USB volume / MMEM:DATA? serve its CSV as
+/// SCOPnnn.CSV): after the header text PW_PAR bytes of parameters (f32 su,
+/// ou, si, oi: volts = (code - ou) * su, amperes = (code - oi) * si; f32
+/// tu, seconds per time unit; u32 n samples; u8 flags (bit 0: sample 0 is
+/// U), 3 bytes 0; u32 CRC-32 of the 28 bytes before it), then n samples of
+/// 4 bytes (u16 time from sample 0 in tu, i16 code), U and I in turn, then
+/// u32 CRC-32 of the samples. Not coded (a frame is at most 2048 samples,
+/// 8 KiB).
+pub const KIND_PWAVE: u8 = 4;
+pub const PW_PAR: usize = 32;
+/// The generated CSV row: "+d.ddddde+xx,+d.dddde+xx,\r\n" (U) or
+/// "+d.ddddde+xx,,+d.dddde+xx\r\n" (I).
+pub const PW_ROW: usize = 27;
+
+/// The Power Wave file header (header text = the CSV's, column line
+/// included) into `out`; returns its length (FHDR + text + PW_PAR).
+pub fn pw_header(text: &[u8], sc: [f32; 4], tu: f32, n: u32, y_first: bool, out: &mut [u8]) -> usize {
+    let k = file_header(KIND_PWAVE, b"V,A", text, out);
+    let p = &mut out[k..k + PW_PAR];
+    for (i, v) in [sc[0], sc[1], sc[2], sc[3], tu].into_iter().enumerate() {
+        p[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    p[20..24].copy_from_slice(&n.to_le_bytes());
+    p[24..28].copy_from_slice(&[y_first as u8, 0, 0, 0]);
+    let c = !crc32_upd(!0, &p[..28]);
+    p[28..32].copy_from_slice(&c.to_le_bytes());
+    k + PW_PAR
+}
+
+/// CSV row of Power Wave sample `k` (time `t` in units of `tu`, `code`):
+/// U in the volts column, I in the amperes column, the other one empty.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+pub fn pw_row(sc: &[f32; 4], tu: f32, y_first: bool, k: u32, t: u16, code: i16, out: &mut [u8; PW_ROW]) {
+    sci(&mut out[0..12], t as f32 * tu, 5);
+    out[12] = b',';
+    let u = (k % 2 == 0) == y_first;
+    let v = if u { (code as f32 - sc[1]) * sc[0] } else { (code as f32 - sc[3]) * sc[2] };
+    let at = if u { 13 } else { 14 };
+    out[if u { 24 } else { 13 }] = b',';
+    sci(&mut out[at..at + 11], v, 4);
+    out[25] = b'\r';
+    out[26] = b'\n';
+}
+
 // ------------------------------------------------------------- decoder
 
 /// Random-access bytes of one file.
@@ -1267,6 +1315,8 @@ pub struct Gen<S: Src> {
     /// coded bytes (<= SBLK_RAW: u16); the block decoder (`sd_b` = its
     /// block, `sd_ok`), the last code it gave.
     sc: (f32, f32, f32, u32),
+    /// Kind 4: su, ou, si, oi; tu; sample 0 is U (`off0`: the samples).
+    pw: ([f32; 4], f32, bool),
     off0: u32,
     blen: [u16; SBLK_MAX],
     sd: SDec,
@@ -1303,7 +1353,7 @@ impl<S: Src> Gen<S> {
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     pub fn open(mut s: S, size: u32) -> Option<Gen<S>> {
         let (kind, hl, ul, unit) = parse_file(&mut s, size)?;
-        if kind != KIND_DMM && kind != KIND_SCOPE && kind != KIND_FAST {
+        if kind != KIND_DMM && kind != KIND_SCOPE && kind != KIND_FAST && kind != KIND_PWAVE {
             return None;
         }
         let mut g = Gen {
@@ -1314,6 +1364,7 @@ impl<S: Src> Gen<S> {
             unit,
             win: Win::new(),
             sc: (0.0, 0.0, 0.0, 0),
+            pw: ([0.0; 4], 0.0, false),
             off0: 0,
             blen: [0; SBLK_MAX],
             sd: SDec { pos: 0, bit: 0, end: 0, mode: 0, j: 0, h: [0; 3], ad: Ad::new(AS0) },
@@ -1340,7 +1391,7 @@ impl<S: Src> Gen<S> {
             if !g.s.read(at, &mut p) || !crc32_upd(!0, &p[..20]) != le32(&p, 20) {
                 return None;
             }
-            let f = |o: usize| f32::from_le_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
+            let f = |o: usize| f32::from_bits(le32(&p, o));
             let n = le32(&p, 16);
             let nb = (n as usize).div_ceil(SBLK);
             if nb > SBLK_MAX {
@@ -1393,6 +1444,39 @@ impl<S: Src> Gen<S> {
             g.info.chunks = rows.div_ceil(SBLK as u32);
             g.info.csv = hl + rows * SCOPE_ROW as u32;
             g.info.valid = o;
+            g.size = g.info.valid;
+            return Some(g);
+        }
+        if kind == KIND_PWAVE {
+            let mut p = [0u8; PW_PAR];
+            let at = FHDR as u32 + hl;
+            if !g.s.read(at, &mut p) || !crc32_upd(!0, &p[..28]) != le32(&p, 28) {
+                return None;
+            }
+            let f = |o: usize| f32::from_le_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
+            let n = le32(&p, 20);
+            let d0 = at + PW_PAR as u32;
+            let e = d0 + 4 * n;
+            if n > 1 << 16 || e + 4 > size {
+                return None;
+            }
+            let mut c = !0u32;
+            let mut x = d0;
+            while x < e {
+                let Some(v) = g.win.byte(&mut g.s, x, e) else { return None };
+                c = crc32_upd(c, &[v]);
+                x += 1;
+            }
+            let mut t = [0u8; 4];
+            if !g.s.read(e, &mut t) || !c != le32(&t, 0) {
+                return None;
+            }
+            g.pw = ([f(0), f(4), f(8), f(12)], f(16), p[24] & 1 != 0);
+            g.off0 = d0;
+            g.info.rows = n;
+            g.info.chunks = 1;
+            g.info.csv = hl + n * PW_ROW as u32;
+            g.info.valid = e + 4;
             g.size = g.info.valid;
             return Some(g);
         }
@@ -1680,6 +1764,22 @@ impl<S: Src> Gen<S> {
                 let o = ((off - self.info.hl) % wd) as usize;
                 let n = (wd as usize - o).min(buf.len() - i);
                 buf[i..i + n].copy_from_slice(&self.row[o..o + n]);
+                i += n;
+                off += n as u32;
+                continue;
+            }
+            if self.info.kind == KIND_PWAVE {
+                let k = (off - self.info.hl) / PW_ROW as u32;
+                let mut b = [0u8; 4];
+                if !self.s.read(self.off0 + 4 * k, &mut b) {
+                    return;
+                }
+                let mut r = [0u8; PW_ROW];
+                let (sc, tu, y) = self.pw;
+                pw_row(&sc, tu, y, k, le16(&b, 0) as u16, le16(&b, 2) as u16 as i16, &mut r);
+                let o = ((off - self.info.hl) % PW_ROW as u32) as usize;
+                let n = (PW_ROW - o).min(buf.len() - i);
+                buf[i..i + n].copy_from_slice(&r[o..o + n]);
                 i += n;
                 off += n as u32;
                 continue;

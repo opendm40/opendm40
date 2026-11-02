@@ -44,9 +44,9 @@ in each section.
   chip's X*Y RMS statistic. Couplings DC / AC / AC+DC, energy (Wh, VAh),
   per-channel autorange, burden compensation ("At load", off by default),
   a continuous-current limit, phase calibration, V gain and zero jobs, W
-  limits, Bluetooth. Code: [`src/powermeter.rs`](../src/powermeter.rs),
+  limits, Bluetooth. The U and I waveforms (Power Wave, 3.18). Code: [`src/powermeter.rs`](../src/powermeter.rs),
   [`src/app_power.rs`](../src/app_power.rs),
-  [`src/ui_power.rs`](../src/ui_power.rs). Sections 3.1..3.17.
+  [`src/ui_power.rs`](../src/ui_power.rs). Sections 3.1..3.18.
 * **Burden voltage readout** in the DMM A functions (3.15).
 * **Wrong-connection alerts**
   ([`src/sentinel.rs`](../src/sentinel.rs), hooks in
@@ -747,6 +747,165 @@ invalidates the mark. Code: `ui::set_pw_parts` / `main_dy` / `chart_geom`
 the Wh / VAh tap, back to DC with no leftover pixels; a coupling switch
 keeps the old layout for up to ~4 s (until the first reading of the new
 coupling).
+
+### 3.18 Power Wave: U and I waveforms
+
+Power Settings > **Wave** (or `POWer:WAVE ON`) opens a page with the
+voltage (U, yellow) and the current (I, cyan) of the power meter as two
+traces, each with its own scale, 2 .. 20 ms/div, and U, I (RMS), P and f
+of the frame. Code: [`src/pwave.rs`](../src/pwave.rs) (capture, readouts,
+plot columns; host tests in tools/meter-test),
+[`src/app_pwave.rs`](../src/app_pwave.rs),
+[`src/ui_pwave.rs`](../src/ui_pwave.rs); emulator test
+[`emu/hy3131/pwavetest.py`](../../emu/hy3131/pwavetest.py).
+
+**Feasibility.** The chip converts U and I at the same time: in the power
+row AD2 (I) and AD3 (U) run on one clock and one OSR, aligned by SPHACAL
+(section 1). It has one data register for both, R03..R05, and SDO23 (R34
+bit 2) selects which converter it shows. So the two converters cannot be
+read in one SPI frame: a frame reads them alternately (a sample of one,
+R34 flipped, a sample of the other), each sample stamped with the MCU
+cycle counter. The plot puts every sample at its own time, and P pairs
+each sample with the other channel linearly interpolated at that time.
+This is simultaneous conversion with an alternating readout, not the
+power meter's statistic multiplexing (3.4: no row switch, no statistic
+switch).
+
+**Rate.** A 3-byte read takes ~13 us on the main loop's bus (/16), as long
+as one conversion of the power row (76.8 kS/s): nearly every read would
+cross a conversion edge. A frame therefore rewrites the power row with
+R26 = 19.2 kS/s (OSR 128, AD3 shares the OSR), written as the power meter
+writes it (`configure_ph`: SPHACAL first, AD3 then AD2, AD1 off), then:
+
+* a value is taken when two reads in a row agree (a read across an edge,
+  or a torn read, differs: it is read again; `Cap::retries`);
+* after each R34 write the next read waits one conversion (55 us): right
+  whether R03..R05 shows the selected converter's last result at once or
+  only from its next conversion (UNKNOWN which; the datasheet says only
+  that SDO23 routes AD3 into the register);
+* the reads run every three conversions (156.25 us, `SLOT_CYC`), so each
+  sits at the same place between two conversion edges and U and I lag
+  their conversions alike. In the emulator (one conversion grid) P at
+  PF 0.5 is within 0.2 % of the power meter's this way; reads at free
+  times gave +0.5 .. +1.9 % (a lag that differed between the channels).
+  On the chip AD3 is enabled one register write before AD2
+  (`configure_ph`), so its grid may sit ~10 us earlier (INFERRED from the
+  "AD2F twice per period" of `set_ad2_stream`; SPHACAL moves it by
+  0.407 us per step): a U / I skew of that size stays in the traces
+  (0.2 deg at 50 Hz).
+
+3200 samples per second and channel (64 per 50 Hz cycle), at most 2048
+samples per frame (the scope's record buffer, lent while the page is
+open). Scaling as `pw_take`: V with the V gain in force and the Y zero, I
+with the AC A RMS gain and the X zero of the range (the LPF zeros applied
+to single samples: INFERRED). "At load" is not applied: the traces are at
+the jacks.
+
+**I zero from the DC meter.** Device 468ea813 (5.000 V, 20.6 mA DC, DC
+coupling, no `POW:ZERO` known): U matched the meter (5.0508 V) but I read
+21.85 mA, +6.1 % (P +6 %); the trace's level agreed with that value. U
+and method B's I_dc share Power Wave's offset handling, so the difference
+is between the meter's DC coupling (AD1, factory DC A gain and offset) and
+AD2: AD2's X zero is not in the factory record (0x10C.. all 0, inrush.rs)
+and is ~880 raw codes with OP1 x10 (3.11 / 3.12) = 0.84 mA on the 60 mA
+range, 4.1 % of 20.6 mA; the rest (~2 %) is a gain (INFERRED: AD2 reads
++0.3 .. +1.8 % above nominal against AD1 in device test 6.5 of
+[dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md); not the
+19.2 kS/s OSR: U on AD3 at the same OSR matched). So when the page opens
+in DC coupling with a current reading, its first frame matches its mean I
+to that reading, kept while the page is open:
+
+* with `POW:ZERO`'s X zero stored (AD2's zero known): as a **gain** on I
+  (`pwave::anchor_gain`, 0.9 .. 1.1, only above 2000 raw codes of mean;
+  `POW:WAVE?` field 11);
+* without it: as a **zero** (`pwave::anchor`, at most 2000 raw codes;
+  field 10). One reading cannot tell a zero from a gain, so this zero
+  takes both: exact at that DC current, but the gain error stays on the
+  AC part and at other currents. Device 27a0e81f (5 V, no `POW:ZERO`):
+  error against the meter +0.42 / +0.26 / +0.17 % at 5 / 20 / 50 mA, the
+  zero taken 0.070 mA (6 mA range) / 1.149 / 1.688 mA (60 mA range): on
+  the 60 mA range ~0.79 mA of zero plus ~1.8 % of gain. That gain stays
+  on an AC current (INFERRED: ~1.8 % high on 60 mA). Known limitation;
+  `POW:ZERO` (Power Settings > Zero) before the page removes it.
+
+In AC and AC+DC coupling there is no AD1 reading: the zero is
+`POW:ZERO`'s and the gain the AC A calibration's, as the meter's own
+method B.
+
+**Frames.** Each frame waits up to 60 ms for a rising crossing of the last
+frame's mid level on U (on I when U's peak-peak is below half a minimum
+division, free run when both are), then runs for the timebase's 10
+divisions; one frame every >= 250 ms. The frame blocks the main loop (up
+to ~260 ms at 20 ms/div). U, I and P are over the whole cycles of the
+trigger channel inside the frame (all of it without two crossings, or
+when its peak-peak is below half a minimum division: noise on DC is no
+frequency), f from those cycles. Scales: 1-2-5 per division, the peak within 3.5 divisions,
+kept while it stays within 1 .. 3.9; not below the range's full scale /
+100. A sample at the converter's rail shows "U OL" / "I OL". The ranges
+are the power meter's at the entry (no autorange on the page; a range
+change from SCPI closes it).
+
+**What pauses.** While the page is open main.rs counts the HY3131 as busy
+(as for a logger session): no power readings, no BT serve, no energy;
+leaving it rewrites the power row (`Dmm::start` -> `pw_restart`) and the
+open time is not integrated (`Dmm::pw_wave_gap`). Refused with
+`POW:METH ALT`, during Zero / V cal, a recording, a logger session or the
+decoder's frame log (it has the scope buffer; `DECode:MODE LOG` is refused
+with the page open for the same reason).
+
+**Current check.** The meter's own current rules do not run while the
+page holds the chip, so the page applies them to its I (RMS with the DC
+part; `App::pwave_guard`): after every frame, and while stopped once a
+second from a 100 ms I-only read (`pwave::i_probe`: SDO23 0, no flips;
+5 / 6 whole cycles at 50 / 60 Hz; the stopped frame's samples are not
+touched). Each closes the page into the power meter's view with a toast:
+
+* the 10 A rating (`danger::over_rating`: the 10 A range and I > 10 A or
+  a sample on the rail) for `I10_ASSERT_MS` (1 s): `i10_since` is set, so
+  the danger alarm (4.10) sounds at once and the meter's readings keep it;
+* over the range on a range below 10 A (a sample on the rail or I above
+  1.03 x the range): the meter's first reading then trips OVERLOAD on a
+  manual uA / mA range or ranges up in I AUTO (`pw_autorange`);
+* the continuous-current limit (3.6): `Dmm::pw_wave_current` keeps its
+  countdown (`over_t0`, I > `i_cont` starts it, < 0.95 x stops it; kept
+  across the page) and closes the page when it runs out; the meter then
+  toasts and beeps (`pw_over_expired`).
+
+A-PROT does not apply (the power meter measures through A on purpose,
+`pw_enter` ends it). Emulator: `pwavetest.py` over10 / ovr / limit.
+
+**CSV.** The page's **CSV** button stops it and writes the frame on the
+screen as the next free `SCOPE/SCOPnnn.DLG`, like the scope's Save CSV
+(the screenshot writer, the scope buffer held until its result), as DLG
+kind 4 ([compact-log-format.md](compact-log-format.md#power-wave-frame-kind-4)):
+the samples and their times, not coded. The USB volume and `MMEM:DATA?`
+serve it as `SCOPnnn.CSV`: header lines (timebase, scales, samples, the
+readouts), then `time_s,volts,amperes`, one row per sample from the
+first, U and I in turn with the other column empty (no interpolated
+values). No SCPI command (the scope's Save CSV has none either).
+
+**Not done.** Gap-free streaming of both channels on the AD2 stream ISR: its phase lock keys on INTF AD2F,
+which both converters set; its DMA frames have no write path for the R34
+flip; the read would have to fit the flip and two reads into one period.
+
+**Device checks** (one DC run on 468ea813, above; the emulator's model
+latches the selected converter's value at each conversion, on one grid
+for both):
+1. Mains through a resistive load: P on the page (`POW:WAVE?`) within
+   ~1 % of `FETC:POW:ALL?`. Through a capacitor (PF ~0): the difference
+   of the two P measures the U / I skew, ~0.7 W per 10 us at 230 V, 1 A,
+   50 Hz (S x omega x skew); pass: within ~1 W (~15 us).
+2. `POW:WAVE?` repeated and unreadable read counts over a minute (the
+   torn-read question at 19.2 kS/s). Device 468ea813: 0 unreadable,
+   ~2900 repeated in 16 s; U 5.0508 V = the meter (so the SDO23 flip does
+   not disturb AD3, check 3).
+2a. DC coupling, 5 V and 5 / 20 / 50 mA without `POW:ZERO`: done on
+   27a0e81f (above, +0.17 .. +0.42 %). Still to do: the same after
+   `POW:ZERO` (field 10 = 0, field 11 ~0.98, the error within ~0.3 % at
+   each current), then an AC current against AC A.
+3. Whether the SDO23 flip with AD3 running disturbs AD3 (a DC voltage:
+   flat U trace, Urms = the DC meter).
+4. USB / touch while frames block the loop at 20 ms/div.
 
 ---------------------------------------------------------------------------
 

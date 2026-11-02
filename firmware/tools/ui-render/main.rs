@@ -104,6 +104,9 @@ mod splash;
 // The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
 #[path = "../../src/inrush.rs"]
 mod inrush;
+// Power Wave: the capture's pure part and the page's plot geometry.
+#[path = "../../src/pwave.rs"]
+mod pwave;
 
 /// The scope page's input source in the scenes (the MCX | DMM badge until
 /// 2026-11-02; now `Model::wave`): MCX (and none) = the OSC input, DMM = the
@@ -3650,7 +3653,7 @@ fn main() {
             };
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
-            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
+            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=33).filter(|&c| c != 21).collect();
             let pr = |row: u8, part: i8| ui::RowPress { row, part, on: true };
             let d_kp = || ui::keypad(ui::KP_NUM, "Vpp", "3.00", "V", true);
             let kp_codes: Vec<u8> = ui::keypad_keys(ui::KP_NUM).iter().map(|k| k.2).filter(|&c| c != 0).collect();
@@ -4153,6 +4156,61 @@ fn main() {
             ui::inr::button(vals.btn, vals.btn_bg, vals.enabled);
             ck.same_as(&format!("inrush-live/{name}"), &want);
         }
+    }
+
+    // 6z2. The Power Wave page (src/ui_pwave.rs): mains (U and I with a
+    //      phase lag), DC with ripple, both channels at the rail (OL) with
+    //      the longest texts, the empty grid (before the first frame,
+    //      stopped); the live parts drawn over another page equal a fresh
+    //      page with those texts.
+    {
+        use pwave::{Cap, Scale, BUF_MIN, COL_AT, PW, T_AT, T_UNIT_US};
+        use ui::pwv::Vals;
+        let sc = Scale { su: 8.0 * 1.25 / 262_144.0 * 1000.0, ou: 3.0, si: 8.0 * 1.25 / 262_144.0 / 0.01, oi: -2.0 };
+        let mk = |u: &dyn Fn(f32) -> f32, i: &dyn Fn(f32) -> f32, du: f32, di: f32, span_us: u32| -> Vec<u16> {
+            let mut b = vec![0u16; BUF_MIN];
+            let n = 1000;
+            for k in 0..n {
+                let t_us = k as u32 * 100;
+                let t = t_us as f32 * 1e-6;
+                let c = if k % 2 == 0 { u(t) / sc.su + sc.ou } else { i(t) / sc.si + sc.oi };
+                b[k] = (c.round().clamp(-32768.0, 32767.0) as i16) as u16;
+                b[T_AT + k] = (t_us / T_UNIT_US) as u16;
+            }
+            pwave::columns(&mut b, &Cap { n, y_first: true, ..Cap::default() }, &sc, du, di, span_us);
+            b
+        };
+        let w = 2.0 * std::f32::consts::PI * 50.0;
+        let mains = mk(&|t| 325.0 * (w * t).sin(), &|t| 1.414 * (w * t - 1.047).sin(), 100.0, 0.5, 100_000);
+        let dc = mk(&|t| 12.0 + 0.3 * (w * 2.0 * t).sin(), &|t| 2.0 + 0.4 * (w * 2.0 * t).sin(), 5.0, 1.0, 50_000);
+        let ol = mk(&|t| 900.0 * (w * t).sin(), &|t| -14.0 * (w * t).sin(), 200.0, 5.0, 200_000);
+        let v = |u: &'static str, i: &'static str, p: &'static str, f: &'static str, u_div: &'static str, i_div: &'static str, tb: &'static str, run: bool, u_ol: bool, i_ol: bool| Vals { u, i, p, f, u_div, i_div, tb, run, u_ol, i_ol };
+        let cases: Vec<(&str, Vals, Option<&Vec<u16>>)> = vec![
+            ("w01-pwave-mains", v("U 230.0V", "I 999.8mA", "P 115.0W", "f 50.00Hz", "100V", "500mA", "10ms/div", true, false, false), Some(&mains)),
+            ("w02-pwave-dc", v("U 12.00V", "I 2.010A", "P 24.13W", "f --Hz", "5V", "1A", "5ms/div", true, false, false), Some(&dc)),
+            ("w03-pwave-ol", v("U OL", "I OL", "P -8888W", "f 99.99Hz", "200V", "5A", "20ms/div", false, true, true), Some(&ol)),
+            ("w04-pwave-empty", v("U --V", "I --A", "P --W", "f --Hz", "", "", "2ms/div", false, false, false), None),
+            ("w05-pwave-wide", v("U 999.9mV", "I 999.9uA", "P -999.9mW", "f 999.9Hz", "500mV", "500uA", "20ms/div", true, false, false), Some(&mains)),
+        ];
+        for (name, vals, b) in cases.iter() {
+            host::reset(0);
+            ui::pwv::page(vals);
+            ui::pwv::plot(b.map(|b| &b[COL_AT..COL_AT + 2 * PW]));
+            ck.check_opts(&format!("pwave/{name}"), &page_regions, false);
+            save(&out, name);
+            let want = emu().fb.clone();
+            host::reset(0);
+            let (_, o, _) = &cases[(cases.iter().position(|c| c.0 == *name).unwrap() + 1) % cases.len()];
+            ui::pwv::page(o);
+            ui::pwv::plot(b.map(|b| &b[COL_AT..COL_AT + 2 * PW]));
+            ui::pwv::live(vals);
+            ck.same_as(&format!("pwave-live/{name}"), &want);
+        }
+        // Power Settings with the Wave button pressed.
+        host::reset(0);
+        ui::pw::settings_page(&pw_cases()[0].1);
+        ui::pw::settings_press(&pw_cases()[0].1, ui::pw::PS_WAVE, true);
+        save(&out, "w06-power-settings-wave");
     }
 
     // Clipped texts of draws after the last check (saved scenes only).
