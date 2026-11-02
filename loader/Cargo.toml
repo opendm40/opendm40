@@ -1,0 +1,36 @@
+[package]
+name = "miniloader"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "miniloader"
+path = "src/main.rs"
+test = false
+bench = false
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = true
+panic = "abort"
+
+[features]
+default = ["lfn", "touch_ui", "labels", "verify", "installed", "idle", "format"]
+# Entered by the BL patched into the stock ROM at 0x660: no vector table, linked at 0x08001974.
+hook = []
+# Long names in the list + the full printable ASCII font.
+lfn = []
+# Tap a row, tap the Install button.
+touch_ui = []
+# Key names and actions at the left edge.
+labels = []
+# Whole-file CRC before any erase.
+verify = []
+# Mark / skip the file that is already flashed.
+installed = []
+# Rescan ~3 s after the last USB write.
+idle = []
+# FAT16 on a blank first SPI sector.
+format = []
