@@ -32,6 +32,25 @@ pub const ITEMS: [(u8, &str, Unit); 20] = [
 /// Default selection (stock 0x0804c6ac): Freq, Vpp, Cycl, Vrms.
 pub const DEFAULT_SEL: [u8; 4] = [0, 10, 9, 11];
 
+/// A selected item measures the DMM channel (CH2): this flag on its stock
+/// id (`App::meas_sel`; the settings word keeps it, 8 bits per item).
+pub const CH2: u8 = 0x80;
+
+/// The stock id of a selected item.
+pub const fn item(sel: u8) -> u8 {
+    sel & !CH2
+}
+
+/// The item measures CH2.
+pub const fn is_ch2(sel: u8) -> bool {
+    sel & CH2 != 0
+}
+
+/// A selection byte a saved setting may hold.
+pub const fn valid(sel: u8) -> bool {
+    item(sel) < 20
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
     V,

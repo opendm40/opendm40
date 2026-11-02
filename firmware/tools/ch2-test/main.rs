@@ -107,6 +107,7 @@ fn main() {
         }
     }
     fails += holes(&mut r);
+    fails += meas(&mut r);
     let rate = edge as f64 / some.max(1) as f64;
     println!("ch2-test: {cols} columns, {some} with samples, {edge} at a rounding edge ({:.4} %), {fails} failed", rate * 100.0);
     if fails > 0 || rate > 0.01 || some < cols / 4 {
@@ -161,6 +162,50 @@ fn holes(r: &mut Rng) -> u64 {
 /// another interrupt; the gap before it is up to 1.9 periods, the one
 /// after it short): not a hole, the store keeps the samples before it.
 /// The failures.
+/// Store::meas_src: every code within 1..=1022, the min on 1 and the max on
+/// 1022, and v_0 + v_k x code within one code step of the sample's SI; a
+/// flat run is all code 1 at its SI.
+fn meas(r: &mut Rng) -> u64 {
+    let mut fails = 0;
+    for case in 0..300 {
+        let st = scope_ch2::store();
+        let sc = WaveScale { a: -3.0 + r.below(600) as f32 / 100.0, b: 1e-6 * (1 + r.below(1000)) as f32, vdiv: 1.0, amps: false, ac: false };
+        st.reset(0, 38_400, sc);
+        let n = 2 + r.below(6000) as u64;
+        let flat = case % 10 == 0;
+        let amp = 1 + r.below(30_000) as i32;
+        let mut raws = vec![];
+        for k in 0..n {
+            let c = if flat { 1234 } else { r.below(2 * amp as u32 + 1) as i32 - amp };
+            st.push((k * 26) as u32, c * 8);
+            raws.push(c);
+        }
+        let si = |c: i32| sc.a + sc.b * ((c * 8 + 4) as f32 + 512.0 * 512.0 - 256.0) / 512.0;
+        let (ia, ib) = (n.saturating_sub(4096), n);
+        let (src, v_0, v_k) = st.meas_src(ia, ib);
+        let (mut lo, mut hi, mut bad) = (u16::MAX, 0u16, 0);
+        for i in 0..src.n() {
+            let code = src.code(i);
+            lo = lo.min(code);
+            hi = hi.max(code);
+            let want = si(raws[(ia as usize) + i]);
+            let got = v_0 + v_k * code as f32;
+            if !(1..=1022).contains(&code) || (got - want).abs() > v_k.abs() * 1.01 + want.abs() * 1e-5 + 1e-9 {
+                bad += 1;
+            }
+        }
+        let ends = if flat { lo == 1 && hi == 1 && v_k == 0.0 } else { lo == 1 && hi == 1022 };
+        if bad > 0 || !ends || src.n() as u64 != ib - ia {
+            fails += 1;
+            if fails <= 10 {
+                println!("FAIL meas case {case}: n {n} flat {flat} codes {lo}..{hi} bad {bad} v_0 {v_0} v_k {v_k}");
+            }
+        }
+    }
+    println!("ch2-test: 300 measurement runs, {fails} failed");
+    fails
+}
+
 fn late(r: &mut Rng) -> u64 {
     let mut fails = 0;
     for case in 0..300 {

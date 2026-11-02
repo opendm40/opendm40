@@ -909,7 +909,8 @@ The column on the right of the chart shows **MAX**, **AVG**, **MIN** and
 ### The bargraph and the history row
 
 **Settings > Display > DMM row** chooses what the row under the reading
-shows: **Bargraph** (default) or **History**.
+shows: **Bargraph** (default) or **History**. A double tap on the trend
+chart's plot switches between them too (not with the power meter).
 
 - **Bargraph**: 50 segments, each 2 % of the range; centre zero in DC V and
   DC A (25 segments per side, 4 % each), from zero elsewhere, empty in
@@ -1440,6 +1441,14 @@ Press **MF**: the **Measure** tab lists 20 measurements. Tap up to four;
 tap a selected one to remove it. **Clear** removes all, **Default**
 restores Freq, Vp-p, Cycl, Vrms.
 
+The last cell of the grid, **CH1** / **CH2**, chooses the channel the next
+tapped item measures. With **CH2** the names turn magenta and the item
+measures the multimeter channel ([CH2 (DMM)](#display-settings)); its
+value is magenta in the measurement row, so Freq of CH1 and Freq of CH2
+can sit side by side. The CH2 measurements use the CH2 samples taken while
+the screen's CH1 samples were (at most 38.4 k samples/s: Freq and the
+widths of fast signals are coarse) and show **--** while CH2 is off.
+
 
 ![The Measure tab](img/scope-measure.png)
 
@@ -1471,7 +1480,9 @@ record zoomed out beyond its length, they show **--**.
 
 Tap **CUR** at the bottom of the graph: **CUR X** (two time cursors), **CUR
 Y** (two voltage cursors), off. The measurement row shows X2-1 and Xf, or
-Y2-1. Drag the **1** / **2** markers.
+Y2-1. Drag the **1** / **2** markers. While CH2 is on, **CUR Y** shows two
+Y2-1: the yellow one at the CH1 V/div, the magenta one at the CH2 V/div
+(the **DMM** block's).
 
 
 | ![X cursors: 800 µs apart](img/scope-cur-x.png) | ![Y cursors: 3.01 V apart](img/scope-cur-y.png) |

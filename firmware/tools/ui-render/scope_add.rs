@@ -717,6 +717,21 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                 save(out, name);
             }
         }
+        // CH2 measurements: Source CH2 in the Measure tab, two CH2 items
+        // picked (magenta), and their cells under the graph.
+        if !combined {
+            let c2 = scope_meas::CH2;
+            let mut pv2 = pv;
+            pv2.meas_src2 = true;
+            pv2.meas = [0, 10, c2, 17 | c2];
+            draw(&m, scope_ui::Popup::Mf(0), &pv2, true);
+            save(out, "s08-ch2-measure");
+            draw(&m, scope_ui::Popup::None, &pv2, true);
+            let cells = ["Freq:1.00kHz", "Vp-p:3.00V", "\u{2}Freq:1.00kHz", "\u{2}Y2-1:2.01A"];
+            scope_ui::cells(&m, &cells);
+            ck.check_replica("gen/ch2-cells");
+            save(out, "s08-ch2-cells");
+        }
     }
 }
 

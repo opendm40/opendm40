@@ -213,6 +213,29 @@ impl Store {
         Some((ia, ib))
     }
 
+    /// The stream's rate (samples/s) from its nominal period.
+    pub fn fs(&self) -> f32 {
+        crate::clock::HCLK_HZ as f32 / self.period
+    }
+
+    /// The samples [ia, ib) as a measurement source (`scope_meas::
+    /// compute_codes`): codes re-quantized to 1..=1022 over their min..max
+    /// (inside the 10-bit histogram, never "clipped"), with the SI of code
+    /// 0 and of one code step. A flat run is all code 1.
+    pub fn meas_src(&self, ia: u64, ib: u64) -> (MeasSrc<'_>, f32, f32) {
+        let (mut lo, mut hi) = (i16::MAX, i16::MIN);
+        for n in ia..ib {
+            let c = self.codes[(n % CAP as u64) as usize];
+            lo = lo.min(c);
+            hi = hi.max(c);
+        }
+        let span = (hi as i32 - lo as i32).max(0);
+        let (s_lo, s_hi) = (self.si(lo), self.si(hi));
+        let v_k = if span > 0 { (s_hi - s_lo) / MEAS_SPAN as f32 } else { 0.0 };
+        let src = MeasSrc { st: self, ia, n: (ib - ia) as usize, lo, span };
+        (src, s_lo - v_k, v_k)
+    }
+
     fn min_max(&self, ia: u64, ib: u64) -> (f32, f32) {
         let (mut lo, mut hi) = (i16::MAX, i16::MIN);
         for n in ia..ib {
@@ -301,6 +324,37 @@ impl Store {
         let ia = base + fa as u32 as u64;
         let ib = (base + fb as u32 as u64).max(ia + 1).min(self.tot);
         Some((ia, ib))
+    }
+}
+
+/// Code steps of `Store::meas_src` between the run's min (code 1) and max
+/// (code 1022).
+const MEAS_SPAN: i32 = 1021;
+
+/// A run of stored samples re-quantized for the scope measurements
+/// (`Store::meas_src`; its `pack10::Src` is in app_ch2.rs).
+pub struct MeasSrc<'a> {
+    st: &'a Store,
+    ia: u64,
+    n: usize,
+    lo: i16,
+    span: i32,
+}
+
+impl MeasSrc<'_> {
+    /// Samples in the run.
+    pub fn n(&self) -> usize {
+        self.n
+    }
+
+    /// The re-quantized code of sample `i` (1..=1022).
+    #[inline]
+    pub fn code(&self, i: usize) -> u16 {
+        if self.span <= 0 {
+            return 1;
+        }
+        let c = self.st.codes[((self.ia + i as u64) % CAP as u64) as usize];
+        (1 + (c as i32 - self.lo as i32) * MEAS_SPAN / self.span) as u16
     }
 }
 

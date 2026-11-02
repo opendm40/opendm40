@@ -77,10 +77,16 @@ pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
 const BAR_X: i16 = 4;
 /// Left edge of the main readout's cells in the extra-digit layout
-/// (`CELLS_X`, 8..398): 390 px do not fit in the stock 40..400, so the
+/// (`CELLS_X`, 12..402): 390 px do not fit in the stock 40..400, so the
 /// whole number starts further left, over the stock HV lightning's box
-/// (`hv_warning` draws it small in the aux row then).
-const XT_X: i16 = 8;
+/// (`hv_warning` draws it small in the aux row then). As far right as the
+/// unit and the limit badge allow (their boxes from 403 / 406; the digits'
+/// ink ends ~4 px before the cells' end): the stock-sized 5 digits end at
+/// 400, the 6 should not sit much further left.
+const XT_X: i16 = 12;
+/// Right end of the extra-digit layout's cells (and its box: it also
+/// clears the stock cells' end, 400).
+const XT_END: i16 = XT_X + 390;
 /// The aux-row box of the small HV lightning (extra-digit layout): the
 /// stock lightning at half size, its baseline just below the box.
 const HV_SMALL: sf::Rect = rect(8, 37, 20, 29);
@@ -156,7 +162,8 @@ const CELLS: [[u8; 7]; 6] = [
 /// OL): the 7 cells of the reading and the extra digit's cell, all full
 /// size. Sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78
 /// digits are <= 56 px wide): centred, every glyph keeps >= 1 px to its
-/// neighbours = 390 px: XT_X..398, >= 5 px before the limit badge (403).
+/// neighbours = 390 px: XT_X..XT_END (402), the ink >= 5 px before the
+/// limit badge (403).
 /// The layout holds whenever the extra digit can appear (`DmmView::ext_slot`),
 /// with or without it, so the digit only fills or empties the last cell.
 const CELLS_X: [[u8; 8]; 4] = [
@@ -893,16 +900,18 @@ impl DmmView {
             _ => 3,
         };
         let mkey = r.mode | (r.cpl_auto as u8) << 4 | (r.acdc as u8) << 7 | r.power.map_or(0, |p| pk(p.coup) << 5);
-        // Extra-digit layout: CELLS_X from XT_X (8..398), the digit in the
-        // last cell at full size; its box runs to 400 so a full draw clears
-        // the stock cells' end (40..400). Leaving it, the stock cells start
-        // at 40: the strip 8..40 is cleared (the HV lightning's box, which
-        // the app redraws with the layout change, `hv_warning`).
-        let (x0, w, cells): (i16, i16, &[u8]) = if slot { (XT_X, 400 - XT_X, &CELLS_X[f & 3]) } else { (40, 360, &CELLS[f]) };
+        // Extra-digit layout: CELLS_X from XT_X (12..402), the digit in the
+        // last cell at full size; its box runs past 400 so a full draw
+        // clears the stock cells' end (40..400). Leaving it, the stock cells
+        // start at 40 and end at 400: the strips 12..40 (the HV lightning's
+        // box, which the app redraws with the layout change, `hv_warning`)
+        // and 400..402 are cleared.
+        let (x0, w, cells): (i16, i16, &[u8]) = if slot { (XT_X, XT_END - XT_X, &CELLS_X[f & 3]) } else { (40, 360, &CELLS[f]) };
         // The power meter's parts layout: PARTS_DY lower (0 elsewhere).
         let md = main_dy();
         if last_slot && !slot {
             lcd::fill_rect(XT_X as u16, (68 + md) as u16, (40 - XT_X) as u16, 80, BG);
+            lcd::fill_rect(400, (68 + md) as u16, (XT_END - 400) as u16, 80, BG);
         }
         // The caption after the "0L" (`ol_word`): cleared before the cells
         // (a value's digits reach into its box), drawn after them.
@@ -2269,7 +2278,7 @@ pub fn rate_chip_hit(x: u16, y: u16) -> bool {
 }
 
 /// A tap on the DMM page's main value (the F78 cells 40..400 x 68..148,
-/// in the extra-digit layout 8..398; 4 px around): resolution / rate step
+/// in the extra-digit layout 12..402; 4 px around): resolution / rate step
 /// (App). The power meter's parts layout: down to its P sub-line (..168).
 pub fn value_hit(x: u16, y: u16) -> bool {
     let y1 = if pw_parts() { 168 } else { 151 };
