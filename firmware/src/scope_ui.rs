@@ -45,7 +45,39 @@ pub const C_YELLOW: Color = 0xffe0;
 /// The extra channels' traces (opendm40, docs/scope-gen-channel.md): the
 /// generator (computed) and the DMM's CH2.
 pub const C_GEN_TR: Color = 0x07ff;
-pub const C_CH2: Color = 0xf81f;
+/// The DMM CH2's default colour (magenta); the user's choice is `c_ch2`.
+pub const C_CH2_DEFAULT: Color = 0xf81f;
+/// MF > Display CH2 "Color" (`set_ch2_colour`): 0 the default magenta,
+/// 1..=9 the CH1 palette (PALETTE). Set by the app (settings W_SCOPE_EXT +
+/// 5 bits 16..19).
+static CH2_COLOUR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+/// The CH2 colour names in `CH2_COLOUR` order.
+pub const CH2_COLOUR_NAMES: [&str; 10] = ["magenta", "red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold"];
+
+pub fn ch2_colour_idx() -> u8 {
+    CH2_COLOUR.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_ch2_colour(i: u8) {
+    CH2_COLOUR.store(i % 10, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The CH2 trace / marker / label / measurement colour.
+pub fn c_ch2() -> Color {
+    match ch2_colour_idx() {
+        0 => C_CH2_DEFAULT,
+        i => PALETTE[(i as usize - 1) % 9],
+    }
+}
+
+/// Text on a CH2-coloured fill (the DMM block): white on magenta, else as
+/// on the CH1 palette (CH1_INK).
+pub fn c_ch2_ink() -> Color {
+    match ch2_colour_idx() {
+        0 => C_WHITE,
+        i => CH1_INK[(i as usize - 1) % 9],
+    }
+}
 /// The strip value's digits below the accuracy (ui::strip_acc): the DMM
 /// page's VALUE_LOW.
 pub const C_LOW: Color = crate::ui::VALUE_LOW;
@@ -995,8 +1027,8 @@ pub fn block_look(m: &Model, b: usize) -> Look {
             on: true,
             open: m.ch1_open,
         },
-        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: C_CH2, ink: C_WHITE, on: false, open: false },
-        BLK_DMM => Look { name: Txt::new("DMM"), glyph: 0, scale: m.ch2_txt, col: C_CH2, ink: C_WHITE, on: m.ch2_on, open: false },
+        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: c_ch2(), ink: c_ch2_ink(), on: false, open: false },
+        BLK_DMM => Look { name: Txt::new("DMM"), glyph: 0, scale: m.ch2_txt, col: c_ch2(), ink: c_ch2_ink(), on: m.ch2_on, open: false },
         BLK_GEN => Look { name: Txt::new("GEN"), glyph: 0, scale: m.gen_txt, col: C_GEN_TR, ink: C_FILL, on: m.gen_on, open: false },
         _ => {
             // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
@@ -1149,7 +1181,7 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
         _ => Txt::new(text),
     };
     let t = Ink::new(sf::SC_F12, r, text.as_str(), 8, 0);
-    let pal = if ch2 { C_CH2 } else { m.pal_text() };
+    let pal = if ch2 { c_ch2() } else { m.pal_text() };
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
         if let Some(g) = t.at(x, y) {
             return (pal, tag(2, g));
@@ -1372,7 +1404,7 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
         n += 1;
     }
     if m.ch2_on {
-        out[n] = (CH2_LEVEL, level(off_row(m.ch2_pos), FAM_2, m.sel_v == CH2_LEVEL, C_CH2));
+        out[n] = (CH2_LEVEL, level(off_row(m.ch2_pos), FAM_2, m.sel_v == CH2_LEVEL, c_ch2()));
         n += 1;
     }
     if let Some(yc) = m.ycur {
@@ -1810,7 +1842,7 @@ pub struct Graph {
     pub tr: [(i16, i16); NCOL],
     pub ps: [(i16, i16); NCOL],
     pub ma: [(i16, i16); NCOL],
-    /// The GEN trace (C_GEN) and the CH2 trace (C_CH2), under CH1.
+    /// The GEN trace (C_GEN) and the CH2 trace (c_ch2()), under CH1.
     pub gn: [(i16, i16); NCOL],
     pub c2: [(i16, i16); NCOL],
     d_tr: [(i16, i16); NCOL],
@@ -2108,7 +2140,7 @@ fn band_run(sp: &mut [Color], tr: &[(i16, i16)], ps: &[(i16, i16)], ma: &[(i16, 
         } else if r >= tr.0 && r <= tr.1 {
             d.trace
         } else if r >= c2.0 && r <= c2.1 {
-            C_CH2
+            c_ch2()
         } else if r >= gn.0 && r <= gn.1 {
             C_GEN_TR
         } else if r >= ps.0 && r <= ps.1 {
@@ -2205,7 +2237,7 @@ impl Graph {
                 return d.trace;
             }
             if fy >= c2.0 && fy <= c2.1 {
-                return C_CH2;
+                return c_ch2();
             }
             if fy >= gn.0 && fy <= gn.1 {
                 return C_GEN_TR;
@@ -2354,7 +2386,7 @@ impl Graph {
                     } else if fy >= tr.0 && fy <= tr.1 {
                         d.trace
                     } else if fy >= c2.0 && fy <= c2.1 {
-                        C_CH2
+                        c_ch2()
                     } else if fy >= gn.0 && fy <= gn.1 {
                         C_GEN_TR
                     } else if fy >= ps.0 && fy <= ps.1 {
@@ -2444,7 +2476,7 @@ impl Graph {
                         } else if r >= tr.0 && r <= tr.1 {
                             d.trace
                         } else if r >= c2.0 && r <= c2.1 {
-                            C_CH2
+                            c_ch2()
                         } else if r >= gn.0 && r <= gn.1 {
                             C_GEN_TR
                         } else if r >= ps.0 && r <= ps.1 {
@@ -3288,7 +3320,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
         0 => {
             fill_c(rect(15, 61, 398, 110), pc, C_POP_BG);
             // The item names in the colour of the channel they measure.
-            let ink = if v.meas_src2 { C_CH2 } else { C_WHITE };
+            let ink = if v.meas_src2 { c_ch2() } else { C_WHITE };
             for i in 0..20i16 {
                 let r = rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30);
                 let c = if v.pressed_cell == Some(i as u8) { C_DIS } else { C_BAR };
@@ -3297,13 +3329,13 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             // opendm40: the Source cell in the grid's free 21st place.
             let i = MEAS_SRC_CELL;
             let r = rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30);
-            let (t, c) = if v.meas_src2 { ("CH2", C_CH2) } else { ("CH1", C_YELLOW) };
+            let (t, c) = if v.meas_src2 { ("CH2", c_ch2()) } else { ("CH1", C_YELLOW) };
             rbox_text(r, pc, 8, C_POP_TAB, C_POP_BG, sf::SC_F16, t, c);
             fill_c(rect(15, 171, 398, 40), pc, C_POP_BG);
             for k in 0..v.meas_n.min(4) as usize {
                 let r = rect(16 + 57 * k as i16, 176, 55, 30);
                 let sel = v.meas[k];
-                let c = if crate::scope_meas::is_ch2(sel) { C_CH2 } else { C_YELLOW };
+                let c = if crate::scope_meas::is_ch2(sel) { c_ch2() } else { C_YELLOW };
                 rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[crate::scope_meas::item(sel) as usize % 20], c);
             }
             rbox_text(rect(281, 176, 60, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
@@ -3324,6 +3356,9 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             // opendm40: the DMM as CH2 and its V/div.
             fill_c(rect(14, 211, 399, 49), pc, C_POP_BG);
             fill_text(C2_LABEL, pc, C_POP_BG, sf::SC_F16, C2_LABEL, "CH2 (DMM):", C_FILL, 1, 0);
+            let mut cb = Buf::new();
+            cb.push("Color: ").push(CH2_COLOUR_NAMES[ch2_colour_idx() as usize % 10]);
+            rbox_text(C2_COLOUR, pc, 8, c_ch2(), C_POP_BG, sf::SC_F16, cb.as_str(), c_ch2_ink());
             option_list(C2_LIST, pc, &["On", "Off"], 44, if v.ch2_on { 0 } else { 1 });
             if v.ch2_on {
                 rbox_text(C2_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
@@ -3399,6 +3434,8 @@ pub const C2_LIST: Rect = rect(24, 233, 88, 24);
 pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
 pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
 pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
+/// MF > Display: the CH2 colour (a tap: the next one), right of its label.
+pub const C2_COLOUR: Rect = rect(214, 210, 184, 22);
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
 pub fn fmt_s125(out: &mut Buf, s: f32) {
     let (x, u) = if s >= 0.999 {
@@ -3452,6 +3489,8 @@ pub enum MfHit {
     /// The DMM CH2 on, its V/div step (true = up).
     Ch2(bool),
     Ch2Step(bool),
+    /// MF > Display: the next CH2 colour.
+    Ch2Colour,
     PriScr,
     SaveCsv,
     /// The Decode tab's page.
@@ -3514,6 +3553,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Ch2Step(false)
             } else if v.ch2_on && near(C2_PLUS) {
                 MfHit::Ch2Step(true)
+            } else if rect(C2_COLOUR.x - 2, C2_COLOUR.y - 2, C2_COLOUR.w + 4, C2_COLOUR.h + 3).has(x, y) {
+                MfHit::Ch2Colour
             } else {
                 MfHit::Inside
             }
@@ -4048,7 +4089,8 @@ pub fn meter_strip(d: &StripData) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
     if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey && ol.short == d.short) {
-        let c = if d.dim { C_DIS } else if d.short { crate::ui::SHORT_FG } else { C_YELLOW };
+        // The DMM page's value colour (orange), not the stock strip's yellow.
+        let c = if d.dim { C_DIS } else if d.short { crate::ui::SHORT_FG } else { crate::ui::VALUE };
         st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), c, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
@@ -4062,7 +4104,7 @@ pub fn meter_strip(d: &StripData) {
         if o.is_some() {
             lcd::fill_rect(ST_UNIT_X as u16, ST_UNIT_Y as u16, (ST_SUB_END + 1 - ST_UNIT_X) as u16, (ST_GEN_T.y + ST_GEN_T.h - ST_UNIT_Y) as u16, C_FILL);
         }
-        st_text(ur, uf, d.unit.as_str(), C_YELLOW, ua, 1);
+        st_text(ur, uf, d.unit.as_str(), crate::ui::VALUE, ua, 1);
     }
     if changed(ol.gen == d.gen) || moved {
         st_badge(ST_GEN, if gen_on { "GEN" } else { "" }, C_GEN);

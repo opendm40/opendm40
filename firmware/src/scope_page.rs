@@ -2708,6 +2708,13 @@ impl App {
             su::MfHit::Ch2Step(up) => {
                 self.ch2_step(up, now);
             }
+            su::MfHit::Ch2Colour => {
+                // The next CH2 colour: the whole page again (trace, marker,
+                // DMM block, CH2 cells; the popup over it).
+                su::set_ch2_colour(su::ch2_colour_idx() + 1);
+                self.sp_settings_changed();
+                self.redraw = true;
+            }
             su::MfHit::GenTrace(on) => self.gen_trace_set(on, now),
             su::MfHit::PCond(c) => {
                 st.pcond = c.min(2);
@@ -3055,6 +3062,8 @@ impl App {
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
         // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
         p[5] = self.ch2.pos as u16 as u32;
+        // [5] bits 16..19: the CH2 colour (scope_ui::CH2_COLOUR, 0 = magenta).
+        p[5] |= (su::ch2_colour_idx() as u32 & 0xF) << 16;
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3083,6 +3092,7 @@ impl App {
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
         self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
+        su::set_ch2_colour(((p[5] >> 16 & 0xF) as u8).min(9));
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };

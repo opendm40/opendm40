@@ -709,7 +709,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
             draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
             let add = if tab == 1 {
-                vec![rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)]
+                vec![rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS), rb(scope_ui::C2_COLOUR)]
             } else {
                 vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE)]
             };
@@ -733,6 +733,16 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             scope_ui::cells(&m, &cells);
             ck.check_replica("gen/ch2-cells");
             save(out, "s08-ch2-cells");
+            // CH2 in green (MF > Display "Color"): trace, '2' marker, DMM
+            // block, the CH2 cells, the Display tab's colour button.
+            scope_ui::set_ch2_colour(4);
+            draw(&m, scope_ui::Popup::None, &pv2, true);
+            scope_ui::cells(&m, &cells);
+            ck.check_replica("gen/ch2-colour");
+            save(out, "s08-ch2-colour");
+            draw(&m, scope_ui::Popup::Mf(1), &pv2, true);
+            save(out, "s08-ch2-colour-display");
+            scope_ui::set_ch2_colour(0);
         }
     }
 }
