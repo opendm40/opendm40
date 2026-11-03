@@ -26,7 +26,7 @@ run() { # name, build.sh args...
         echo "ok   $n: $(grep -m1 '^stack:' "$V/$n.log" | sed 's/.*headroom/stack headroom/'); $(grep -m1 'region B free' "$V/$n.log" | sed 's/ *(.*//; s/^ *//; s/  *= */ /'); $(grep -m1 'region C free' "$V/$n.log" | sed 's/ *(.*//; s/^ *//; s/  *= */ /')"
     else
         echo "FAIL $n (build.sh $*): $V/$n.log"
-        grep -E '^error|error:|assert|Error' "$V/$n.log" | head -5 | sed 's/^/     /'
+        grep -E '^error|error:|assert|Error|stackdepth:|region [A-C2]+ free' "$V/$n.log" | head -6 | sed 's/^/     /'
         fail=1
     fi
 }
