@@ -411,6 +411,7 @@ impl Settings {
     }
 
     /// V/div at the x1 probe (the zoom applied).
+    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn vdiv1(&self) -> f32 {
         VSTEPS[self.vidx()]
     }
@@ -2215,6 +2216,7 @@ impl Scope {
         r
     }
 
+    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn sample_rate(&self) -> u32 {
         if self.wave { wave_real_fs(wv().fs) } else { TB[self.s.tb].0 }
     }

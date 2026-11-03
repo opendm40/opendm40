@@ -708,6 +708,7 @@ impl Meter {
 
     /// Readout state for the status label: 0 RUN, 1 HOLD (manual), 2
     /// AutoHold waiting / tracking, 3 AutoHold showing a captured value.
+    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn hold_state(&self) -> u8 {
         if self.hold {
             1
@@ -920,6 +921,7 @@ impl Meter {
         }
     }
 
+    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn rel_off(&mut self) {
         if self.rel.take().is_some() {
             self.ah_held = None;

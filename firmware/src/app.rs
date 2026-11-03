@@ -1588,6 +1588,7 @@ impl App {
     /// the host. The idle dim still runs on touches and keys alone, and host
     /// activity does not undim: nobody is necessarily looking at the screen,
     /// and a dimmed backlight costs the session nothing.
+    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn note_host_activity(&mut self, now: u64) {
         self.last_host = self.last_host.max(now);
     }
