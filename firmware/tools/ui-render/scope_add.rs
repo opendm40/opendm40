@@ -769,15 +769,16 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             let tc = m.trace_colour();
             let gh = h as usize;
             draw(&m, scope_ui::Popup::None, &pv2, true);
-            let shown = count(scope_ui::GX as usize, scope_ui::GR as usize, top, top + gh, tc);
+            // Below the top markers' row (the trigger position's T stays).
+            let shown = count(scope_ui::GX as usize, scope_ui::GR as usize, top + 14, top + gh, tc);
             let mut m1 = m;
             m1.ch1_on = false;
             draw(&m1, scope_ui::Popup::None, &pv2, true);
             ck.check_replica("gen/ch1-off");
             save(out, "s08-ch1-off");
-            let hidden = count(scope_ui::GX as usize, scope_ui::GR as usize, top, top + gh, tc);
+            let hidden = count(scope_ui::GX as usize, scope_ui::GR as usize, top + 14, top + gh, tc);
             println!("CH1 off: {hidden} px in CH1's trace colour (on: {shown})");
-            if !(shown > 300 && hidden < shown / 20) {
+            if !(shown > 300 && hidden == 0) {
                 ck.fail("gen/ch1-off", format!("CH1 off still drawn: {hidden} px of CH1's colour (on: {shown})"));
             }
             scope_ui::set_ch2_colour(0);
