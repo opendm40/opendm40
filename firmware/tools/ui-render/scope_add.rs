@@ -764,6 +764,22 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             if !(badge > 20 && mark > 20 && line > 40) {
                 ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px"));
             }
+            // CH1 hidden (owner 2026-11-03): no CH1 trace or 'A' marker,
+            // the CH1 block dimmed; CH2, GEN and the trigger stay.
+            let tc = m.trace_colour();
+            let gh = h as usize;
+            draw(&m, scope_ui::Popup::None, &pv2, true);
+            let shown = count(scope_ui::GX as usize, scope_ui::GR as usize, top, top + gh, tc);
+            let mut m1 = m;
+            m1.ch1_on = false;
+            draw(&m1, scope_ui::Popup::None, &pv2, true);
+            ck.check_replica("gen/ch1-off");
+            save(out, "s08-ch1-off");
+            let hidden = count(scope_ui::GX as usize, scope_ui::GR as usize, top, top + gh, tc);
+            println!("CH1 off: {hidden} px in CH1's trace colour (on: {shown})");
+            if !(shown > 300 && hidden < shown / 20) {
+                ck.fail("gen/ch1-off", format!("CH1 off still drawn: {hidden} px of CH1's colour (on: {shown})"));
+            }
             scope_ui::set_ch2_colour(0);
             // GEN in orange (MF > Display "Color" of the GEN trace).
             scope_ui::set_gen_colour(1);

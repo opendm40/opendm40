@@ -1280,8 +1280,9 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   then zoom in (magnifier +, left) and zoom out (magnifier −). A channel that
   is off is dimmed. The **CH1** title also shows the probe and coupling
   symbol when the probe is not ×1 or the coupling is AC.
-  - Tap a title: **CH1** opens the channel popup; **DMM** and **GEN** switch
-    their trace on / off; **MATH** opens the math popup.
+  - Tap a title: **CH1** opens the channel popup (tapped again with the
+    popup open, it hides CH1, as **MATH** does for math); **DMM** and **GEN**
+    switch their trace on / off; **MATH** opens the math popup.
   - Hold the **DMM** title: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Measurement row** at the bottom: up to four measurements.
 
@@ -1333,6 +1334,10 @@ in the left or right half of the graph steps), **Off**.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
     readings, not the hardware.
   - **Color** of the trace (the stock nine and cyan; MATH's the same).
+- Tap the **CH1** title again with the popup open to hide CH1: no trace and
+  no **A** marker, the block dimmed. CH1 is still recorded, so the trigger
+  on CH1, the measurements and MATH keep working. Tap the dimmed title to
+  show CH1 again (the popup opens). Kept over a restart.
 - Bandwidth: owners report flat to about 3 MHz.
 
 

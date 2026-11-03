@@ -306,6 +306,9 @@ fn hz_opts(nyq: f32) -> [f32; 4] {
 
 /// Scope page state.
 pub(super) struct Sp {
+    /// CH1 hidden (owner 2026-11-03): a second tap on the CH1 block with
+    /// its popup open, as stock math (`su::Model::ch1_on`).
+    pub ch1_off: bool,
     pub sel_v: u8,
     pub sel_h: u8,
     /// Group of the last selection (false = level / V, true = time / H).
@@ -394,6 +397,7 @@ impl Sp {
 
     pub const fn new() -> Sp {
         Sp {
+            ch1_off: false,
             sel_v: 0,
             sel_h: 0,
             last_h: false,
@@ -565,6 +569,8 @@ impl App {
             // Combined view: the strip's GEN badge shows it instead.
             gen_hz: if self.gen.s.on && self.view == View::Scope { self.gen.actual_hz() } else { 0.0 },
             ch1_open: matches!(sp.popup, su::Popup::Ch1(_)),
+            // The Wave view's CH1 is the DMM's reading: always shown.
+            ch1_on: !sp.ch1_off || wave,
             math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
             combined: self.view == View::DmmScope,
@@ -2218,7 +2224,13 @@ impl App {
             match b {
                 // The wave view: CH1 = the coupling note.
                 su::BLK_CH1 if wave => self.wave_coupling_note(now),
-                su::BLK_CH1 => self.sp_popup_open(su::Popup::Ch1(0)),
+                su::BLK_CH1 => {
+                    // As the math label: CH1 off -> on with its popup.
+                    if self.sp.ch1_off {
+                        self.sp_ch1_show(true);
+                    }
+                    self.sp_popup_open(su::Popup::Ch1(0))
+                }
                 // The wave view: back to the OSC (MCX) input.
                 su::BLK_DMM if wave => self.wave_badge_close(clk),
                 su::BLK_DMM => {
@@ -2269,6 +2281,13 @@ impl App {
 
     /// The GEN trace on / off (the GEN block's title, MF > Display, SCPI
     /// GEN:DISP): first on, its V/div starts at CH1's.
+    /// CH1 shown / hidden: the graph again from the record.
+    fn sp_ch1_show(&mut self, on: bool) {
+        self.sp.ch1_off = !on;
+        self.scope_invalidate();
+        self.sp_settings_changed();
+    }
+
     pub(super) fn gen_trace_set(&mut self, on: bool, now: u64) {
         if on && self.scope.gen_vdiv as usize >= su::VDIV_VAL.len() {
             self.scope.gen_vdiv = vdiv_idx(self.scope.s.vidx(), self.scope.s.probe);
@@ -2512,6 +2531,12 @@ impl App {
                         self.toast_hold = true;
                         self.sp_mf_tap(clk, t, su::mf_hit(t, &v, x, y), now);
                         self.sp_toast_release(now);
+                    }
+                    su::Popup::Ch1(_) if su::panel_hit(p.x, p.y) == Some(3 * su::BLK_CH1) && !self.scope.wave_on() => {
+                        // As the math label: the CH1 label with its popup
+                        // open = CH1 hidden.
+                        self.sp_ch1_show(false);
+                        self.sp_popup_close();
                     }
                     su::Popup::Ch1(t) => {
                         self.toast_hold = true;
@@ -3090,6 +3115,8 @@ impl App {
             | ((s.tsrc == scope::TSRC_CH2) as u32) << 7
             // Bits 8..12: the GEN V/div index + 1 (0: not set yet).
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
+            // Bit 13: CH1 hidden.
+            | (self.sp.ch1_off as u32) << 13
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
         // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
@@ -3126,6 +3153,7 @@ impl App {
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
+        self.sp.ch1_off = p[3] >> 13 & 1 != 0;
         self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
         su::set_ch2_colour(((p[5] >> 16 & 0xF) as u8).min(su::NPAL as u8));
         su::set_gen_colour(((p[5] >> 20 & 0xF) as u8 ^ su::GEN_COLOUR_DEFAULT).min(su::NPAL as u8 - 1));
