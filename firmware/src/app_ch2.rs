@@ -184,8 +184,14 @@ impl App {
         if !on {
             crate::scope_ui::graph().c2 = [crate::scope_ui::EMPTY; crate::scope_ui::NCOL];
         }
-        // The comparator on / off: restart the acquisition.
-        let st = self.scope.s;
+        // The comparator on / off: restart the acquisition. CH2 off with
+        // the trigger on it: the trigger goes back to CH1 (owner
+        // 2026-11-03: no source on a channel that is off).
+        let mut st = self.scope.s;
+        if !on && st.tsrc == scope::TSRC_CH2 {
+            st.tsrc = scope::TSRC_CH1;
+            self.toast(now, "Trigger source: CH1", false);
+        }
         self.scope_set(st, now);
         self.update_rails(clk);
     }

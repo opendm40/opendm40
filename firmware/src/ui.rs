@@ -3244,15 +3244,18 @@ pub const S_OHM_NEG: u8 = 22;
 /// stock): ON restarts the multimeter after a power-off as it was (app.rs
 /// `restore`).
 pub const S_REMEMBER: u8 = 23;
+/// The continuity / diode beeper: Always (owner 2026-11-03, the default:
+/// heard at 0 % volume too) or with the key / alert volume (0 % = silent).
+pub const S_CONT: u8 = 24;
 /// Number of settings (the value array's length).
-pub const SET_N: usize = 24;
+pub const SET_N: usize = 25;
 
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "Help", "Jack alerts",
     "Danger alarm", "USB disk", "Burden voltage", "Device info", "Touch test", "Accuracy", "Negative ohm",
-    "Mode Remember",
+    "Mode Remember", "Continuity beep",
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
@@ -3260,7 +3263,7 @@ pub const SET_NAMES: [&str; SET_N] = [
 /// there) with its Device section and our help / touch test pages.
 pub const SET_TABS: [(&str, &[u8]); 6] = [
     ("Display", &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
-    ("Alerts", &[S_VOLUME, S_ALARM, S_JACK]),
+    ("Alerts", &[S_VOLUME, S_CONT, S_ALARM, S_JACK]),
     ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     ("Multimeter", &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     ("Scope", &[S_SWIPE, S_PRESS, S_TAP_STEP]),

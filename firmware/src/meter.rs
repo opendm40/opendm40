@@ -411,6 +411,8 @@ const SHOW_MIN_MS: u64 = 80;
 //              EXT_TREND_SHIFT
 //   bits 24..27 the stored function's fixed range: its range page item + 1
 //              (ui::range_items; 0 = autorange), EXT_RANGE_SHIFT
+//   bit 28     the continuity / diode beeper follows the key / alert volume
+//              (0 % = silent; 0 = always on, the default), EXT_CONT_VOL
 // (bits 9.. are set / read by app.rs next to ext_word / ext_settings.)
 
 /// p[38] bit 9: temperature unit deg F.
@@ -435,6 +437,8 @@ pub const EXT_MODE_REMEMBER: u32 = 1 << 20;
 pub const EXT_TREND_SHIFT: u32 = 21;
 /// p[38] bits 24..27: the fixed range item + 1 (0 = autorange: older records).
 pub const EXT_RANGE_SHIFT: u32 = 24;
+/// p[38] bit 28: the continuity beeper with the volume (0 = always: older records).
+pub const EXT_CONT_VOL: u32 = 1 << 28;
 
 /// Settings decoded from p[38].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

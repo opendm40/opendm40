@@ -2742,13 +2742,16 @@ impl App {
                 // The page height is the same, the rows below change.
             }
             su::MfHit::TSrc(t) => {
-                st.tsrc = t.min(scope::TSRC_CH2);
-                self.scope_set(st, now);
-                if st.tsrc == scope::TSRC_GEN && !self.gen.s.on {
+                // Not a channel that is off (owner 2026-11-03): the source
+                // stays, a toast says why.
+                let t = t.min(scope::TSRC_CH2);
+                if t == scope::TSRC_GEN && !self.gen.s.on {
                     self.toast(now, "Generator is off", false);
-                }
-                if st.tsrc == scope::TSRC_CH2 && !self.ch2.on {
+                } else if t == scope::TSRC_CH2 && !self.ch2.on {
                     self.toast(now, "CH2 (DMM) is off", false);
+                } else {
+                    st.tsrc = t;
+                    self.scope_set(st, now);
                 }
             }
             su::MfHit::Ch2(on) => {
