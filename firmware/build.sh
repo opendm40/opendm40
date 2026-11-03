@@ -76,8 +76,14 @@ done
 # default_handler loop -> FWDGT reset, counted by DBG:BOOT? as before; no
 # panic handler and no panic formatting code (~19 KB of regions B + C). The
 # magenta bar of main.rs `panic` is not drawn in this build.
+# --icf=all (lld: identical functions folded into one copy, ~0.7 KB of
+# region B) and -machine-outliner-reruns=1 (LLVM's machine outliner a second
+# time over its own result, ~0.3 KB): region B audit #11 (2026-11-03,
+# docs/native-boot.md). No change in function; a merged copy keeps the
+# largest frame of its twins (stackdepth.py sees the one function).
+SIZE_FLAGS="-C link-arg=--icf=all -C llvm-args=-machine-outliner-reruns=1"
 RUSTC_BOOTSTRAP=1 \
-RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
+RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4 $SIZE_FLAGS$REMAP" CARGO_TARGET_DIR=$TDIR \
     cargo build --release -Zbuild-std=core "$@"
 ELF=$TDIR/thumbv7em-none-eabihf/release/opendm40
 
@@ -94,7 +100,7 @@ rm -f $TDIR/regiona2.warn $TDIR/regionb.warn $TDIR/regionc.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
 python3 ../stock/dm40fw.py pack --pad "$BODY" "$OUT"
 python3 - "$BODY" "$ELF" "$TDIR" <<'PY'
-import os, re, struct, subprocess, sys
+import bisect, os, re, struct, subprocess, sys
 body = open(sys.argv[1], 'rb').read()
 BASE, MARK, END = 0x08004000, 0x08008000, 0x080A0000
 end = BASE + len(body)
@@ -172,34 +178,51 @@ assert ops and not bad, 'gen::reads: %s between the timed reads' % bad
 # fails the build.
 if 'ad2_stream_irq' in syms:
     dis = subprocess.run([od, '-d', '--no-show-raw-insn', sys.argv[2]], capture_output=True, text=True).stdout
-    funcs, cur = {}, None
+    # Functions by start address: local symbols repeat (the machine
+    # outliner's OUTLINED_FUNCTION_<n> in each crate), so a name is not one.
+    funcs, names, cur = {}, {}, None
     for l in dis.split('\n'):
-        m = re.match(r'^[0-9a-f]{8} <(.*)>:$', l)
+        m = re.match(r'^([0-9a-f]{8}) <(.*)>:$', l)
         if m:
-            cur = funcs.setdefault(m.group(1), [set(), set(), {}])
+            cur = funcs.setdefault(int(m.group(1), 16), [set(), set(), {}])
+            names[int(m.group(1), 16)] = m.group(2)
             continue
         if cur is None:
             continue
         m = re.search(r'\.word\s+0x([0-9a-f]+)', l)
         if m:
             cur[0].add(int(m.group(1), 16))
-        m = re.search(r'\b(?:bl|b\.w|b)\s+0x[0-9a-f]+ <([^+>]*)', l)
+        m = re.search(r'\b(?:bl|b\.w|b)\s+0x([0-9a-f]+) <', l)
         if m:
-            cur[1].add(m.group(1))
+            cur[1].add(int(m.group(1), 16))
         m = re.search(r'\bmov([wt])\s+(\w+), #0x([0-9a-f]+)', l)
         if m and m.group(1) == 'w':
             cur[2][m.group(2)] = int(m.group(3), 16)
         elif m and m.group(2) in cur[2]:
             cur[0].add(int(m.group(3), 16) << 16 | cur[2][m.group(2)])
-    seen, todo = set(), ['ad2_stream_irq']
+    starts = sorted(funcs)
+    def owner(t):  # the function holding address t
+        i = bisect.bisect_right(starts, t) - 1
+        return starts[i] if i >= 0 else None
+    root = owner(syms['ad2_stream_irq'] & ~1)
+    seen, todo, up = set(), [root], {}
     while todo:
         f = todo.pop()
-        if f in seen or f not in funcs:
+        if f is None or f in seen:
             continue
         seen.add(f)
-        todo.extend(funcs[f][1])
+        for t in funcs[f][1]:
+            g = owner(t)
+            if g is not None and g not in seen:
+                up.setdefault(g, f)
+                todo.append(g)
     xr = [(syms['__bkp_bss_start'], 0x40024FE8), (0x40060000, 0x40061000)]
-    hits = ['%s: 0x%08x' % (f, w) for f in sorted(seen) for w in funcs[f][0] if any(a <= w < b for a, b in xr)]
+    def chain(f):  # f <- its caller <- ... <- ad2_stream_irq (one call path)
+        p = [f]
+        while p[-1] in up and len(p) < 40:
+            p.append(up[p[-1]])
+        return ' <- '.join(names[q] for q in p)
+    hits = ['%s: 0x%08x' % (chain(f), w) for f in sorted(seen) for w in funcs[f][0] if any(a <= w < b for a, b in xr)]
     assert len(seen) > 1 and not hits, 'the AD2 stream ISR reaches the extra RAM areas: %s' % hits
     print("  AD2 stream ISR   = %d functions, no extra-RAM address" % len(seen))
 PY

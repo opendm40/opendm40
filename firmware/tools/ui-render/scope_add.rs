@@ -742,6 +742,48 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             save(out, "s08-ch2-colour");
             draw(&m, scope_ui::Popup::Mf(1), &pv2, true);
             save(out, "s08-ch2-colour-display");
+            // Trigger on CH2 (DMM): the T marker, the badge and the level's
+            // guide line in CH2's colour (owner 2026-11-03), CH2 in green.
+            let mut mt = m;
+            mt.tsrc = scope::TSRC_CH2;
+            mt.trig_row = 90;
+            mt.sel_v = 1;
+            mt.guide = true;
+            let mut pvt = pv2;
+            pvt.tsrc = scope::TSRC_CH2;
+            draw(&mt, scope_ui::Popup::None, &pvt, true);
+            ck.check_replica("gen/ch2-trigger");
+            save(out, "s08-ch2-trigger");
+            let w = host::W;
+            let count = |x0: usize, x1: usize, y0: usize, y1: usize, c: u16| (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
+            let (g, rx) = (scope_ui::c_ch2(), (scope_ui::GR - 12) as usize);
+            let top = mt.top() as usize;
+            let fy = top + scope_ui::line_fy(h, 90) as usize;
+            let (badge, mark, line) = (count(352, 414, 1, 18, g), count(rx, rx + 12, top, top + h as usize, g), count(20, 300, fy, fy + 1, g));
+            println!("CH2 trigger in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px");
+            if !(badge > 20 && mark > 20 && line > 40) {
+                ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px"));
+            }
+            // The Trigger tab with Source DMM (its note: the CH2 scale).
+            draw(&mt, scope_ui::Popup::Mf(2), &pvt, true);
+            save(out, "s08-ch2-trigger-tab");
+            // CH1 hidden (owner 2026-11-03): no CH1 trace or 'A' marker,
+            // the CH1 block dimmed; CH2, GEN and the trigger stay.
+            let tc = m.trace_colour();
+            let gh = h as usize;
+            draw(&m, scope_ui::Popup::None, &pv2, true);
+            // Below the top markers' row (the trigger position's T stays).
+            let shown = count(scope_ui::GX as usize, scope_ui::GR as usize, top + 14, top + gh, tc);
+            let mut m1 = m;
+            m1.ch1_on = false;
+            draw(&m1, scope_ui::Popup::None, &pv2, true);
+            ck.check_replica("gen/ch1-off");
+            save(out, "s08-ch1-off");
+            let hidden = count(scope_ui::GX as usize, scope_ui::GR as usize, top + 14, top + gh, tc);
+            println!("CH1 off: {hidden} px in CH1's trace colour (on: {shown})");
+            if !(shown > 300 && hidden == 0) {
+                ck.fail("gen/ch1-off", format!("CH1 off still drawn: {hidden} px of CH1's colour (on: {shown})"));
+            }
             scope_ui::set_ch2_colour(0);
             // GEN in orange (MF > Display "Color" of the GEN trace).
             scope_ui::set_gen_colour(1);
@@ -749,6 +791,23 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             ck.check_replica("gen/gen-colour");
             save(out, "s08-gen-colour-display");
             scope_ui::set_gen_colour(scope_ui::GEN_COLOUR_DEFAULT);
+            // The panel after a popup that reached into it (owner
+            // 2026-11-03: the MF menu "not always cleared", the panel's
+            // buttons over the menu): `panel` repaints all of it, gaps
+            // included, as the page without the popup.
+            draw(&m, scope_ui::Popup::None, &pv, true);
+            let fresh = emu().fb.clone();
+            let pops = [0u8, 1, 2, 3, 4].map(scope_ui::Popup::Mf).into_iter().chain([scope_ui::Popup::Ch1(0), scope_ui::Popup::Math(0)]);
+            for p in pops {
+                draw(&m, p, &pv, true);
+                scope_ui::panel(&m);
+                ck.cases += 1;
+                let w = host::W;
+                let bad = (20..301usize).flat_map(|y| (scope_ui::PANEL_X as usize..w).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] != fresh[y * w + x]).count();
+                if bad > 0 {
+                    ck.fail("gen/panel-after-popup", format!("{bad} panel px differ from the page without the popup after {}", match p { scope_ui::Popup::Mf(t) => t as i32, _ => -1 }));
+                }
+            }
         }
     }
 }

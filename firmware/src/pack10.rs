@@ -127,6 +127,35 @@ pub fn pack_in_place(p: *mut u8, n: usize) {
     }
 }
 
+/// `Codes::cap` of a view over the DMM CH2 store (scope_ch2.rs `meas_src`):
+/// its i16 codes in a ring of CH2_RING at `base`, re-quantized to 1..=1022
+/// over the run's min..max (`set_ch2_q`), so one `scope_meas::compute_codes`
+/// serves CH1 and CH2 (a second copy for the CH2 type was 1.8 KB of region B).
+pub const CH2_VIEW: usize = usize::MAX;
+pub const CH2_RING: usize = 4096;
+/// The CH2 view's (lo, span): code lo -> 1, lo + span -> 1022.
+static mut CH2_Q: (i32, i32) = (0, 0);
+
+/// Set the CH2 view's quantisation (before reading a CH2 view; main loop).
+pub fn set_ch2_q(lo: i16, span: i32) {
+    // SAFETY: main loop only.
+    unsafe { core::ptr::addr_of_mut!(CH2_Q).write((lo as i32, span)) }
+}
+
+/// A CH2 store code on the 10-bit measurement scale (1 for a flat run).
+#[inline]
+pub fn ch2_quant(c: i16, lo: i32, span: i32) -> u16 {
+    if span <= 0 { 1 } else { (1 + (c as i32 - lo) * 1021 / span) as u16 }
+}
+
+#[inline(never)]
+fn ch2_at(base: *const u8, j: usize) -> u16 {
+    // SAFETY: base is the CH2 store's CH2_RING codes (`meas_src`).
+    let c = unsafe { core::ptr::read(base.cast::<i16>().add(j % CH2_RING)) };
+    let (lo, span) = unsafe { core::ptr::addr_of!(CH2_Q).read() };
+    ch2_quant(c, lo, span)
+}
+
 /// Packed codes `off .. off + len` of a ring of `cap` samples at `base`
 /// (index wraps at `cap`; off < cap, len <= cap); `cap` 0: samples `off ..
 /// off + len` of the coded ring (`CODED`).
@@ -163,6 +192,9 @@ impl Codes {
     pub fn at(&self, i: usize) -> u16 {
         if self.cap == 0 {
             return coded(self.off.wrapping_add(i) as u32);
+        }
+        if self.cap == CH2_VIEW {
+            return ch2_at(self.base, self.off.wrapping_add(i));
         }
         let mut j = self.off + i;
         if j >= self.cap {

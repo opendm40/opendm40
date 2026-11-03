@@ -1360,6 +1360,39 @@ only through an address.
 | stack headroom (static worst path) | 20 872 B | 20 872 B |
 | SRAM free | 8 948 B | 8 948 B |
 
+### Region B audit #11 (2026-11-03, dmm-trigger2)
+
+Room for the fork's DMM (CH2) trigger and what comes next, no change in
+function. [`rprof.py`](../tools/region-profile/rprof.py) on 0.4.11-sk1:
+region B 477 KB used (406 KB code, fonts 27 KB, texts 13 KB), region C
+7.2 KB free, so nothing more moves from B to C. New:
+[`inl.py`](../tools/region-profile/inl.py), the inlined copies per function
+from the DWARF of the debug ELF (the `#[inline(never)]` candidates).
+Each row measured as its own commit's build:
+
+| change | region B | region C |
+|---|---|---|
+| build.sh: lld `--icf=all` (identical functions, one copy) and `-machine-outliner-reruns=1` | +1 040 | +240 |
+| fastenc: CRC-32 by the 64-byte nibble table (dlog / calbackup's), not a 1 KiB byte table (~0.2 ms more per 4 KiB fast-log chunk) | +1 064 | 0 |
+| dlog: the decoders take `&mut dyn Src` (the gallery's monomorphs were region B code only region C called) | +568 | +776 |
+| main.rs `put_u32` = `Scpi::put_u32` | +24 | 0 |
+| `#[inline(never)]`: `Held::asserted`, `Meter::hold_state` / `rel_off`, `Settings::vdiv1`, `Scope::sample_rate`, `App::note_host_activity` (6-9 inlined copies each) | +880 | +40 |
+| (tried, reverted) `stockfont::rect` not inlined: its 719 call sites mostly pass constants | -904 | -56 |
+
+| | 0.4.11-sk1 | after |
+|---|---|---|
+| region A2 free | 2 324 B | 2 324 B |
+| region B free | 14 064 B | 17 640 B |
+| region C free | 7 224 B | 8 280 B |
+| stack headroom (static worst path) | 20 940 B | 20 700 B |
+
+Measured, not taken: `-machine-outliner-reruns=3` (as 1); the `#[inline(always)]`
+helpers inl.py lists first (lcd `run` / `px` / `row_out`, fastenc `put24` /
+`rice`, `Codes::at`, the logger ISR's `dma_end` / `dma_store`) are inlined
+for speed on purpose. The developer's `DBG:` commands are the cargo feature
+`dbg-dev` (default); `tools/build-variants` builds `no-dbg-dev` and prints
+what they cost.
+
 ### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
 
 The device probe of [PR #183](https://github.com/opendm40/opendm40/pull/183)

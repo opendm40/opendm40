@@ -153,6 +153,8 @@ impl Store {
 
     /// Sample index (fractional) at DWT time `t`; None before the oldest
     /// anchor still in the store (or no anchor yet).
+    // The reference for `pos_run` (`range`, tools/ch2-test).
+    #[allow(dead_code)]
     fn index_at(&self, t: u32) -> Option<f64> {
         let n = self.nanc.min(NANCH);
         if n == 0 {
@@ -218,11 +220,41 @@ impl Store {
         crate::clock::HCLK_HZ as f32 / self.period
     }
 
+    /// Trigger on CH2 (scope.rs `ch2_next`): the first stored sample taken
+    /// in DWT [t0, t1) where the signal crosses `level` (SI) in the edge's
+    /// direction (the sample before it on the other side), and the DWT time
+    /// up to which the store has been searched (the newest sample's when
+    /// it ends before t1: the rest is searched once it is in).
+    #[inline(never)]
+    pub fn crossing(&self, t0: u32, t1: u32, level: f32, rising: bool) -> (Option<u32>, u32) {
+        let oldest = self.tot.saturating_sub(CAP as u64);
+        // t0 then t1: a run's times rise (f32 from the anchors, as a frame).
+        let mut r = self.run();
+        let a = self.pos_run(&mut r, t0).map_or(oldest, |(i, f)| i + f as u32 as u64).max(oldest);
+        let Some((bi, bf)) = self.pos_run(&mut r, t1) else { return (None, t0) };
+        let b = (bi + bf as u32 as u64).min(self.tot);
+        // DWT of sample j: back from t1 at the stream's period (the window
+        // is at most CAP samples: f32 to well under a microsecond).
+        let at = |j: u64| t1.wrapping_sub(((bi.wrapping_sub(j) as i32 as f32 + bf) * self.period) as u32);
+        let mut prev: Option<f32> = None;
+        for j in a..b {
+            let v = self.si(self.codes[(j % CAP as u64) as usize]);
+            if let Some(p) = prev {
+                if if rising { p < level && v >= level } else { p > level && v <= level } {
+                    let t = at(j);
+                    return (Some(t), t);
+                }
+            }
+            prev = Some(v);
+        }
+        (None, if b >= self.tot { at(self.tot - 1) } else { t1 })
+    }
+
     /// The samples [ia, ib) as a measurement source (`scope_meas::
     /// compute_codes`): codes re-quantized to 1..=1022 over their min..max
     /// (inside the 10-bit histogram, never "clipped"), with the SI of code
     /// 0 and of one code step. A flat run is all code 1.
-    pub fn meas_src(&self, ia: u64, ib: u64) -> (MeasSrc<'_>, f32, f32) {
+    pub fn meas_src(&self, ia: u64, ib: u64) -> (crate::pack10::Codes, f32, f32) {
         let (mut lo, mut hi) = (i16::MAX, i16::MIN);
         for n in ia..ib {
             let c = self.codes[(n % CAP as u64) as usize];
@@ -232,8 +264,9 @@ impl Store {
         let span = (hi as i32 - lo as i32).max(0);
         let (s_lo, s_hi) = (self.si(lo), self.si(hi));
         let v_k = if span > 0 { (s_hi - s_lo) / MEAS_SPAN as f32 } else { 0.0 };
-        let src = MeasSrc { st: self, ia, n: (ib - ia) as usize, lo, span };
-        (src, s_lo - v_k, v_k)
+        crate::pack10::set_ch2_q(lo, span);
+        let v = crate::pack10::Codes::new(self.codes.as_ptr().cast(), (ia % CAP as u64) as usize, (ib - ia) as usize, crate::pack10::CH2_VIEW);
+        (v, s_lo - v_k, v_k)
     }
 
     fn min_max(&self, ia: u64, ib: u64) -> (f32, f32) {
@@ -274,8 +307,11 @@ impl Store {
         self.range_run(r, t0, len).map(|(ia, ib)| self.min_max(ia, ib))
     }
 
-    /// The sample indices [ia, ib) of `span_run`.
-    pub fn range_run(&self, r: &mut Run, t0: u32, len: f32) -> Option<(u64, u64)> {
+    /// The anchor `base` and the fractional sample index past it at DWT
+    /// time `t0` (the search goes on from the run's last segment): None
+    /// before the oldest usable anchor (or no anchor yet).
+    #[inline(never)]
+    fn pos_run(&self, r: &mut Run, t0: u32) -> Option<(u64, f32)> {
         if self.nanc == 0 {
             return None;
         }
@@ -306,11 +342,18 @@ impl Store {
             r.k = k;
             return None;
         } else {
-            // Not rising (never in a frame): the full search.
+            // Not rising (never in a frame): the search again from the
+            // oldest usable anchor (it ends in one of the branches above).
             r.k = r.kmax;
-            return self.range(t0, len);
+            return self.pos_run(r, t0);
         };
         r.k = k;
+        Some((base, frac))
+    }
+
+    /// The sample indices [ia, ib) of `span_run`.
+    pub fn range_run(&self, r: &mut Run, t0: u32, len: f32) -> Option<(u64, u64)> {
+        let (base, frac) = self.pos_run(r, t0)?;
         // 32-bit conversions (the u64 / i64 ones are library calls): base
         // is within the store, oldest .. tot.
         let lo = -(base.saturating_sub(self.tot.saturating_sub(CAP as u64)) as u32 as f32);
@@ -328,35 +371,10 @@ impl Store {
 }
 
 /// Code steps of `Store::meas_src` between the run's min (code 1) and max
-/// (code 1022).
+/// (code 1022; `pack10::ch2_quant`).
 const MEAS_SPAN: i32 = 1021;
 
-/// A run of stored samples re-quantized for the scope measurements
-/// (`Store::meas_src`; its `pack10::Src` is in app_ch2.rs).
-pub struct MeasSrc<'a> {
-    st: &'a Store,
-    ia: u64,
-    n: usize,
-    lo: i16,
-    span: i32,
-}
-
-impl MeasSrc<'_> {
-    /// Samples in the run.
-    pub fn n(&self) -> usize {
-        self.n
-    }
-
-    /// The re-quantized code of sample `i` (1..=1022).
-    #[inline]
-    pub fn code(&self, i: usize) -> u16 {
-        if self.span <= 0 {
-            return 1;
-        }
-        let c = self.st.codes[((self.ia + i as u64) % CAP as u64) as usize];
-        (1 + (c as i32 - self.lo as i32) * MEAS_SPAN / self.span) as u16
-    }
-}
+const _: () = assert!(CAP == crate::pack10::CH2_RING, "the CH2 view's ring is the store's");
 
 /// The state of a `Store::span_run` sequence.
 pub struct Run {

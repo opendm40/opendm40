@@ -1002,6 +1002,7 @@ impl Held {
             self.t0 = None;
         }
     }
+    #[inline(never)] // one copy, not one per caller (region B audit #11)
     fn asserted(&self, now: u64, was: bool, assert_ms: u64, clear_ms: u64) -> bool {
         match self.t0 {
             Some(_) if was => now.saturating_sub(self.last) < clear_ms,

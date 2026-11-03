@@ -825,13 +825,13 @@ struct SDec {
 }
 
 impl SDec {
-    fn new<S: Src>(s: &mut S, w: &mut Win, start: u32, end: u32) -> Option<SDec> {
+    fn new(s: &mut dyn Src, w: &mut Win, start: u32, end: u32) -> Option<SDec> {
         let mut d = SDec { pos: start, bit: 0, end, mode: 0, j: 0, h: [0; 3], ad: Ad::new(AS0) };
         d.mode = d.get(s, w, 3)?;
         (d.mode <= S_RAW).then_some(d)
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn get<S: Src>(&mut self, s: &mut S, w: &mut Win, mut bits: u32) -> Option<u32> {
+    fn get(&mut self, s: &mut dyn Src, w: &mut Win, mut bits: u32) -> Option<u32> {
         let mut v = 0u32;
         while bits > 0 {
             let b = w.byte(s, self.pos, self.end)?;
@@ -848,7 +848,7 @@ impl SDec {
         Some(v)
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn next<S: Src>(&mut self, s: &mut S, w: &mut Win) -> Option<u16> {
+    fn next(&mut self, s: &mut dyn Src, w: &mut Win) -> Option<u16> {
         let x = if self.mode == S_RAW {
             self.get(s, w, 10)? as i32
         } else {
@@ -997,7 +997,7 @@ impl Win {
     }
     /// Byte `off` (< `end`, the readable limit).
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn byte<S: Src>(&mut self, s: &mut S, off: u32, end: u32) -> Option<u8> {
+    fn byte(&mut self, s: &mut dyn Src, off: u32, end: u32) -> Option<u8> {
         if off < self.base || off >= self.base + self.n {
             if off >= end {
                 return None;
@@ -1071,7 +1071,7 @@ impl RowDec {
     }
 
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn get<S: Src>(&mut self, s: &mut S, w: &mut Win, mut bits: u32) -> Option<u32> {
+    fn get(&mut self, s: &mut dyn Src, w: &mut Win, mut bits: u32) -> Option<u32> {
         let mut v = 0u32;
         while bits > 0 {
             let b = w.byte(s, self.pos, self.end)?;
@@ -1089,7 +1089,7 @@ impl RowDec {
     }
 
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn rice<S: Src>(&mut self, s: &mut S, w: &mut Win, k: u32) -> Option<u32> {
+    fn rice(&mut self, s: &mut dyn Src, w: &mut Win, k: u32) -> Option<u32> {
         let mut q = 0;
         while q < QMAX && self.get(s, w, 1)? == 1 {
             q += 1;
@@ -1102,7 +1102,7 @@ impl RowDec {
 
     /// The next row: (t ms, value, flags).
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn next<S: Src>(&mut self, s: &mut S, w: &mut Win) -> Option<(u32, Val, u8)> {
+    fn next(&mut self, s: &mut dyn Src, w: &mut Win) -> Option<(u32, Val, u8)> {
         if self.left == 0 {
             return None;
         }
@@ -1160,7 +1160,7 @@ impl RowDec {
 
 /// Parse the file header: (kind, hl, unit length, unit).
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-pub fn parse_file<S: Src>(s: &mut S, size: u32) -> Option<(u8, u32, usize, [u8; UNIT_MAX])> {
+pub fn parse_file(s: &mut dyn Src, size: u32) -> Option<(u8, u32, usize, [u8; UNIT_MAX])> {
     let mut h = [0u8; FHDR];
     if size < FHDR as u32 || !s.read(0, &mut h) || h[..4] != MAGIC {
         return None;
@@ -1192,7 +1192,7 @@ pub fn parse_file<S: Src>(s: &mut S, size: u32) -> Option<(u8, u32, usize, [u8; 
 /// The chunk header at `off` if it is whole within `size` (and, with
 /// `check`, its CRC matches).
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-pub fn chunk_at<S: Src>(s: &mut S, w: &mut Win, off: u32, size: u32, check: bool) -> Option<Chunk> {
+pub fn chunk_at(s: &mut dyn Src, w: &mut Win, off: u32, size: u32, check: bool) -> Option<Chunk> {
     let mut h = [0u8; CHDR];
     if off.checked_add(CHDR as u32)? > size || !s.read(off, &mut h) || h[0] != b'D' || h[1] != b'C' {
         return None;
@@ -1227,7 +1227,7 @@ pub fn chunk_at<S: Src>(s: &mut S, w: &mut Win, off: u32, size: u32, check: bool
 
 /// Rows of chunk `c` to `f(t_ms, value, flags)` (gallery). False on a
 /// decode error.
-pub fn rows<S: Src>(s: &mut S, w: &mut Win, c: &Chunk, f: &mut dyn FnMut(u32, Val, u8)) -> bool {
+pub fn rows(s: &mut dyn Src, w: &mut Win, c: &Chunk, f: &mut dyn FnMut(u32, Val, u8)) -> bool {
     let mut rd = RowDec::new(c);
     for _ in 0..c.nrows {
         match rd.next(s, w) {
@@ -1888,7 +1888,7 @@ impl FChunk {
 /// The kind-3 chunk header at `off` if whole within `size` (with `check`:
 /// its CRC over the payload, then header bytes 8..28, matches).
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-pub fn fchunk_at<S: Src>(s: &mut S, w: &mut Win, off: u32, size: u32, check: bool) -> Option<FChunk> {
+pub fn fchunk_at(s: &mut dyn Src, w: &mut Win, off: u32, size: u32, check: bool) -> Option<FChunk> {
     FR[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     let mut h = [0u8; CHDR];
     if off.checked_add(CHDR as u32)? > size || !s.read(off, &mut h) || h[0] != b'D' || h[1] != b'C' {
@@ -1947,7 +1947,7 @@ impl FDec {
     }
 
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn get<S: Src>(&mut self, s: &mut S, w: &mut Win, mut bits: u32) -> Option<u32> {
+    fn get(&mut self, s: &mut dyn Src, w: &mut Win, mut bits: u32) -> Option<u32> {
         let mut v = 0u32;
         while bits > 0 {
             let b = w.byte(s, self.pos, self.end)?;
@@ -1965,7 +1965,7 @@ impl FDec {
     }
 
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn rice<S: Src>(&mut self, s: &mut S, w: &mut Win, k: u32) -> Option<u32> {
+    fn rice(&mut self, s: &mut dyn Src, w: &mut Win, k: u32) -> Option<u32> {
         let mut q = 0;
         while q < QMAX && self.get(s, w, 1)? == 1 {
             q += 1;
@@ -1978,7 +1978,7 @@ impl FDec {
 
     /// The next row: (t us, raw, us since the previous row).
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-    fn next<S: Src>(&mut self, s: &mut S, w: &mut Win) -> Option<(u64, i32, u32)> {
+    fn next(&mut self, s: &mut dyn Src, w: &mut Win) -> Option<(u64, i32, u32)> {
         if self.left == 0 {
             return None;
         }
@@ -2000,7 +2000,7 @@ impl FDec {
 
 /// Rows of kind-3 chunk `c` to `f(t_us, raw, dt_us)` (gallery). False on a
 /// decode error.
-pub fn fast_rows<S: Src>(s: &mut S, w: &mut Win, c: &FChunk, p: &FPar, f: &mut dyn FnMut(u64, i32, u32)) -> bool {
+pub fn fast_rows(s: &mut dyn Src, w: &mut Win, c: &FChunk, p: &FPar, f: &mut dyn FnMut(u64, i32, u32)) -> bool {
     let mut d = FDec::new(c, p.p_us());
     for _ in 0..c.nrows {
         match d.next(s, w) {

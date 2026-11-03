@@ -373,6 +373,9 @@ pub struct App {
     /// the readings are above the 10 A rating.
     alarm: crate::danger::Alarm,
     pub alarm_mode: u8,
+    /// Settings > Alerts "Continuity beep": Always (true, the default) or
+    /// with the volume (`ui::S_CONT`).
+    cont_always: bool,
     danger_rd: bool,
     i10_since: Option<u64>,
     /// A fuse check was running at the last tick (`fuse_tick`).
@@ -738,6 +741,7 @@ impl App {
             alert_buzz: false,
             alarm: crate::danger::Alarm::NEW,
             alarm_mode: crate::danger::LOUD,
+            cont_always: true,
             danger_rd: false,
             i10_since: None,
             fuse_busy: false,
@@ -1053,6 +1057,7 @@ impl App {
                 vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { "ON" } else { "OFF" };
                 vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" };
                 vals[ui::S_REMEMBER as usize] = if self.mode_remember { "ON" } else { "OFF" };
+                vals[ui::S_CONT as usize] = if self.cont_always { "Always" } else { "With volume" };
                 ui::settings(self.set_tab, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
@@ -1583,6 +1588,7 @@ impl App {
     /// the host. The idle dim still runs on touches and keys alone, and host
     /// activity does not undim: nobody is necessarily looking at the screen,
     /// and a dimmed backlight costs the session nothing.
+    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn note_host_activity(&mut self, now: u64) {
         self.last_host = self.last_host.max(now);
     }
@@ -1719,8 +1725,9 @@ impl App {
         }
         self.alert_beep(now);
         // The continuity / diode beeper (HY3131 CMP pin) has no loudness:
-        // off at volume 0 % (Dmm::poll applies a change).
-        crate::hy3131::set_beeper(self.volume > 0);
+        // its own level, or off at volume 0 % unless "Continuity beep" is
+        // Always (Dmm::poll applies a change).
+        crate::hy3131::set_beeper(self.volume > 0 || self.cont_always);
         if !can_draw {
             self.note_host_activity(now);
         }
@@ -2364,6 +2371,7 @@ impl App {
             | if self.dmm.ohm_neg { crate::meter::EXT_OHM_NEG } else { 0 }
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT
             | if self.mode_remember { crate::meter::EXT_MODE_REMEMBER } else { 0 }
+            | if self.cont_always { 0 } else { crate::meter::EXT_CONT_VOL }
             | ui::trend_code(self.chart_rate) << crate::meter::EXT_TREND_SHIFT
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
@@ -2421,7 +2429,8 @@ impl App {
         crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
-        crate::hy3131::set_beeper(self.volume > 0); // before the first DMM row
+        self.cont_always = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_CONT_VOL == 0;
+        crate::hy3131::set_beeper(self.volume > 0 || self.cont_always); // before the first DMM row
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
@@ -2520,6 +2529,14 @@ impl App {
             *c = *w as i32;
         }
         app_touchtest::tc_restore(tc);
+        // The probe factor: a preference (the probe stays on the jack),
+        // kept also without Mode Remember (owner 2026-11-03).
+        let pr = f32::from_bits(p[8]);
+        if scope::PROBES.contains(&pr) {
+            let mut sc = self.scope.s;
+            sc.probe = pr;
+            self.scope.apply(sc, 0);
+        }
         // The scope's acquisition, trigger, math and measurements: as the
         // multimeter, kept after a power-off with Mode Remember ON.
         if !cont {
@@ -4270,6 +4287,7 @@ impl App {
                         };
                         self.dmm.set_alert_mask(clk, j);
                     }
+                    ui::S_CONT => self.cont_always = !self.cont_always,
                     ui::S_ALARM => {
                         // Danger alarm (doc 4.10): Loud -> Volume -> Off.
                         self.alarm_mode = (self.alarm_mode + 1) % 3;
@@ -4790,6 +4808,7 @@ impl App {
     /// channels' tuning replies): region C (link-native.x), out of
     /// `scpi_dmm`'s frame.
     #[inline(never)]
+    #[cfg(feature = "dbg-dev")]
     fn dbg_gen(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
         match cmd {
@@ -5079,14 +5098,17 @@ impl App {
                 out.put_bytes(if self.meter.smoothing() == Smooth::High { b"SLOW" } else { b"FAST" });
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(Some(m)) => {
                 scope_page::set_pinch_mode(m);
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(None) => {
                 crate::put_u32(out, scope_page::pinch_mode() as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgReadout => {
                 // Emulator tests (ohmhunt, autowaittest, switchtest): what
                 // the DMM readout draws now, whatever the view.
@@ -5123,6 +5145,7 @@ impl App {
                 }
                 app_touchtest::tc_scpi(op, out)
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgView => {
                 // <view>,<settings section 1..6>,<wave view on>,<trend chart
                 // ms/div> (emulator tests: where a DBG:KEY / DBG:TAP landed;
@@ -5134,6 +5157,7 @@ impl App {
                 crate::put_u32(out, self.chart_rate as u32 * 160);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgGest => {
                 // n;target,axis,delta,ms;... oldest first.
                 crate::put_u32(out, self.gest_n as u32);
@@ -5202,10 +5226,12 @@ impl App {
                 out.put_u32(self.dmm.alert_mask() as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(Some(v)) => {
                 self.dmm.set_sent_variant(clk, v);
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(None) => {
                 out.put_u32(crate::sentinel::variant() as u32);
                 true
@@ -5228,6 +5254,7 @@ impl App {
                 out.put_u32(self.volume as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgAlarm => {
                 let a = &self.alarm;
                 for (i, v) in [a.sounding() as u32, a.silenced() as u32, a.events, self.alarm_mode as u32].into_iter().enumerate() {
@@ -5260,15 +5287,19 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(Some(ms)) => {
                 self.dmm.precond_ms = ms;
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(None) => {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             c @ (C::DbgGenLag(_) | C::DbgGenStat | C::DbgCh2Lag(_)) => self.dbg_gen(c, out),
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);
@@ -5507,11 +5538,15 @@ impl App {
                 Some(())
             }
             C::TrigSource(Some(t)) => {
-                sc.tsrc = t.min(scope::TSRC_GEN);
+                sc.tsrc = t.min(scope::TSRC_CH2);
                 None
             }
             C::TrigSource(None) => {
-                out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
+                out.put_bytes(match sc.tsrc {
+                    scope::TSRC_GEN => b"GEN",
+                    scope::TSRC_CH2 => b"CHAN2",
+                    _ => b"CHAN1",
+                });
                 Some(())
             }
             C::GenScale(Some(v)) => {
@@ -5618,6 +5653,7 @@ impl App {
             }
             // Comparator trigger (hwtrig.rs, ../docs/history/hwtrig-integration.md H8);
             // a scope command: the scope rail is on for it (calibration).
+            #[cfg(feature = "dbg-dev")]
             C::DbgHwTrig(op, on) => {
                 let hw = &mut self.scope.hw;
                 let put_i = |out: &mut crate::scpi::Scpi, v: i64| {

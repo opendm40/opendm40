@@ -46,15 +46,6 @@ impl Ch2 {
     pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, pos: 0 };
 }
 
-impl crate::pack10::Src for scope_ch2::MeasSrc<'_> {
-    fn len(&self) -> usize {
-        self.n()
-    }
-    fn at(&self, i: usize) -> u16 {
-        self.code(i)
-    }
-}
-
 /// The CH2 V/div label ("1.5V", "200mA").
 fn label(vdiv: f32, amps: bool) -> crate::scope_ui::Txt {
     let mut b = crate::scope_ui::Buf::new();
@@ -193,8 +184,14 @@ impl App {
         if !on {
             crate::scope_ui::graph().c2 = [crate::scope_ui::EMPTY; crate::scope_ui::NCOL];
         }
-        // The comparator on / off: restart the acquisition.
-        let st = self.scope.s;
+        // The comparator on / off: restart the acquisition. CH2 off with
+        // the trigger on it: the trigger goes back to CH1 (owner
+        // 2026-11-03: no source on a channel that is off).
+        let mut st = self.scope.s;
+        if !on && st.tsrc == scope::TSRC_CH2 {
+            st.tsrc = scope::TSRC_CH1;
+            self.toast(now, "Trigger source: CH1", false);
+        }
         self.scope_set(st, now);
         self.update_rails(clk);
     }
@@ -246,7 +243,7 @@ impl App {
         let st = scope_ch2::store();
         let t0 = t0.wrapping_add((off as f64 * step as f64) as u64 as u32);
         let len = f.data.len() as f32 * step as f32;
-        let Some((ia, ib)) = st.range(t0, len) else { return none };
+        let Some((ia, ib)) = st.range_run(&mut st.run(), t0, len) else { return none };
         let (src, v_0, v_k) = st.meas_src(ia, ib);
         crate::scope_meas::compute_codes(&src, st.fs(), v_0, v_k)
     }

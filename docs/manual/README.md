@@ -622,7 +622,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - The beeper sounds while the resistance is below about 67 Ω (*inferred*
   from the measuring chip's setting, the same as on the stock firmware). The
   chip switches it itself: the beep starts and stops with the contact.
-  Silent at [Key/alert volume](#alerts-tab) 0 %.
+  At [Key/alert volume](#alerts-tab) 0 % it sounds while **Continuity
+  beep** is **Always** (the default), silent with **With volume**.
 - While it sounds (also at volume 0 %) a green **SHORT** band shows above the
   reading and the digits turn green, for at least 0.15 s.
 - Top left, small: the test current, **I -0.26 mA** (the short-circuit
@@ -648,7 +649,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
-  readings only. Silent at Key/alert volume 0 %.
+  readings only. At Key/alert volume 0 % as continuity (**Continuity
+  beep**).
 - The same green band while it beeps: **SHORT** below 22 mV, **BEEP** for a
   pattern.
 
@@ -1280,8 +1282,9 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   then zoom in (magnifier +, left) and zoom out (magnifier −). A channel that
   is off is dimmed. The **CH1** title also shows the probe and coupling
   symbol when the probe is not ×1 or the coupling is AC.
-  - Tap a title: **CH1** opens the channel popup; **DMM** and **GEN** switch
-    their trace on / off; **MATH** opens the math popup.
+  - Tap a title: **CH1** opens the channel popup (tapped again with the
+    popup open, it hides CH1, as **MATH** does for math); **DMM** and **GEN**
+    switch their trace on / off; **MATH** opens the math popup.
   - Hold the **DMM** title: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Measurement row** at the bottom: up to four measurements.
 
@@ -1333,6 +1336,10 @@ in the left or right half of the graph steps), **Off**.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
     readings, not the hardware.
   - **Color** of the trace (the stock nine and cyan; MATH's the same).
+- Tap the **CH1** title again with the popup open to hide CH1: no trace and
+  no **A** marker, the block dimmed. CH1 is still recorded, so the trigger
+  on CH1, the measurements and MATH keep working. Tap the dimmed title to
+  show CH1 again (the popup opens). Kept over a restart.
 - Bandwidth: owners report flat to about 3 MHz.
 
 
@@ -1368,7 +1375,7 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 | **Edge** | Rising, Falling. |
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
-| **Source** | **CH1**, or **GEN**: the generator's own output. |
+| **Source** | **CH1**, **GEN**: the generator's own output, or **DMM**: the multimeter channel (CH2). |
 
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
@@ -1391,10 +1398,22 @@ from the generator's timers when its output crosses the trigger level, and
 places the trigger there. The level is in the generator's volts (0 to
 3 V; a square above 50 kHz switches between 0 and 3 V); a level outside
 the output's swing never triggers. It is an edge trigger (Rising / Falling);
-the trigger badge turns cyan. Useful when the circuit's response to the
+the trigger badge and the T marker take the GEN trace's colour (cyan by
+default). Useful when the circuit's response to the
 generator is on CH1 and too noisy or too small to trigger on. With the
-generator off, nothing triggers (Auto still shows frames). SCPI
+generator off, **GEN** cannot be picked (a toast says so); turned off
+later, nothing triggers (Auto still shows frames). SCPI
 `TRIGger:SOURce GENerator`.
+
+**Source DMM** triggers on the multimeter channel ([CH2 (DMM)](#display-settings)):
+the level is read on CH2's scale (the T marker against CH2's trace; the
+badge shows it in CH2's unit; the badge, the T marker and its level line
+take CH2's colour, magenta by default), and moving CH2 with
+its **2** marker moves the level with it. It is an edge trigger, searched
+in CH2's samples (at most 38.4 k samples/s), so the trigger point is as
+exact as one CH2 sample. With CH2 off, **DMM** cannot be picked (a toast
+says so); turning CH2 off puts the trigger back on CH1. SCPI
+`TRIGger:SOURce CHANnel2`.
 
 ![Runt trigger: the second level, the orange T](img/scope-trig-runt.png)
 
@@ -2397,7 +2416,8 @@ goes back to the main menu.
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. The continuity / diode beeper has one fixed loudness (the measuring chip drives it, *inferred*); **Continuity beep** says whether 0 % silences it. The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Continuity beep** | Always, With volume | Always | The continuity / diode beeper at Key/alert volume 0 %: **Always** sounds (so 0 % silences the key beeps only), **With volume** is silent. |
 | **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
 | **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
 
@@ -2962,7 +2982,7 @@ measurement as it was.
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
 | All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
-| Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
+| Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep; the scope's probe factor | Scope: the timebase, V/div, coupling, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 
