@@ -5,6 +5,82 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.12-sk1 (2026-11-03)
+
+A build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40)
+on v0.4.0: the scope's DMM channel (CH2) as a full channel, colours, the ohm
+null and fixes. Not an official opendm40 release.
+
+### New
+
+- **Scope: CH2 (DMM) in the measurements and cursors.** MF > Measure has a
+  **Source CH1 / CH2** cell: the next measurement picked is of that channel
+  (Freq, Vp-p, Vrms, ... on CH2's samples, in its unit), CH1 and CH2 cells
+  mixed in the row (CH2's in its colour). With CH2 on, **CUR Y** gives a
+  second Y2-1 at CH2's V/div
+  ([manual](docs/manual/README.md#measurements),
+  [cursors](docs/manual/README.md#cursors)).
+
+  ![CH2 measurements](docs/changelog/v0.4.12-sk1/ch2-measure.png)
+- **Scope: trigger source DMM (CH2).** MF > Trigger > Source **CH1 / GEN /
+  DMM**: an edge trigger on CH2's samples, the level on CH2's scale and unit;
+  dragging CH2 moves the level with it. The badge, the **T** marker and the
+  level line take the source's colour. SCPI `TRIGger:SOURce CHANnel2`
+  ([manual](docs/manual/README.md#trigger)).
+
+  ![Trigger on the DMM channel](docs/changelog/v0.4.12-sk1/dmm-trigger.png)
+- **Scope: CH2's vertical position:** drag its **2** marker; kept over a
+  restart.
+- **Scope: colours.** MF > Display: a **Color** for CH2 (magenta by default)
+  and for the GEN trace (cyan by default); **cyan** added to every channel's
+  colours (CH1, MATH, CH2, GEN)
+  ([manual](docs/manual/README.md#display-settings)).
+
+  ![CH2 and GEN colours](docs/changelog/v0.4.12-sk1/colours.png)
+- **Scope: hide CH1:** tap the **CH1** title again with its popup open (as
+  MATH): no trace and no **A** marker, the block dimmed; the trigger on CH1,
+  the measurements and MATH keep working. A tap on the dimmed title shows it
+  again; kept over a restart ([manual](docs/manual/README.md#the-scope-page)).
+
+  ![CH1 hidden](docs/changelog/v0.4.12-sk1/ch1-off.png)
+- **Combined view: the multimeter reading in orange**, as on the multimeter
+  page ([manual](docs/manual/README.md#combined-view)).
+
+  ![The combined view's reading](docs/changelog/v0.4.12-sk1/combined.png)
+- **Multimeter: ohm null (lead resistance)**, separate from REL: short the
+  leads, tap **Null** on the resistance range page; every reading has the
+  leads' resistance taken off (**NULL** beside the test current). Kept in the
+  settings ([manual](docs/manual/README.md#resistance)).
+
+  ![Ohm null](docs/changelog/v0.4.12-sk1/ohm-null.png)
+- **Multimeter: a double tap on the trend chart** switches the row under the
+  reading between the bargraph and the history
+  ([manual](docs/manual/README.md#the-bargraph-and-the-history-row)). The
+  6-digit readings sit a little further right.
+
+  ![Bargraph and history](docs/changelog/v0.4.12-sk1/dmm-row.png)
+- **Settings > Alerts > Continuity beep: Always / With volume.** With
+  **Always** (the default) the continuity and diode beeper sounds at Key/alert
+  volume 0 % too, so 0 % silences only the key beeps
+  ([manual](docs/manual/README.md#alerts-tab)).
+
+  ![Settings, Alerts](docs/changelog/v0.4.12-sk1/alerts.png)
+
+### Fixed
+
+- **Scope: the probe factor** (CH1 > Probe) is kept over a restart with
+  **Mode Remember** OFF too.
+- **Scope: the MF menu** no longer leaves pieces on the right panel when a
+  tab changes or the menu closes.
+- **Scope: a trigger source on a channel that is off** cannot be picked
+  (DMM with CH2 off, GEN with the generator off: a toast says so); turning
+  CH2 off puts the trigger back on CH1.
+
+### Inside
+
+- Region B (fast flash) 14.1 -> 17.6 KB free for what comes next, no change
+  in function ([region B audit #11](firmware/docs/native-boot.md#region-b-audit-11-2026-11-03-dmm-trigger2)).
+
 ## v0.4.0 (2026-11-02)
 
 ### New

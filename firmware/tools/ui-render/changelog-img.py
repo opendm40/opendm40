@@ -113,3 +113,19 @@ elif tag == 'v0.4.0':
     single('mv-div', m2('s07-mcx-2mv'), (0, 0, 480, 300))
     side('decode-log', [(now('scope-decode-log'), FULL, 'Mode Log'),
                         (now('scope-decode-log-wave'), FULL, 'A frame')])
+elif tag == 'v0.4.12-sk1':
+    FULL = (0, 0, 480, 320)
+    side('ch2-measure', [(m2('s08-ch2-measure'), FULL, 'Measure: Source CH2'),
+                         (m2('s08-ch2-cells'), FULL, 'CH1 and CH2 cells')])
+    side('dmm-trigger', [(m2('s08-ch2-trigger-tab'), FULL, 'Trigger: Source DMM'),
+                         (m2('s08-ch2-trigger'), FULL, 'Triggered on CH2')])
+    side('colours', [(m2('s08-ch2-colour-display'), FULL, 'CH2 green, GEN cyan'),
+                     (m2('s08-gen-colour-display'), FULL, 'GEN orange')])
+    side('ch1-off', [(m2('s08-ch2-colour'), FULL, 'CH1 shown'),
+                     (m2('s08-ch1-off'), FULL, 'CH1 hidden')])
+    side('ohm-null', [(m2('m07c-range-ohm-null'), FULL, 'Range page: Null'),
+                      (m2('d06b-dmm-ohm-null'), (0, 0, 480, 180), 'Reading with NULL')])
+    side('dmm-row', [(m2('d07-dmm-bar-dcv'), (0, 0, 480, 290), 'Bargraph'),
+                     (m2('d01-dmm'), (0, 0, 480, 290), 'History (double tap)')])
+    single('combined', m2('s00-replica-combined'), (0, 0, 480, 110))
+    single('alerts', m2('m01-settings-1-alerts'), (0, 0, 480, 230))
