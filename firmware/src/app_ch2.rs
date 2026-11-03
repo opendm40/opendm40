@@ -237,7 +237,7 @@ impl App {
         let st = scope_ch2::store();
         let t0 = t0.wrapping_add((off as f64 * step as f64) as u64 as u32);
         let len = f.data.len() as f32 * step as f32;
-        let Some((ia, ib)) = st.range(t0, len) else { return none };
+        let Some((ia, ib)) = st.range_run(&mut st.run(), t0, len) else { return none };
         let (src, v_0, v_k) = st.meas_src(ia, ib);
         crate::scope_meas::compute_codes(&src, st.fs(), v_0, v_k)
     }

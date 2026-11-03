@@ -153,8 +153,8 @@ impl Store {
 
     /// Sample index (fractional) at DWT time `t`; None before the oldest
     /// anchor still in the store (or no anchor yet).
-    // Not inlined: its soft-float f64 maths once (range, crossing).
-    #[inline(never)]
+    // The reference for `pos_run` (`range`, tools/ch2-test).
+    #[allow(dead_code)]
     fn index_at(&self, t: u32) -> Option<f64> {
         let n = self.nanc.min(NANCH);
         if n == 0 {
@@ -227,16 +227,15 @@ impl Store {
     /// it ends before t1: the rest is searched once it is in).
     #[inline(never)]
     pub fn crossing(&self, t0: u32, t1: u32, level: f32, rising: bool) -> (Option<u32>, u32) {
-        if self.tot == 0 || self.nanc == 0 {
-            return (None, t0);
-        }
         let oldest = self.tot.saturating_sub(CAP as u64);
-        let Some(bf) = self.index_at(t1) else { return (None, t0) };
-        let a = self.index_at(t0).map_or(oldest, |a| a.max(oldest as f64) as u64).max(oldest);
-        let b = (bf.max(0.0) as u64).min(self.tot);
+        // t0 then t1: a run's times rise (f32 from the anchors, as a frame).
+        let mut r = self.run();
+        let a = self.pos_run(&mut r, t0).map_or(oldest, |(i, f)| i + f as u32 as u64).max(oldest);
+        let Some((bi, bf)) = self.pos_run(&mut r, t1) else { return (None, t0) };
+        let b = (bi + bf as u32 as u64).min(self.tot);
         // DWT of sample j: back from t1 at the stream's period (the window
         // is at most CAP samples: f32 to well under a microsecond).
-        let at = |j: u64| t1.wrapping_sub(((bf - j as f64) as f32 * self.period) as u32);
+        let at = |j: u64| t1.wrapping_sub(((bi.wrapping_sub(j) as i32 as f32 + bf) * self.period) as u32);
         let mut prev: Option<f32> = None;
         for j in a..b {
             let v = self.si(self.codes[(j % CAP as u64) as usize]);
@@ -308,8 +307,11 @@ impl Store {
         self.range_run(r, t0, len).map(|(ia, ib)| self.min_max(ia, ib))
     }
 
-    /// The sample indices [ia, ib) of `span_run`.
-    pub fn range_run(&self, r: &mut Run, t0: u32, len: f32) -> Option<(u64, u64)> {
+    /// The anchor `base` and the fractional sample index past it at DWT
+    /// time `t0` (the search goes on from the run's last segment): None
+    /// before the oldest usable anchor (or no anchor yet).
+    #[inline(never)]
+    fn pos_run(&self, r: &mut Run, t0: u32) -> Option<(u64, f32)> {
         if self.nanc == 0 {
             return None;
         }
@@ -340,11 +342,18 @@ impl Store {
             r.k = k;
             return None;
         } else {
-            // Not rising (never in a frame): the full search.
+            // Not rising (never in a frame): the search again from the
+            // oldest usable anchor (it ends in one of the branches above).
             r.k = r.kmax;
-            return self.range(t0, len);
+            return self.pos_run(r, t0);
         };
         r.k = k;
+        Some((base, frac))
+    }
+
+    /// The sample indices [ia, ib) of `span_run`.
+    pub fn range_run(&self, r: &mut Run, t0: u32, len: f32) -> Option<(u64, u64)> {
+        let (base, frac) = self.pos_run(r, t0)?;
         // 32-bit conversions (the u64 / i64 ones are library calls): base
         // is within the store, oldest .. tot.
         let lo = -(base.saturating_sub(self.tot.saturating_sub(CAP as u64)) as u32 as f32);
