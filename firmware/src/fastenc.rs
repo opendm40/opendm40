@@ -74,17 +74,20 @@ pub trait Nor {
     }
 }
 
-/// CRC-32 (zlib) (= dlog::crc32_upd, which is `.cold`). A byte table
-/// (1 KiB, region B): a chunk's payload is checked in one pass at its close
-/// (~5 instructions per byte).
+/// CRC-32 (zlib) register update: the nibble table of dlog::crc32_upd /
+/// calbackup::crc32_upd, the same code, so lld's --icf=all keeps one copy
+/// (build.sh; region B audit #11). The 1 KiB byte table it had was ~1 KB of
+/// region B for ~2x the speed at a chunk's close (~10 instructions per
+/// byte: ~0.2 ms per 4 KiB chunk).
+#[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
 pub fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
-    const T: [u32; 256] = {
-        let mut t = [0u32; 256];
+    const T: [u32; 16] = {
+        let mut t = [0u32; 16];
         let mut i = 0;
-        while i < 256 {
+        while i < 16 {
             let mut c = i as u32;
             let mut k = 0;
-            while k < 8 {
+            while k < 4 {
                 c = (c >> 1) ^ (0xEDB8_8320 & (c & 1).wrapping_neg());
                 k += 1;
             }
@@ -94,7 +97,9 @@ pub fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
         t
     };
     for &b in d {
-        c = (c >> 8) ^ T[((c ^ b as u32) & 0xFF) as usize];
+        c ^= b as u32;
+        c = (c >> 4) ^ T[(c & 15) as usize];
+        c = (c >> 4) ^ T[(c & 15) as usize];
     }
     c
 }
