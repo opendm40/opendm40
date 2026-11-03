@@ -111,6 +111,14 @@ jobs:
             firmware/BUILD.txt
             firmware/target/native/stackdepth.txt
           if-no-files-found: error
+      # The linked ELF (symbols, debug info) for size work offline:
+      # tools/region-profile/rprof.py, llvm-nm -S. Not an install file.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.image.outputs.artifact }}-elf
+          path: firmware/target/native/thumbv7em-none-eabihf/release/opendm40
+          retention-days: 14
+          if-no-files-found: error
 
   host-tests:
     name: Host test suites
