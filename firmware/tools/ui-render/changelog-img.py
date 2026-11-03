@@ -42,7 +42,10 @@ def m2(name):
 
 
 def save(im, name):
-    q = im.quantize(colors=256, method=Image.Quantize.LIBIMAGEQUANT, dither=Image.Dither.NONE)
+    try:
+        q = im.quantize(colors=256, method=Image.Quantize.LIBIMAGEQUANT, dither=Image.Dither.NONE)
+    except ValueError:  # a PIL without libimagequant
+        q = im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     q.save(os.path.join(DST, name + '.png'), optimize=True)
     print(name)
 
@@ -125,7 +128,7 @@ elif tag == 'v0.4.12-sk1':
                      (m2('s08-ch1-off'), FULL, 'CH1 hidden')])
     side('ohm-null', [(m2('m07c-range-ohm-null'), FULL, 'Range page: Null'),
                       (m2('d06b-dmm-ohm-null'), (0, 0, 480, 180), 'Reading with NULL')])
-    side('dmm-row', [(m2('d07-dmm-bar-dcv'), (0, 0, 480, 290), 'Bargraph'),
-                     (m2('d01-dmm'), (0, 0, 480, 290), 'History (double tap)')])
+    side('dmm-row', [(m2('d07-dmm-bar-dcv'), (0, 0, 480, 276), 'Bargraph'),
+                     (m2('d01-dmm'), (0, 0, 480, 276), 'History (double tap)')])
     single('combined', m2('s00-replica-combined'), (0, 0, 480, 110))
     single('alerts', m2('m01-settings-1-alerts'), (0, 0, 480, 230))
