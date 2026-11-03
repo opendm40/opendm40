@@ -30,6 +30,12 @@ mod clock {
 #[path = "../../src/scope_ch2.rs"]
 mod scope_ch2;
 
+// The CH2 measurement view (scope_ch2 `meas_src`: a pack10::Codes over the
+// store).
+#[allow(dead_code, static_mut_refs)]
+#[path = "../../src/pack10.rs"]
+mod pack10;
+
 use scope::WaveScale;
 
 struct Rng(u64);
@@ -185,8 +191,8 @@ fn meas(r: &mut Rng) -> u64 {
         let (ia, ib) = (n.saturating_sub(4096), n);
         let (src, v_0, v_k) = st.meas_src(ia, ib);
         let (mut lo, mut hi, mut bad) = (u16::MAX, 0u16, 0);
-        for i in 0..src.n() {
-            let code = src.code(i);
+        for i in 0..src.len() {
+            let code = src.at(i);
             lo = lo.min(code);
             hi = hi.max(code);
             let want = si(raws[(ia as usize) + i]);
@@ -196,7 +202,7 @@ fn meas(r: &mut Rng) -> u64 {
             }
         }
         let ends = if flat { lo == 1 && hi == 1 && v_k == 0.0 } else { lo == 1 && hi == 1022 };
-        if bad > 0 || !ends || src.n() as u64 != ib - ia {
+        if bad > 0 || !ends || src.len() as u64 != ib - ia {
             fails += 1;
             if fails <= 10 {
                 println!("FAIL meas case {case}: n {n} flat {flat} codes {lo}..{hi} bad {bad} v_0 {v_0} v_k {v_k}");

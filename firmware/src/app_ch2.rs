@@ -46,15 +46,6 @@ impl Ch2 {
     pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, pos: 0 };
 }
 
-impl crate::pack10::Src for scope_ch2::MeasSrc<'_> {
-    fn len(&self) -> usize {
-        self.n()
-    }
-    fn at(&self, i: usize) -> u16 {
-        self.code(i)
-    }
-}
-
 /// The CH2 V/div label ("1.5V", "200mA").
 fn label(vdiv: f32, amps: bool) -> crate::scope_ui::Txt {
     let mut b = crate::scope_ui::Buf::new();
