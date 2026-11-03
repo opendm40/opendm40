@@ -238,6 +238,10 @@ SECTIONS
         /* "Leads in A?" reminder's beep / toast (once per function change;
          * the per-pass check App::leads_tick stays in B). */
         *(.text.*8opendm403app*3App12leads_remind*);
+        /* The ohm null's tap and its Resistor Settings button (the DMM
+         * range page: no AD2 stream there). */
+        *(.text.*8opendm403app*3App12ohm_null_tap*);
+        *(.text.*8opendm402ui15ohm_null_button*);
         *(.text.*8opendm403app*3App11leads_toast*);
         /* NOT persist: its crc runs on every main-loop pass (device
          * 00e088f: lat_pc in persist::crc, 9..18 us stalls). */

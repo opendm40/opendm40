@@ -2116,6 +2116,7 @@ impl App {
     /// Resistor Settings "Null": on, the reading now (the shorted leads,
     /// 0 .. dmm::OHM_NULL_MAX ohm, settled, without the null) becomes the
     /// null; on again: off. Independent of REL; kept in the settings.
+    #[inline(never)] // .cold (link-native.x): a tap on the range page
     fn ohm_null_tap(&mut self, now: u64) {
         if self.dmm.ohm_null() > 0.0 {
             self.dmm.set_ohm_null(0.0);

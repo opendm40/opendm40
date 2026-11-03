@@ -227,14 +227,16 @@ impl Store {
         if n == 0 || j < oldest || j >= self.tot {
             return None;
         }
+        // f32 within a segment (at most a few thousand samples from its
+        // anchor: ~1e-7 of the offset, under a cycle per us).
         let per = |a: (u64, u32), b: (u64, u32)| {
             let dt = b.1.wrapping_sub(a.1) as i32;
-            if b.0 > a.0 && dt > 0 { dt as f64 / (b.0 - a.0) as f64 } else { self.period as f64 }
+            if b.0 > a.0 && dt > 0 { dt as f32 / (b.0 - a.0) as u32 as f32 } else { self.period }
         };
         let (mut hi_i, mut hi_t) = self.anc_k(0);
         if j >= hi_i {
-            let p = if n >= 2 { per(self.anc_k(1), (hi_i, hi_t)) } else { self.period as f64 };
-            return Some(hi_t.wrapping_add(((j - hi_i) as f64 * p) as u32));
+            let p = if n >= 2 { per(self.anc_k(1), (hi_i, hi_t)) } else { self.period };
+            return Some(hi_t.wrapping_add(((j - hi_i) as u32 as f32 * p) as u32));
         }
         for k in 1..n {
             let (lo_i, lo_t) = self.anc_k(k);
@@ -243,7 +245,7 @@ impl Store {
             }
             if j >= lo_i {
                 let p = per((lo_i, lo_t), (hi_i, hi_t));
-                return Some(lo_t.wrapping_add(((j - lo_i) as f64 * p) as u32));
+                return Some(lo_t.wrapping_add(((j - lo_i) as u32 as f32 * p) as u32));
             }
             (hi_i, hi_t) = (lo_i, lo_t);
         }
@@ -255,6 +257,7 @@ impl Store {
     /// direction (the sample before it on the other side), and the DWT time
     /// up to which the store has been searched (the newest sample's when
     /// it ends before t1: the rest is searched once it is in).
+    #[inline(never)]
     pub fn crossing(&self, t0: u32, t1: u32, level: f32, rising: bool) -> (Option<u32>, u32) {
         if self.tot == 0 || self.nanc == 0 {
             return (None, t0);

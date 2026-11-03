@@ -1964,13 +1964,17 @@ impl Scope {
     /// flight) in [n0, n1) at CH2's crossing of `ch2_level`, and the index
     /// up to which CH2's samples have been searched (its store lags the
     /// acquisition by the stream's latency).
+    #[inline(never)] // one copy for finish and stream_poll
     fn ch2_next(&self, n0: u64, n1: u64) -> (Option<u64>, u64) {
         let Some(s0) = self.t_s0 else { return (None, n0) };
-        let s = self.t_step as f64;
-        let t = |n: u64| s0.wrapping_add((n as f64 * s) as u64 as u32);
+        // Integer maths (no soft-float f64 in region B): the sample period
+        // is a whole number of DWT cycles ((PSC+1)(ARR+1)), sample times
+        // wrap with the 32-bit counter.
+        let s = (self.t_step as u32).max(1);
+        let t = |n: u64| s0.wrapping_add((n as u32).wrapping_mul(s));
         let (t0, t1) = (t(n0), t(n1));
         let (hit, upto) = crate::scope_ch2::store().crossing(t0, t1, self.ch2_level(), self.s.rising);
-        let idx = |d: u32| n0 + ((d.wrapping_sub(t0) as i32).max(0) as f64 / s) as u64;
+        let idx = |d: u32| n0 + ((d.wrapping_sub(t0) as i32).max(0) as u32 / s) as u64;
         (hit.map(idx).filter(|&n| n < n1), idx(upto).clamp(n0, n1))
     }
 
