@@ -111,20 +111,6 @@ jobs:
             firmware/BUILD.txt
             firmware/target/native/stackdepth.txt
           if-no-files-found: error
-      # TEMPORARY (region B audit #11 measurements, not for merge): every
-      # commit of the series built on its own.
-      - name: TEMP per-commit sizes
-        run: |
-          git fetch -q --depth=30 origin dmm-trigger2
-          LB=$(echo "$(rustc --print sysroot)"/lib/rustlib/*/bin)
-          for c in d6de435 5d208c6 165b582 2e61739 5782484 5f5190f e0a6458; do
-            git worktree add -q /tmp/w_$c $c
-            if (cd /tmp/w_$c/firmware && DM40_TDIR=/tmp/t_$c DM40_OUT=/tmp/t_$c/o.bin ./build.sh > /tmp/l_$c.log 2>&1); then r=ok; else r=FAIL; fi
-            echo "XC $c $r $(grep -m1 'headroom' /tmp/l_$c.log | sed 's/.*headroom/headroom/') | $(grep -m1 'region A2 free' /tmp/l_$c.log | sed 's/ *(.*//;s/^ *//') | $(grep -m1 'region B free' /tmp/l_$c.log | sed 's/ *(.*//;s/^ *//') | $(grep -m1 'region C free' /tmp/l_$c.log | sed 's/ *(.*//;s/^ *//')"
-            [ $r = FAIL ] && grep -E 'error|assert|Error' /tmp/l_$c.log | head -8 | sed 's/^/XC   /'
-            E=/tmp/t_$c/thumbv7em-none-eabihf/release/opendm40
-            [ -f "$E" ] && "$LB/llvm-nm" -C "$E" | grep -E 'Held>::asserted|Meter>::hold_state|Meter>::rel_off|Settings>::vdiv1|Scope>::sample_rate|App>::note_host_activity|stockfont::rect$|crc32_upd|put_u32' | sed "s/^/XN $c /"
-          done
 
   host-tests:
     name: Host test suites
