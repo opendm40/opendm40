@@ -76,8 +76,14 @@ done
 # default_handler loop -> FWDGT reset, counted by DBG:BOOT? as before; no
 # panic handler and no panic formatting code (~19 KB of regions B + C). The
 # magenta bar of main.rs `panic` is not drawn in this build.
+# --icf=all (lld: identical functions folded into one copy, ~0.7 KB of
+# region B) and -machine-outliner-reruns=1 (LLVM's machine outliner a second
+# time over its own result, ~0.3 KB): region B audit #11 (2026-11-03,
+# docs/native-boot.md). No change in function; a merged copy keeps the
+# largest frame of its twins (stackdepth.py sees the one function).
+SIZE_FLAGS="-C link-arg=--icf=all -C llvm-args=-machine-outliner-reruns=1"
 RUSTC_BOOTSTRAP=1 \
-RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
+RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4 $SIZE_FLAGS$REMAP" CARGO_TARGET_DIR=$TDIR \
     cargo build --release -Zbuild-std=core "$@"
 ELF=$TDIR/thumbv7em-none-eabihf/release/opendm40
 
