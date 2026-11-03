@@ -1233,6 +1233,11 @@ pub fn top_bar(m: &Model) {
 }
 
 pub fn panel(m: &Model) {
+    // The background first: the parts paint their own rects only, and a
+    // popup (the MF box to x 413, CH1 / MATH) reaching into the panel
+    // left its pixels in the gaps between them (owner 2026-11-03: the MF
+    // menu "not always cleared").
+    lcd::fill_rect(PANEL_X as u16, 20, (480 - PANEL_X) as u16, 281, C_BAR);
     for k in 0..NPANEL {
         panel_part(m, k);
     }

@@ -2520,6 +2520,14 @@ impl App {
             *c = *w as i32;
         }
         app_touchtest::tc_restore(tc);
+        // The probe factor: a preference (the probe stays on the jack),
+        // kept also without Mode Remember (owner 2026-11-03).
+        let pr = f32::from_bits(p[8]);
+        if scope::PROBES.contains(&pr) {
+            let mut sc = self.scope.s;
+            sc.probe = pr;
+            self.scope.apply(sc, 0);
+        }
         // The scope's acquisition, trigger, math and measurements: as the
         // multimeter, kept after a power-off with Mode Remember ON.
         if !cont {

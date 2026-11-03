@@ -749,6 +749,23 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             ck.check_replica("gen/gen-colour");
             save(out, "s08-gen-colour-display");
             scope_ui::set_gen_colour(scope_ui::GEN_COLOUR_DEFAULT);
+            // The panel after a popup that reached into it (owner
+            // 2026-11-03: the MF menu "not always cleared", the panel's
+            // buttons over the menu): `panel` repaints all of it, gaps
+            // included, as the page without the popup.
+            draw(&m, scope_ui::Popup::None, &pv, true);
+            let fresh = emu().fb.clone();
+            let pops = [0u8, 1, 2, 3, 4].map(scope_ui::Popup::Mf).into_iter().chain([scope_ui::Popup::Ch1(0), scope_ui::Popup::Math(0)]);
+            for p in pops {
+                draw(&m, p, &pv, true);
+                scope_ui::panel(&m);
+                ck.cases += 1;
+                let w = host::W;
+                let bad = (20..301usize).flat_map(|y| (scope_ui::PANEL_X as usize..w).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] != fresh[y * w + x]).count();
+                if bad > 0 {
+                    ck.fail("gen/panel-after-popup", format!("{bad} panel px differ from the page without the popup after {}", match p { scope_ui::Popup::Mf(t) => t as i32, _ => -1 }));
+                }
+            }
         }
     }
 }
