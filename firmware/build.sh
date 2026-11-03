@@ -88,6 +88,30 @@ if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20480 --top 0 > $TDI
     exit 1
 fi
 head -1 $TDIR/stackdepth.txt
+# TEMPORARY (size diagnostics, not for merge): region B's largest symbols.
+if [ -z "${DM40_TDIR:-}" ]; then
+"$LLVMBIN/llvm-nm" -S -C "$ELF" | python3 -c '
+import sys
+rows = []
+for ln in sys.stdin:
+    p = ln.split(None, 3)
+    if len(p) == 4:
+        try:
+            a, n = int(p[0], 16), int(p[1], 16)
+        except ValueError:
+            continue
+        if 0x08008000 <= a < 0x08080000:
+            rows.append((n, p[3].strip()))
+rows.sort()
+print("=== SIZES region B top 80 (bytes name)")
+for n, nm in rows[-80:]:
+    print("SZ %6d %s" % (n, nm[:150]))
+print("=== SIZES matching")
+for n, nm in rows:
+    if any(k in nm for k in ("ch2", "crossing", "time_of", "index_at", "stream_poll", "finish", "trig_badge", "sp_model", "meas_src", "compute_codes", "c_ch2", "c_gen")):
+        print("SM %6d %s" % (n, nm[:150]))
+'
+fi
 
 BODY=$TDIR/opendm40.body.bin
 rm -f $TDIR/regiona2.warn $TDIR/regionb.warn $TDIR/regionc.warn
