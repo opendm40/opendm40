@@ -1332,7 +1332,7 @@ in the left or right half of the graph steps), **Off**.
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
     readings, not the hardware.
-  - **Color** of the trace.
+  - **Color** of the trace (the stock nine and cyan; MATH's the same).
 - Bandwidth: owners report flat to about 3 MHz.
 
 
@@ -1546,7 +1546,7 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 **Brightness** and **Grid** intensity; **GEN trace** on / off.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
-in cyan under CH1, on CH1's position and its own V/div (the **GEN** block's
+in cyan (**Color** beside it, a tap: the next one) under CH1, on CH1's position and its own V/div (the **GEN** block's
 magnifiers; it starts at CH1's): computed from the generator's settings and
 timers, not measured (the trace is the ideal waveform; a probe on the output
 shows the real one). It is not drawn in roll mode, zoomed out past the record, or
