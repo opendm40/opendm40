@@ -42,8 +42,10 @@ Changes per release: [CHANGELOG.md](CHANGELOG.md).
 | Power meter: P, S, Q, PF, f, Wh with DC, AC or AC+DC coupling | Alerts for wrong connections, with a loud alarm for dangerous ones |
 | ![Recording](docs/manual/img/record.png) | ![Generator](docs/manual/img/generator.png) |
 | Recording to the internal disk, read as CSV over USB | Generator, running on every page |
-| ![Protocol decoder](docs/manual/img/scope-decode.png) | ![Scope channels: CH1, DMM, generator, math](docs/manual/img/scope-channels.png) |
-| Protocol decoder: UART with Modbus RTU frames, DALI; frame log | Scope channels: CH1, the multimeter as CH2, the generator trace, math |
+| ![Protocol decoder: a Modbus RTU request](docs/manual/img/scope-decode-modbus.png) | ![Protocol decoder: the frame log](docs/manual/img/scope-decode-log.png) |
+| Protocol decoder: UART and DALI; Modbus RTU frames recognised by their CRC | The frame log: every frame of a running stream, with time and status |
+| ![Scope channels: CH1, DMM, generator, math](docs/manual/img/scope-channels.png) | ![Wave view](docs/manual/img/wave.png) |
+| Scope channels: CH1, the multimeter as CH2, the generator trace, math | Wave view: the waveform on the multimeter jacks, isolated |
 
 - **Multimeter:** all 16 stock functions; 60000-count ranges and AC+DC on
   every model; AUTO AC/DC; HOLD, AutoHold, REL, MIN/MAX/AVG, limits, trend
