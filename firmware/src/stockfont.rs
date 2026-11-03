@@ -475,8 +475,6 @@ pub struct Rect {
     pub h: i16,
 }
 
-// Not inlined (region B audit #11: 91 inlined copies of the packing, ~1.4 KB).
-#[inline(never)]
 pub const fn rect(x: i16, y: i16, w: i16, h: i16) -> Rect {
     Rect { x, y, w, h }
 }
