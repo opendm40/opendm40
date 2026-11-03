@@ -684,6 +684,8 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         // The DMM CH2 too: its block (on, 250mA) and a trace.
         m.ch2_txt = scope_ui::Txt::new("250mA");
         m.ch2_on = true;
+        // Its zero row 60 rows below the centre: the '2' marker by its trace.
+        m.ch2_pos = 60;
         m.gen_on = true;
         m.gen_txt = scope_ui::Txt::new("1V");
         draw(&m, scope_ui::Popup::None, &pv, true);

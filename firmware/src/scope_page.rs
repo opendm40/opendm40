@@ -153,6 +153,8 @@ struct Cache {
     /// (docs/scope-gen-channel.md).
     gseg: [(i16, i16); scope::COLS],
     c2seg: [(i16, i16); scope::COLS],
+    /// `Ch2::pos` the c2seg rows were made at (a drag previews the move).
+    c2pos: i16,
     valid: bool,
     pos: i32,
     hpos: i32,
@@ -172,6 +174,7 @@ static mut CACHE: Cache = Cache {
     seg: [su::EMPTY; scope::COLS],
     gseg: [su::EMPTY; scope::COLS],
     c2seg: [su::EMPTY; scope::COLS],
+    c2pos: 0,
     valid: false,
     pos: 0,
     hpos: 200,
@@ -595,6 +598,7 @@ impl App {
             tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
             ch2_on: self.ch2.on && !wave,
             ch2_txt: self.ch2_label(),
+            ch2_pos: self.ch2.pos,
             gen_on: self.scope.gen_trace,
             gen_txt: self.gen_label(),
         }
@@ -882,6 +886,7 @@ impl App {
         c.tb = s.tb;
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
+        c.c2pos = self.ch2.pos;
         // The protocol decoder's band (app_decode.rs).
         self.dec_frame(f);
         self.sp_math_frame(f);
@@ -911,7 +916,7 @@ impl App {
             // Owner 2026-11-01: both vanished while a stopped record was
             // panned.
             g.gn[j] = fy(preview_rows(c, &c.gseg, j as i32, d_pos, hpos, gky, kx, zr));
-            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, 0, hpos, 1.0, kx, 0.0));
+            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, (self.ch2.pos - c.c2pos) as i32, hpos, 1.0, kx, 0.0));
             let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
             let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
             g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
@@ -1731,6 +1736,14 @@ impl App {
                 self.sp_code(5 + 10 * i as u8);
                 return;
             }
+            su::CH2_LEVEL if self.ch2.on => {
+                // The DMM CH2 trace's position (screen only, as its V/div).
+                self.ch2.pos = (self.ch2.pos as i32 + rows).clamp(-392, 392) as i16;
+                self.sp_render();
+                self.sp_code(16);
+                self.sp_settings_changed();
+                return;
+            }
             _ => return,
         }
         self.sp_preview(st);
@@ -1819,7 +1832,7 @@ impl App {
                 self.gest_log.copy_within(1.., 0);
                 GEST_N - 1
             };
-            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15) as u8;
+            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15 | 16) as u8;
             self.gest_log[i] = (t.code, v, t.travel.clamp(-999, 999) as i16, now.saturating_sub(t.t0).min(9999) as u16);
         }
         if self.sp.frozen {
@@ -2001,6 +2014,16 @@ impl App {
                     st.trig_row -= st.pos;
                     st.runt_row -= st.pos;
                     st.pos = 0;
+                }
+                su::CH2_LEVEL if self.ch2.on => {
+                    // CH2 back on the centre line.
+                    self.ch2.pos = 0;
+                    self.sp_render();
+                    self.sp_settings_changed();
+                    self.beep(now, 60);
+                    self.sp.touch = None;
+                    self.sp.guide_until = now + GUIDE_MS;
+                    return;
                 }
                 1 => {
                     let (hi, lo) = (self.meas_res.v[12], self.meas_res.v[13]);
@@ -3030,6 +3053,8 @@ impl App {
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
+        // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
+        p[5] = self.ch2.pos as u16 as u32;
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3057,6 +3082,7 @@ impl App {
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
+        self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };
