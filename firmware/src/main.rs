@@ -2485,19 +2485,11 @@ fn rec_scpi(scpi: &mut scpi::Scpi, l: scpi::Log) -> bool {
     false
 }
 
-/// Append a u32 as decimal to a SCPI reply (exact; no f32 rounding).
-fn put_u32(scpi: &mut scpi::Scpi, mut v: u32) {
-    let mut t = [0u8; 10];
-    let mut i = t.len();
-    loop {
-        i -= 1;
-        t[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-        if v == 0 {
-            break;
-        }
-    }
-    scpi.put_bytes(&t[i..]);
+/// Append a u32 as decimal to a SCPI reply (exact; no f32 rounding):
+/// `Scpi::put_u32` (one copy; region B audit #11).
+#[inline(always)]
+fn put_u32(scpi: &mut scpi::Scpi, v: u32) {
+    scpi.put_u32(v);
 }
 
 #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
