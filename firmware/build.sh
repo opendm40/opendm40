@@ -191,15 +191,22 @@ if 'ad2_stream_irq' in syms:
             cur[2][m.group(2)] = int(m.group(3), 16)
         elif m and m.group(2) in cur[2]:
             cur[0].add(int(m.group(3), 16) << 16 | cur[2][m.group(2)])
-    seen, todo = set(), ['ad2_stream_irq']
+    seen, todo, up = set(), ['ad2_stream_irq'], {}
     while todo:
         f = todo.pop()
         if f in seen or f not in funcs:
             continue
         seen.add(f)
+        for g in funcs[f][1]:
+            up.setdefault(g, f)
         todo.extend(funcs[f][1])
     xr = [(syms['__bkp_bss_start'], 0x40024FE8), (0x40060000, 0x40061000)]
-    hits = ['%s: 0x%08x' % (f, w) for f in sorted(seen) for w in funcs[f][0] if any(a <= w < b for a, b in xr)]
+    def chain(f):  # ad2_stream_irq -> ... -> f (one call path)
+        p = [f]
+        while p[-1] in up and len(p) < 40:
+            p.append(up[p[-1]])
+        return ' <- '.join(p)
+    hits = ['%s: 0x%08x' % (chain(f), w) for f in sorted(seen) for w in funcs[f][0] if any(a <= w < b for a, b in xr)]
     assert len(seen) > 1 and not hits, 'the AD2 stream ISR reaches the extra RAM areas: %s' % hits
     print("  AD2 stream ISR   = %d functions, no extra-RAM address" % len(seen))
 PY
