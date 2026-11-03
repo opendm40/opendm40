@@ -111,18 +111,6 @@ jobs:
             firmware/BUILD.txt
             firmware/target/native/stackdepth.txt
           if-no-files-found: error
-      # TEMPORARY (size survey, not for merge): the region profile and the
-      # stripped ELF (gzip + base64) in the log.
-      - name: TEMP size survey
-        working-directory: firmware
-        run: |
-          pip install --quiet pyelftools || pip install --quiet --break-system-packages pyelftools
-          ELF=target/native/thumbv7em-none-eabihf/release/opendm40
-          LB=$(dirname "$(find ~/.rustup -name llvm-nm -path '*bin*' | head -1)")
-          export DM40_LLVMBIN=$LB
-          "$LB/llvm-objcopy" --strip-debug "$ELF" /tmp/s.elf
-          ls -l "$ELF" /tmp/s.elf
-          echo "=== INL"; timeout 1500 python3 tools/region-profile/inl.py "$ELF" --top 150 2>&1 || true
 
   host-tests:
     name: Host test suites
