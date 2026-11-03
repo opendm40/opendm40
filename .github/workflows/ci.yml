@@ -111,14 +111,20 @@ jobs:
             firmware/BUILD.txt
             firmware/target/native/stackdepth.txt
           if-no-files-found: error
-      # The linked ELF (symbols, debug info) for size work offline:
-      # tools/region-profile/rprof.py, llvm-nm -S. Not an install file.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.image.outputs.artifact }}-elf
-          path: firmware/target/native/thumbv7em-none-eabihf/release/opendm40
-          retention-days: 14
-          if-no-files-found: error
+      # TEMPORARY (size survey, not for merge): the region profile and the
+      # stripped ELF (gzip + base64) in the log.
+      - name: TEMP size survey
+        working-directory: firmware
+        run: |
+          pip install --quiet pyelftools || pip install --quiet --break-system-packages pyelftools
+          ELF=target/native/thumbv7em-none-eabihf/release/opendm40
+          LB=$(dirname "$(find ~/.rustup -name llvm-nm -path '*bin*' | head -1)")
+          export DM40_LLVMBIN=$LB
+          echo "=== RPROF B"; python3 tools/region-profile/rprof.py "$ELF" --region b --top 120 --candidates 2>&1 | sed 's/^/RPB /' || true
+          echo "=== RPROF C"; python3 tools/region-profile/rprof.py "$ELF" --region c --top 60 2>&1 | sed 's/^/RPC /' || true
+          "$LB/llvm-objcopy" --strip-debug "$ELF" /tmp/s.elf
+          ls -l "$ELF" /tmp/s.elf
+          echo "=== ELF64 BEGIN"; gzip -9c /tmp/s.elf | base64 -w 100 | sed 's/^/E64 /'; echo "=== ELF64 END"
 
   host-tests:
     name: Host test suites
