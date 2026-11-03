@@ -1332,7 +1332,7 @@ in the left or right half of the graph steps), **Off**.
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
     readings, not the hardware.
-  - **Color** of the trace.
+  - **Color** of the trace (the stock nine and cyan; MATH's the same).
 - Bandwidth: owners report flat to about 3 MHz.
 
 
@@ -1546,7 +1546,7 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 **Brightness** and **Grid** intensity; **GEN trace** on / off.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
-in cyan under CH1, on CH1's position and its own V/div (the **GEN** block's
+in cyan (**Color** beside it, a tap: the next one) under CH1, on CH1's position and its own V/div (the **GEN** block's
 magnifiers; it starts at CH1's): computed from the generator's settings and
 timers, not measured (the trace is the ideal waveform; a probe on the output
 shows the real one). It is not drawn in roll mode, zoomed out past the record, or
@@ -1556,7 +1556,9 @@ not use the trigger hardware.
 **CH2 (DMM)** draws the multimeter's input as a second channel (magenta)
 over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
 signal, alongside the scope. Its on / off and V/div (A/div) are also on the
-**DMM** block. Its zero line has a magenta **2** marker on the left: drag
+**DMM** block; **Color** beside it (a tap: the next one) sets its colour,
+magenta by default, for the trace, its marker, the block and its
+measurements. Its zero line has a **2** marker on the left: drag
 it up or down to move the trace (double tap: back to the centre); the
 position is kept in the settings. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
