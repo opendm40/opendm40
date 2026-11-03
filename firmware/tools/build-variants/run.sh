@@ -8,6 +8,7 @@
 #   acdc-meth         the AC+DC prototype methods B / C (src/acdcm.rs, ~1 100
 #                     lines no default build compiles)
 #   memprobe          DBG:PEEK? / POKE / MTEST? ... (src/memprobe.rs)
+#   no-dbg-dev        the default set without the developer DBG: commands
 # Each one is a full build.sh run (link asserts: TCM stack, SRAM, regions
 # A2 / B / C; stackdepth.py --check 20480; pack + whole 128-byte blocks) into
 # its own DM40_TDIR / DM40_OUT under target/variants/, so firmware/target/native
@@ -35,5 +36,6 @@ run fatren-dry-run --features fatren-dry-run
 run keep-screen --features keep-screen
 run acdc-meth --features acdc-meth
 run memprobe --features memprobe
+run no-dbg-dev --no-default-features --features vdisk,ad2-isr,dec-modbus,dec-dali,dec-log
 [ -f opendm40.bin ] && echo "opendm40.bin untouched: $(stat -c %y opendm40.bin)"
 if [ $fail = 0 ]; then echo PASS; else echo FAIL; exit 1; fi

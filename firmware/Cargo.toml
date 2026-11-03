@@ -20,7 +20,7 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log"]
+default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log", "dbg-dev"]
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
@@ -75,6 +75,15 @@ dbg-acdc = []
 # commands are refused (undefined header). Build with --features dbg-touch
 # for a touch session (docs/native-boot.md "SRAM audit").
 dbg-touch = []
+# The developer's DBG: commands (tests, tuning, experiments): DBG:DRAG,
+# DBG:IDLE[?], DBG:FLASH?, DBG:ISR?, DBG:FAST?, DBG:CAP[:...][?], DBG:CHG...,
+# DBG:SCANLINE..., DBG:TE?, DBG:VDISK..., DBG:PINCH, DBG:GEST?, DBG:VIEW?,
+# DBG:READout?, DBG:ALARm?, DBG:SENTinel:LOG? / VARiant / PRECond,
+# DBG:CH2:LAG, DBG:GENTRIG..., DBG:HWTRIG..., DBG:POWer:... Default; without
+# it they are undefined headers (tools/build-variants `no-dbg-dev`: the
+# region B / C it frees). DBG:PING, BOOT?, LCD?, TAP, SWIPE, KEY, UPLoad,
+# UPDATE, LOADER, RESET, TOUCH:CAL / TEST stay in every build.
+dbg-dev = []
 # DBG:PROF? / DBG:PROF:RESET, the main-loop profiler (src/prof.rs; 1 KB of
 # RAM and its hooks in every pass). Off by default: the hooks are empty and
 # the two commands are refused (undefined header).

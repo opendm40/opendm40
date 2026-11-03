@@ -754,6 +754,9 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             draw(&mt, scope_ui::Popup::None, &pvt, true);
             ck.check_replica("gen/ch2-trigger");
             save(out, "s08-ch2-trigger");
+            // The Trigger tab with Source DMM (its note: the CH2 scale).
+            draw(&mt, scope_ui::Popup::Mf(2), &pvt, true);
+            save(out, "s08-ch2-trigger-tab");
             let w = host::W;
             let count = |x0: usize, x1: usize, y0: usize, y1: usize, c: u16| (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
             let (g, rx) = (scope_ui::c_ch2(), (scope_ui::GR - 12) as usize);
