@@ -153,6 +153,8 @@ impl Store {
 
     /// Sample index (fractional) at DWT time `t`; None before the oldest
     /// anchor still in the store (or no anchor yet).
+    // Not inlined: its soft-float f64 maths once (range, crossing).
+    #[inline(never)]
     fn index_at(&self, t: u32) -> Option<f64> {
         let n = self.nanc.min(NANCH);
         if n == 0 {
@@ -221,6 +223,7 @@ impl Store {
     /// DWT time of stored sample `j` (its anchor segment, linear between
     /// anchors; after the newest anchor its segment's slope): None outside
     /// the store.
+    #[inline(never)]
     fn time_of(&self, j: u64) -> Option<u32> {
         let n = self.nanc.min(NANCH);
         let oldest = self.tot.saturating_sub(CAP as u64);
