@@ -9,12 +9,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
-- **Capacitance: large capacitors (about 50–600 µF) with a laptop charger on
-  the USB cable.** The range no longer goes back and forth with
-  "Discharging..." between readings. After two such round trips the meter
-  stays on the large ranges, and the aux row shows "Unstable: unplug USB?"
-  until a value comes. A step between the 600 µF, 6 mF and 60 mF ranges no
-  longer discharges the capacitor again.
+- **Capacitance with a laptop charger on the USB cable:** mains ripple no
+  longer sends a large capacitor (about 50–600 µF) back and forth between
+  ranges with "Discharging..." and a wrong value. Moderate ripple now
+  measures. When the ripple is too strong to measure, the meter shows
+  dashes and "Unstable: unplug USB?". Not checked on the device.
 
 ## v0.4.0 (2026-11-02)
 

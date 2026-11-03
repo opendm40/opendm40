@@ -1532,6 +1532,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 else if(scmpi == 0) SignalEdgesDc(dc, ac, out f, out duty, CmpHighThreshold, CmpLowThreshold);
                 break;
             }
+            case Role.CapRamp:
+            {
+                // Only with capnoise (opt-in; the ramp's turns are not counted otherwise): the
+                // ramp's own turns, or the ripple's when it spans the comparator window (CHOSEN).
+                if(CapNoise <= 0 || CapNoiseHz <= 0) break;
+                var vh = CmpHighThreshold; var vl = CmpLowThreshold;
+                var w = Math.Abs(vh - vl) * CapCmpW;
+                var cr = Fe.CapRampC(CapK[roleRange] * 1e-6, Math.Max(vh, vl));
+                var fn = cr > 0 && w > 0 ? CalGain(0x170 + 4 * roleRange) * CapK[roleRange] / (cr * 1e6) / (2 * w) : 0;
+                f = CapNoise > 0.5 * w ? Math.Max(fn, CapNoiseHz) : fn;
+                duty = 0.5;
+                break;
+            }
             case Role.AcV: case Role.AcMv: case Role.Freq: case Role.DcV: case Role.DcMv: case Role.AcA: case Role.DcA:
                 // HfNoCnt: the AC mV row's counter does not see a jack above HfBwHz
                 if(HfNoCnt && role == Role.AcMv && HfBwHz > 0 && sigHz > HfBwHz) break;

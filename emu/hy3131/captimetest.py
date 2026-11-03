@@ -6,7 +6,8 @@ time (fw uptime, from CONF:CAP) to the first grey value (kind G with a number), 
 final (kind F), the final value, and the ranges passed. The checks: the last LAST finals' value
 (a number within TOL, `small`: below 0.2 nF, `olsmall`: OL or below 0.2 nF), the first final
 within `fmax` s (virtual time; PR #90 lists the times), and no final OL before the last range
-(an over-range on the way up is dashes).
+(an over-range on the way up is dashes). `noise` (mains ripple wider than the comparator window):
+no value, no step back to the oscillator after the first ramp range, a noise hold (DBG:CAP? 26).
 
   emu/hy3131/captimetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 47760
 """
@@ -56,7 +57,10 @@ SCEN = [
     ('470uF', 'c:470e-6;capda:0;capnoise:0', 14, 470e-6, 9),
     ('470uF-50Hz', 'c:470e-6;capda:0;capnoise:0.02;capnoisehz:50', 20, 470e-6, 12),
     ('470uF-60Hz', 'c:470e-6;capda:0;capnoise:0.02;capnoisehz:60', 20, 470e-6, 12),
-    ('470uF-50Hz-big', 'c:470e-6;capda:0;capnoise:0.1;capnoisehz:50', 20, 470e-6, 12),
+    ('470uF-50Hz-40mV', 'c:470e-6;capda:0;capnoise:0.04;capnoisehz:50', 20, 470e-6, 12),
+    # Ripple wider than the comparator window (0.1 V): no measurement; dashes and the hint, no
+    # hunting through the oscillator (v0.4.0: r4 r6 r5 r4 r6 r5 .. with "Discharging...").
+    ('470uF-50Hz-big', 'c:470e-6;capda:0;capnoise:0.1;capnoisehz:50', 20, 'noise', 0),
     ('open', 'open;capnoise:0', 8, 'small', 1),
     # Open leads entered from a 1 mF value's range (AUTO starts on 6 mF: discharge, ramp).
     ('open-1mF', 'open', 10, 'small', 8, ('c:1000e-6', 9)),
@@ -166,9 +170,12 @@ try:
             if not ranges or ranges[-1] != r:
                 ranges.append(r)
             ph = cap[2] if len(cap) > 2 else '?'
-            if A.verbose and (kind, ro[2], r, ph) != last:
-                print('       %s %6.2f r%d %s %s ph%s' % (name, s, r, kind, ro[2], ph[:5]), flush=True)
-            last = (kind, ro[2], r, ph)
+            if A.verbose and (kind, ro[2], r, ph, cap[22:27]) != last:
+                # V mV, dV mV, idle polls, step-down causes / holds (DBG:CAP? 5, 6, 14, 22..26)
+                ex = ' '.join('%g' % num(x) for x in cap[22:27])
+                print('       %s %6.2f r%d %s %s ph%s v%.1f dv%.2f idle%g ex[%s]' % (
+                    name, s, r, kind, ro[2], ph[:5], num(cap[5]), num(cap[6]), num(cap[14]), ex), flush=True)
+            last = (kind, ro[2], r, ph, cap[22:27])
             if kind == 'G' and t_g is None and not math.isnan(v):
                 t_g = s
             if kind == 'F':
@@ -180,11 +187,23 @@ try:
             time.sleep(0.1)
         why = []
         tail = finals[-LAST:]
-        if len(tail) < LAST:
+        if want == 'noise':
+            # Ripple too wide to measure: no value at all, no return to the oscillator after the
+            # first ramp range, and a noise hold (DBG:CAP? 26) with its hint.
+            k5 = next((i for i, x in enumerate(ranges) if x >= 5), len(ranges))
+            if finals:
+                why.append('%d finals' % len(finals))
+            if t_g is not None:
+                why.append('grey value at %.2f s' % t_g)
+            if any(x < 5 for x in ranges[k5:]):
+                why.append('back to the oscillator')
+            if not (len(cap) > 26 and num(cap[26]) > 0):
+                why.append('no hold')
+        elif len(tail) < LAST:
             why.append('%d finals' % len(finals))
         elif any(not value_ok(v, want) for _, _, v in tail):
             why.append('finals %s (want %s)' % (' '.join('%g' % v for _, _, v in tail), want))
-        if t_f is None or t_f > fmax:
+        if want != 'noise' and (t_f is None or t_f > fmax):
             why.append('first final at %s s (want <= %g)' % ('-' if t_f is None else '%.2f' % t_f, fmax))
         if tail and want not in ('olsmall',):
             rl = tail[-1][1]

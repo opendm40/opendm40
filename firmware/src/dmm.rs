@@ -274,19 +274,21 @@ const CAP_SEG_DU: f32 = 0.05;
 /// Ramp ranges: a comparator frequency (kHz) over this is a half ramp of
 /// under ~6 samples (device, class 2: 1 mF on 6 mF 0.5 Hz, 5 uF 50 Hz).
 const CAP_FAST_KHZ: f32 = 0.0015;
-/// The poll's rules run every this many AD1 samples (50 ms each): 300 ms,
-/// 15 cycles of 50 Hz and 18 of 60 Hz, so mains ripple on the node cancels
+/// The poll's rules run every this many AD1 samples (50 ms each): 200 ms,
+/// 10 cycles of 50 Hz and 12 of 60 Hz, so mains ripple on the node cancels
 /// in a poll's dV (was >= 230 ms of wall time, 12.75 cycles of 50 Hz: a
 /// user's 470 uF on 600 uF hunted with a laptop charger on the USB host,
-/// 2026-11-02; the ripple's size there is unknown).
-const CAP_POLL_N: u8 = 6;
+/// 2026-11-02; the ripple's size there is unknown). 300 ms (6 samples)
+/// held 100 uF's first final from 3.3 to 8.9 s (emulator: fewer polls per
+/// half ramp, no direction pair).
+const CAP_POLL_N: u8 = 4;
 /// Ramp ranges: comparator periods counted before CAP_FAST_KHZ steps down
 /// (was 3: on 600 uF, one turn per ~4 s for 470 uF, a few counts of
 /// noise were enough, INFERRED).
 const CAP_FAST_N: u32 = 6;
 /// 600 uF: polls under CAP_R5_DOWN in a row before the step down to the
-/// oscillator (~2 s; the other ramp ranges CAP_EARLY_N).
-const CAP_R5_UNDER_N: u8 = 7;
+/// oscillator (2 s; the other ramp ranges CAP_EARLY_N).
+const CAP_R5_UNDER_N: u8 = 10;
 /// Hunting: a return from an oscillator range (r < 5) to a ramp range
 /// within CAP_HUNT_MS of the last step down from a ramp range, with no
 /// value in between, counts; the CAP_HUNT_N-th holds the ramp ranges (no
@@ -301,6 +303,14 @@ const CAP_HOLD_MS: u64 = 30_000;
 /// 19b6e3b7), a charge is volts (was CAP_SHORT_MV: 470 uF on 600 uF went
 /// to 6 mF and discharged again from inside its window).
 const CAP_STEP_MV: f32 = 150.0;
+/// Noise, not a capacitor: the comparator counter over CAP_FAST_KHZ on a
+/// ramp range, and on the next range down (a tenth of the current) still
+/// over this share of the rate there. A capacitor's rate falls with the
+/// current; mains ripple wider than the comparator window turns the
+/// comparator at its own rate on every range (emulator capnoise 0.1 V:
+/// 470 uF hunted r1 r4 r6 r7 r6 r7 r6 r1 .. and read 55 uF, or "OL" on
+/// 60 mF). The ramp ranges then show dashes and the hint for CAP_HOLD_MS.
+const CAP_NOISE_SAME: f32 = 0.5;
 /// The discharge's line fit is final from CAP_DIS_FIN_MS on, once it moved
 /// less than CAP_DIS_FIN_AGREE in CAP_DIS_FIN_STEP_MS (device, ~1 mF from
 /// 3 V: 1069 uF at 0.4 s, 1031 .. 1020 from 0.6 s).
@@ -1933,6 +1943,11 @@ pub struct Dmm {
     /// counter's CAP_FAST, the slope under the range, the value under it,
     /// no ramp / open), and the holds (wrapping counts).
     cap_exits: [u8; 5],
+    /// The last CAP_FAST step: its range and rate (kHz) (`CAP_NOISE_SAME`).
+    cap_fast_r: i8,
+    cap_fast_f: f32,
+    /// Noise found (`CAP_NOISE_SAME`): dashes and the hint while held.
+    cap_noise: bool,
     /// The discharge's first sample in the slope window (mV, 0 = none) and
     /// its time (ms).
     cap_dis_pv: f32,
@@ -2663,6 +2678,9 @@ impl Dmm {
             cap_hunt: 0,
             cap_hold_t: 0,
             cap_exits: [0; 5],
+            cap_fast_r: -1,
+            cap_fast_f: 0.0,
+            cap_noise: false,
             cap_dis_pv: 0.0,
             cap_dis_pt: 0,
             cap_dis_c: 0.0,
@@ -3841,6 +3859,8 @@ impl Dmm {
         self.cap_down_t = 0;
         self.cap_hunt = 0;
         self.cap_hold_t = 0;
+        self.cap_fast_r = -1;
+        self.cap_noise = false;
         // No grey value or discharge estimate from an earlier visit.
         self.cap_grey = 0.0;
         self.cap_dis_c = 0.0;
@@ -6970,7 +6990,7 @@ impl Dmm {
     fn poll_cap(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
         let mut rd = self.poll_cap_in(clk, now)?;
         // Held after hunting, no value yet: the hint line (ui.rs).
-        if self.range >= 5 && self.ramp.first && rd.aux2.is_none() && self.cap_held(now) {
+        if self.range >= 5 && (self.ramp.first || self.cap_noise) && rd.aux2.is_none() && self.cap_held(now) {
             rd.aux2 = Some(Val::new(0.0, 0, CAP_NOISE_UNIT));
         }
         if !rd.prov {
@@ -7262,8 +7282,32 @@ impl Dmm {
         // into 1.2 .. 5.4 mF, on 600 uF 7 times a second into 190 .. 240
         // uF; device bc205357): the row below, in AUTO as the range, on a
         // manual range for the value only (shown in that range's units).
+        if self.cap_noise {
+            if self.cap_held(now) && v_mv.abs() < CAP_DIS_HI_MV {
+                // Noise (`CAP_NOISE_SAME`): no value, no range step; open
+                // leads (the AD1 clamp) still go to 60 nF.
+                self.deadline = now + CAP_SEG_MS;
+                return Some(self.cap_dash());
+            }
+            // The hold over (or open leads): from 600 uF again.
+            self.cap_noise = false;
+            self.cap_hold_t = 0;
+            self.cap_set_range(clk, if v_mv.abs() < CAP_DIS_HI_MV { 5 } else { CAP_R_MIN });
+            return Some(self.cap_dash());
+        }
         let (cf, cn) = self.cap_ctr();
+        if cn >= CAP_FAST_N && cf > CAP_FAST_KHZ && self.cap_fast_r == r as i8 + 1 && cf > CAP_NOISE_SAME * self.cap_fast_f {
+            // The same rate a range up, at ten times the current: noise.
+            self.cap_fast_r = -1;
+            self.cap_noise = true;
+            self.cap_hold_t = now + CAP_HOLD_MS;
+            self.cap_exits[4] = self.cap_exits[4].wrapping_add(1);
+            self.deadline = now + CAP_SEG_MS;
+            return Some(self.cap_dash());
+        }
         if cn >= CAP_FAST_N && cf > CAP_FAST_KHZ && (r > 5 || self.cap_down_ok(now, 0)) {
+            self.cap_fast_r = r as i8;
+            self.cap_fast_f = cf;
             if self.manual && self.cap_disp.is_none() {
                 self.cap_disp = Some(self.range);
             }
