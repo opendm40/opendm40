@@ -754,9 +754,6 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             draw(&mt, scope_ui::Popup::None, &pvt, true);
             ck.check_replica("gen/ch2-trigger");
             save(out, "s08-ch2-trigger");
-            // The Trigger tab with Source DMM (its note: the CH2 scale).
-            draw(&mt, scope_ui::Popup::Mf(2), &pvt, true);
-            save(out, "s08-ch2-trigger-tab");
             let w = host::W;
             let count = |x0: usize, x1: usize, y0: usize, y1: usize, c: u16| (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
             let (g, rx) = (scope_ui::c_ch2(), (scope_ui::GR - 12) as usize);
@@ -767,6 +764,9 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             if !(badge > 20 && mark > 20 && line > 40) {
                 ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px"));
             }
+            // The Trigger tab with Source DMM (its note: the CH2 scale).
+            draw(&mt, scope_ui::Popup::Mf(2), &pvt, true);
+            save(out, "s08-ch2-trigger-tab");
             // CH1 hidden (owner 2026-11-03): no CH1 trace or 'A' marker,
             // the CH1 block dimmed; CH2, GEN and the trigger stay.
             let tc = m.trace_colour();
