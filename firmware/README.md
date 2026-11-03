@@ -222,6 +222,10 @@ stable; after that an incompatible change bumps MAJOR. Pre-release suffixes
 3. Commit both files, push the branch, wait for CI.
 4. Tag and push the tag: `git tag -a v0.1.0-pre2 -m "opendm40 v0.1.0-pre2"`,
    `git push origin v0.1.0-pre2`.
+   Without the right to push tags (a session that pushes branches only):
+   push the commit to a `publish/<anything>` branch instead; the workflow
+   below then makes the tag `v<version>` with the release (it fails if that
+   tag exists).
 
 The tag starts [`.github/workflows/release.yml`](../.github/workflows/release.yml):
 the CI jobs, then a check that the tag is `v` + [`tools/fw-version.sh`](tools/fw-version.sh)

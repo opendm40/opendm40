@@ -1,10 +1,14 @@
 # A pushed v* tag -> CI jobs, then the GitHub release with the image and
-# SHA256SUMS (firmware/README.md "Releasing").
+# SHA256SUMS (firmware/README.md "Releasing"). A push to a publish/** branch
+# does the same for the commit pushed: the tag is v<Cargo.toml version>,
+# made by the release itself (for a session that may push branches but not
+# tags or releases).
 name: Release
 
 on:
   push:
     tags: ['v*']
+    branches: ['publish/**']
 
 permissions:
   contents: read
@@ -23,12 +27,19 @@ jobs:
     permissions:
       contents: write
     env:
-      TAG: ${{ github.ref_name }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: The tag (pushed, or v<version> for a publish/** branch)
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then t=$GITHUB_REF_NAME; else t=v$(DM40_VERSION_SUFFIX= firmware/tools/fw-version.sh); fi
+          echo "TAG=$t" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" != tag ] && git rev-parse -q --verify "refs/tags/$t" >/dev/null; then
+            echo "release: tag $t exists already" >&2
+            exit 1
+          fi
       - name: Tag matches Cargo.toml
         run: firmware/tools/version-check.sh --tag "$TAG"
       - uses: dtolnay/rust-toolchain@master
@@ -51,13 +62,15 @@ jobs:
         run: |
           prev=$(git describe --tags --match 'v*' --abbrev=0 "$TAG^" 2>/dev/null || true)
           gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-              -f tag_name="$TAG" ${prev:+-f previous_tag_name="$prev"} --jq .body > auto-notes.md
+              -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" ${prev:+-f previous_tag_name="$prev"} --jq .body > auto-notes.md || : > auto-notes.md
           firmware/tools/release-notes.sh "$TAG" "$(git rev-parse HEAD)" auto-notes.md > notes.md
           cat notes.md
       - name: Create the release
         run: |
           pre=
           case $TAG in *-pre*|*-rc*) pre=--prerelease ;; esac
-          gh release create "$TAG" --verify-tag $pre \
+          # A publish/** branch: the release makes the tag at this commit.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then at=--verify-tag; else at="--target $GITHUB_SHA"; fi
+          gh release create "$TAG" $at $pre \
               --title "opendm40 $TAG" --notes-file notes.md \
               "firmware/dm40_opendm40_$TAG.bin" firmware/SHA256SUMS

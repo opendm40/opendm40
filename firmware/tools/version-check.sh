@@ -21,8 +21,14 @@ if [ "$1" = --tag ]; then
     exit 0
 fi
 TAG=$(git describe --tags --match 'v*' --abbrev=0 HEAD 2>/dev/null) || {
-    echo "version-check: no v* tag reachable from HEAD (a shallow clone? CI needs fetch-depth: 0)" >&2
-    exit 1
+    # A fork without the upstream tags (or a shallow clone: CI fetches the
+    # whole history, fetch-depth 0): nothing released to compare with.
+    if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+        echo "version-check: no v* tag reachable from HEAD in a shallow clone (CI needs fetch-depth: 0)" >&2
+        exit 1
+    fi
+    echo "version-check: ok, no v* tag reachable from HEAD (version $VER)"
+    exit 0
 }
 # What goes into the image (build.sh): sources, manifest + lock, linker
 # script, build script, cargo config, vendored crates.
