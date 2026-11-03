@@ -120,21 +120,9 @@ jobs:
           ELF=target/native/thumbv7em-none-eabihf/release/opendm40
           LB=$(dirname "$(find ~/.rustup -name llvm-nm -path '*bin*' | head -1)")
           export DM40_LLVMBIN=$LB
-          echo "=== RPROF B"; python3 tools/region-profile/rprof.py "$ELF" --region b --top 120 --candidates 2>&1 | sed 's/^/RPB /' || true
-          echo "=== RPROF C"; python3 tools/region-profile/rprof.py "$ELF" --region c --top 60 2>&1 | sed 's/^/RPC /' || true
           "$LB/llvm-objcopy" --strip-debug "$ELF" /tmp/s.elf
           ls -l "$ELF" /tmp/s.elf
-          echo "=== ELF64 BEGIN"; gzip -9c /tmp/s.elf | base64 -w 100 | sed 's/^/E64 /'; echo "=== ELF64 END"
-          # Size experiments: the same build with extra flags (each its own dir).
-          x() { n=$1; shift; sed "s|-C target-cpu=cortex-m4\$REMAP|-C target-cpu=cortex-m4 $* \$REMAP|" build.sh > /tmp/build_$n.sh; chmod +x /tmp/build_$n.sh; cp /tmp/build_$n.sh ./build_x.sh
-            if DM40_TDIR=target/x_$n DM40_OUT=target/x_$n/o.bin ./build_x.sh > /tmp/x_$n.log 2>&1; then r=ok; else r=FAIL; fi
-            echo "XP $n $r $(grep -m1 '^stack:' /tmp/x_$n.log) | $(grep -m1 'region A2 free' /tmp/x_$n.log | sed 's/ *(.*//') | $(grep -m1 'region B free' /tmp/x_$n.log | sed 's/ *(.*//') | $(grep -m1 'region C free' /tmp/x_$n.log | sed 's/ *(.*//')"
-            [ $r = FAIL ] && grep -E 'error|assert' /tmp/x_$n.log | head -5 | sed 's/^/XP   /'; rm -f build_x.sh; }
-          x base
-          x icf -C link-arg=--icf=all
-          x rerun1 -C llvm-args=-machine-outliner-reruns=1
-          x rerun3 -C llvm-args=-machine-outliner-reruns=3
-          x icf_rerun3 -C link-arg=--icf=all -C llvm-args=-machine-outliner-reruns=3
+          echo "=== INL"; timeout 1500 python3 tools/region-profile/inl.py "$ELF" --top 150 2>&1 || true
 
   host-tests:
     name: Host test suites
