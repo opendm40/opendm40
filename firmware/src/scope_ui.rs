@@ -958,12 +958,17 @@ pub fn trig_badge(m: &Model) {
     }
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
     let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
-    let c = match m.tsrc {
+    let c = trig_colour(m);
+    badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, c), (&t, c)]);
+}
+
+/// The trigger source's colour: the badge, the T marker and its level line.
+fn trig_colour(m: &Model) -> Color {
+    match m.tsrc {
         crate::scope::TSRC_GEN => c_gen(),
         crate::scope::TSRC_CH2 => c_ch2(),
         _ => m.pal_text(),
-    };
-    badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, c), (&t, c)]);
+    }
 }
 
 /// The battery's shift to the right (px) while both the Bluetooth rune and
@@ -1429,7 +1434,7 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let mut n = 0;
     out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
     n += 1;
-    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
+    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, trig_colour(m)));
     n += 1;
     if m.math_on {
         out[n] = (2, level(off_row(m.math_off), FAM_M, m.sel_v == 2, m.math_pal()));
@@ -1846,7 +1851,7 @@ impl Deco {
             }
             match m.sel_v {
                 0 => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
-                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: ctr }),
+                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: if m.tsrc == crate::scope::TSRC_CH1 { ctr } else { trig_colour(m) } }),
                 2 if m.math_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.math_off as i32), solid: true, col: d.math }),
                 5 => {
                     if let Some(r) = m.runt_row {

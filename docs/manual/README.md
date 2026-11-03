@@ -1391,14 +1391,16 @@ from the generator's timers when its output crosses the trigger level, and
 places the trigger there. The level is in the generator's volts (0 to
 3 V; a square above 50 kHz switches between 0 and 3 V); a level outside
 the output's swing never triggers. It is an edge trigger (Rising / Falling);
-the trigger badge turns cyan. Useful when the circuit's response to the
+the trigger badge and the T marker take the GEN trace's colour (cyan by
+default). Useful when the circuit's response to the
 generator is on CH1 and too noisy or too small to trigger on. With the
 generator off, nothing triggers (Auto still shows frames). SCPI
 `TRIGger:SOURce GENerator`.
 
 **Source DMM** triggers on the multimeter channel ([CH2 (DMM)](#display-settings)):
-the level is read on CH2's scale (the T marker against the magenta trace;
-the badge shows it in CH2's unit and turns magenta), and moving CH2 with
+the level is read on CH2's scale (the T marker against CH2's trace; the
+badge shows it in CH2's unit; the badge, the T marker and its level line
+take CH2's colour, magenta by default), and moving CH2 with
 its **2** marker moves the level with it. It is an edge trigger, searched
 in CH2's samples (at most 38.4 k samples/s), so the trigger point is as
 exact as one CH2 sample. With CH2 off, nothing triggers (Auto still shows

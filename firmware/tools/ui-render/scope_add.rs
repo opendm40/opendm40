@@ -742,6 +742,28 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             save(out, "s08-ch2-colour");
             draw(&m, scope_ui::Popup::Mf(1), &pv2, true);
             save(out, "s08-ch2-colour-display");
+            // Trigger on CH2 (DMM): the T marker, the badge and the level's
+            // guide line in CH2's colour (owner 2026-11-03), CH2 in green.
+            let mut mt = m;
+            mt.tsrc = scope::TSRC_CH2;
+            mt.trig_row = 90;
+            mt.sel_v = 1;
+            mt.guide = true;
+            let mut pvt = pv2;
+            pvt.tsrc = scope::TSRC_CH2;
+            draw(&mt, scope_ui::Popup::None, &pvt, true);
+            ck.check_replica("gen/ch2-trigger");
+            save(out, "s08-ch2-trigger");
+            let w = host::W;
+            let count = |x0: usize, x1: usize, y0: usize, y1: usize, c: u16| (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
+            let (g, rx) = (scope_ui::c_ch2(), (scope_ui::GR - 12) as usize);
+            let top = mt.top() as usize;
+            let fy = top + scope_ui::line_fy(h, 90) as usize;
+            let (badge, mark, line) = (count(352, 414, 1, 18, g), count(rx, rx + 12, top, top + h as usize, g), count(20, 300, fy, fy + 1, g));
+            println!("CH2 trigger in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px");
+            if !(badge > 20 && mark > 20 && line > 40) {
+                ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px"));
+            }
             scope_ui::set_ch2_colour(0);
             // GEN in orange (MF > Display "Color" of the GEN trace).
             scope_ui::set_gen_colour(1);
