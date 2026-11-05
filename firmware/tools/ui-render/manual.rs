@@ -344,8 +344,8 @@ pub fn run(out: &str) -> usize {
         ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.2, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.21, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
-        // Continuity: a short, the beeper indicator on.
-        ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
+        // Continuity: below the threshold, the beeper indicator on.
+        ("dmm-cont", Dp { rate: false, short: 2, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.

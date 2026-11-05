@@ -615,8 +615,10 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   from the measuring chip's setting, the same as on the stock firmware). The
   chip switches it itself: the beep starts and stops with the contact.
   Silent at [Key/alert volume](#alerts-tab) 0 %.
-- While it sounds (also at volume 0 %) a green **SHORT** band shows above the
+- While it sounds (also at volume 0 %) a green **BEEP** band shows above the
   reading and the digits turn green, for at least 0.15 s.
+- For low resistances such as CPU / GPU power phases use
+  [Ω](#resistance): no beep and no band.
 - Top left, small: the test current, **I -0.26 mA** (the short-circuit
   current; negative: it flows the other way than in the diode test).
 - How fast it reacts and how short a contact is still heard are untested
@@ -627,9 +629,9 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   shows [**LIVE?**](#the-alerts).
 
 
-![Continuity: a short](img/dmm-cont.png)
+![Continuity: the beeper sounds](img/dmm-cont.png)
 
-*Continuity: a short, the beeper sounds.*
+*Continuity: below the threshold, the beeper sounds.*
 
 #### Diode
 

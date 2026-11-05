@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- Continuity: the green band says **BEEP**, not **SHORT**: it comes on below about 67 Ω, which is not always a short. Ω has no beep and no band.
+
 ## v0.4.0 (2026-11-02)
 
 ### New

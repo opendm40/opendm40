@@ -338,7 +338,7 @@ pub struct DmmView {
     acc_k: Option<(u32, u8, &'static str)>,
     acc_drawn: bool,
     /// The beeper indicator to show (set by the app, `App::beep_ind`): 0
-    /// none, 1 SHORT (continuity, a diode-mode short), 2 BEEP (a diode
+    /// none, 1 SHORT (a diode-mode short), 2 BEEP (continuity, a diode
     /// pattern); and the band as drawn (`short_sync`).
     pub short: u8,
     short_drawn: u8,

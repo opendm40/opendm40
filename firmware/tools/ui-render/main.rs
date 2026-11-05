@@ -3910,7 +3910,7 @@ fn main() {
         for style in 1..=3u8 {
             ui::set_short_style(style);
             for (name, r, b) in &short_cases {
-                let k = if *name == "diode-pn" { 2 } else { 1 };
+                let k = if *name == "diode" { 1 } else { 2 };
                 for bar in [true, false] {
                     for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
                         page(r, *b, k, bar, lim);
