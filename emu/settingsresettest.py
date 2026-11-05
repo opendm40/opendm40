@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Settings > Other > Reset settings (firmware/src/app.rs, persist::reset_record).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/settingsresettest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 One emulator run, driven like a user (DBG:KEY / DBG:TAP): settings changed over
