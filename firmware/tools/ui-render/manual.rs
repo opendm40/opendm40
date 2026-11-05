@@ -347,7 +347,7 @@ pub fn run(out: &str) -> usize {
         // Continuity: a short, the beeper indicator on.
         ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.
-        ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
+        ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, Some(val(767.7, 1, "\u{3a9}")), false)) }),
         // Capacitance: 100 nF.
         ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.7, 1, "nF"), None, None, false)) }),
         // Frequency: 1 kHz, 50 %, with the small digit (`freq_ext`).

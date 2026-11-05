@@ -642,8 +642,9 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
   readings only. Silent at Key/alert volume 0 %.
+- Top right: the resistance **V / 0.765 mA**; **0L** above about 0.8 V.
 - The same green band while it beeps: **SHORT** below 22 mV, **BEEP** for a
-  pattern.
+  pattern, left of the resistance.
 
 
 ![A silicon diode](img/dmm-diode.png)

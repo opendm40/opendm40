@@ -21,6 +21,8 @@ section named after the tag as the release notes; how to cut a release:
 - **Scope:** the trigger badge takes the new source's colour at once.
 - Function buttons: V and A show the remembered AC / DC / AC+DC / AUTO; continuity / diode and Hz / °C put the remembered sub-mode first.
 
+- Diode: the resistance stays on screen while the SHORT / BEEP band is on (0.4.0 hid it below 22 mV).
+
 ## v0.4.0 (2026-11-02)
 
 ### New
