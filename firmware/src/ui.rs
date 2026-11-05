@@ -3200,8 +3200,10 @@ pub const S_OHM_NEG: u8 = 22;
 /// stock): ON restarts the multimeter after a power-off as it was (app.rs
 /// `restore`).
 pub const S_REMEMBER: u8 = 23;
+/// The UI language (a localized image; its row is in the Display section only then).
+pub const S_LANG: u8 = 24;
 /// Number of settings (the value array's length).
-pub const SET_N: usize = 24;
+pub const SET_N: usize = 24 + cfg!(any(feature = "zh", feature = "ru", feature = "it", feature = "fr")) as usize;
 
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
@@ -3209,12 +3211,17 @@ pub const SET_NAMES: [&str; SET_N] = [
     "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "Help", "Jack alerts",
     "Danger alarm", "USB disk", "Burden voltage", "Device info", "Touch test", "Accuracy", "Negative ohm",
     "Mode Remember",
+    #[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
+    sf::lang::LANG_ROW,
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
 /// "Other" as the stock's Other Settings (USB, Bluetooth, Mode Remember
 /// there) with its Device section and our help / touch test pages.
 pub const SET_TABS: [(&str, &[u8]); 6] = [
+    #[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
+    ("Display", &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW, S_LANG]),
+    #[cfg(not(any(feature = "zh", feature = "ru", feature = "it", feature = "fr")))]
     ("Display", &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
     ("Alerts", &[S_VOLUME, S_ALARM, S_JACK]),
     ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),

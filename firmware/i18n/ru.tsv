@@ -1,0 +1,224 @@
+# opendm40 Russian UI strings; tools/mklang.py. English<TAB>Russian<TAB>M machine-written, needs a native review.
+Multimeter	Мультиметр	M
+Oscilloscope	Осциллограф	M
+Signal	Генератор	M
+Settings	Настройки	M
+Scope	Осцилл.	M
+Main menu	Главное меню	M
+Display	Экран	M
+Alerts	Предупр.	M
+Power	Питание	M
+Other	Прочее	M
+Dim screen	Затемнение	M
+Shutdown	Выключение	M
+Backlight	Подсветка	M
+Key/alert volume	Громкость	M
+Bluetooth	Bluetooth	M
+Start page	Старт. экран	M
+Analog power	Аналог. пит.	M
+DMM rate	Скорость	M
+Smoothing	Сглаживание	M
+DMM row	Шкала/история	M
+Temp unit	Ед. темп.	M
+Swipe	Смахивание	M
+Press effect	Эфф. нажатия	M
+Tap step	Шаг касания	M
+Help	Справка	M
+Jack alerts	Предупр. гнёзд	M
+Danger alarm	Сигн. опасности	M
+USB disk	USB-диск	M
+Burden voltage	Падение напр.	M
+Device info	О приборе	M
+Touch test	Тест сенсора	M
+Accuracy	Точность	M
+Negative ohm	Отриц. Ом	M
+Mode Remember	Запомнить режим	M
+Never	Никогда	M
+1 hour	1 час	M
+1 min	1 мин	M
+5 min	5 мин	M
+10 min	10 мин	M
+30 min	30 мин	M
+On	Вкл	M
+Off	Выкл	M
+ON	ВКЛ	M
+OFF	ВЫКЛ	M
+Cancel	Отмена	M
+OK	ОК	M
+Yes	Да	M
+No	Нет	M
+Back	Назад	M
+< Back	< Назад	M
+< Prev	< Пред	M
+Next >	След >	M
+Save	Сохр.	M
+Delete	Удалить	M
+Clear	Очист.	M
+Default	Умолч.	M
+Reset	Сброс	M
+Start	Старт	M
+Auto	Авто	M
+Normal	Норм.	M
+Single	Однокр.	M
+Rising	Рост	M
+Falling	Спад	M
+Edge	Фронт	M
+Pulse	Имп.	M
+Trigger	Синхр.	M
+Measure	Измерения	M
+Decode	Декодер	M
+Window	Окно	M
+Sine	Синус	M
+Square	Прямоуг.	M
+Triangle	Треуг.	M
+Ramp	Пила	M
+Frequency	Частота	M
+Freq	Част.	M
+Duty	Коэф. зап.	M
+Coupling	Связь	M
+Probe	Щуп	M
+Type:	Тип:	M
+Mode:	Режим:	M
+Mode	Режим	M
+Edge:	Фронт:	M
+Persist:	Послесвеч.:	M
+Roll:	Прокрутка:	M
+Brightness:	Яркость:	M
+Grid intensity:	Яркость сетки:	M
+FFT Unit	Ед. FFT	M
+Source:	Источник:	M
+Threshold:	Порог:	M
+Width:	Ширина:	M
+Offset	Смещение	M
+Color	Цвет	M
+Save CSV	CSV	M
+Save CSV OK	CSV сохранён	M
+CSV save failed	Ошибка CSV	M
+Screenshot	Снимок	M
+Screenshot failed	Ошибка снимка	M
+Stop the scope first	Сначала стоп	M
+Sampling	Сбор данных	M
+Vendor	Производитель	M
+Model	Модель	M
+SN	Сер. №	M
+Bootloader	Загрузчик	M
+Software	Прошивка	M
+Hardware	Плата	M
+Voltage Settings	Настройка U	M
+Current Settings	Настройка I	M
+Resistor Settings	Настройка R	M
+Capacitance Settings	Настройка C	M
+Temperature Settings	Настройка темп.	M
+Power Settings	Настройка P	M
+Power off	Выключить	M
+Power off?	Выключить?	M
+Range	Диапазон	M
+Manual	Ручной	M
+Autorange	Автодиапазон	M
+Auto Hold	Автоудержание	M
+Hold & Limits	Удержание, пределы	M
+Limits	Лимиты	M
+Lower	Нижний	M
+Upper	Верхний	M
+Lower limit	Нижний предел	M
+Upper limit	Верхний предел	M
+Clear limits	Снять пределы	M
+Fail beep	Сигн. предела	M
+Record	Запись	M
+Interval	Интервал	M
+Change	Изменение	M
+Duration	Время	M
+Free	Свободно	M
+Every reading	Каждое показ.	M
+On change	При изменении	M
+Fast	Быстро	M
+Until stopped	До остановки	M
+Start recording	Начать запись	M
+Stop recording	Остановить запись	M
+Stop the recording	Остановить запись	M
+Stop the recording first	Сначала стоп записи	M
+Recording	Запись идёт	M
+Recording CSV	Запись CSV	M
+Saving ...	Сохранение...	M
+Saving CSV...	Сохранение CSV...	M
+Saved	Сохранено	M
+Wave	Форма	M
+History	История	M
+Bargraph	Шкала	M
+Zero	Ноль	M
+Inrush	Пуск. ток	M
+Inrush Current	Пусковой ток	M
+Arm	Взвести	M
+Wiring	Схема	M
+Generator is off	Генератор выкл.	M
+Gallery	Галерея	M
+Gallery: screenshots and logs	Галерея: снимки и записи	M
+No screenshots or logs	Нет снимков и записей	M
+Delete screenshot?	Удалить снимок?	M
+Delete this log?	Удалить запись?	M
+Delete failed	Ошибка удаления	M
+Cannot delete	Нельзя удалить	M
+Log	Журнал	M
+Log failed	Ошибка записи	M
+No data	Нет данных	M
+No disk	Нет диска	M
+Disk full	Диск полон	M
+Disk busy	Диск занят	M
+Disk busy, try again	Диск занят, повторите	M
+Disk read error	Ошибка чтения диска	M
+Read error	Ошибка чтения	M
+Empty file	Пустой файл	M
+File not found	Файл не найден	M
+Loading...	Загрузка...	M
+Try again	Повторите	M
+Again	Ещё раз	M
+Stopped	Остановлено	M
+Discharging...	Разряд...	M
+Check leads	Проверьте щупы	M
+Fuse check	Тест предохр.	M
+Fuse OK	Предохр. цел	M
+Fuse open	Предохр. сгорел	M
+Install it now?	Установить?	M
+Installing firmware...	Установка прошивки...	M
+Touch calibration	Калибровка сенсора	M
+Calibrate	Калибр.	M
+Top bar	Верх экрана	M
+Off (stock)	Выкл (штатн.)	M
+OFF (stock)	ВЫКЛ (штатн.)	M
+Halves (stock)	Половины (штатн.)	M
+Corners	Углы	M
+Auto (per view)	Авто (экран)	M
+Both always	Оба всегда	M
+Files live	Только чтение	M
+PC can edit	ПК может менять	M
+Files live (replug)	Чтение (переподкл.)	M
+PC can edit (replug)	Запись (переподкл.)	M
+Loud	Громко	M
+Volume	Громкость	M
+Measuring ...	Измерение...	M
+Temp	Temp	E
+Cap	Cap	E
+Diode	Diode	E
+Upper = reading	Верх = показ.	M
+Lower = reading	Низ = показ.	M
+AUTO starts on mV: AUTO+ is safer	AUTO с mV: AUTO+ безопаснее	M
+AUTO+ recommended: never steps to mV	Лучше AUTO+: без перехода на mV	M
+Reset Wh	Сброс Wh	M
+Current in A jack: check leads	Ток в A: проверьте щупы	M
+A jack current: 10 A shunt on	Ток в A: шунт 10 A вкл.	M
+Overload: 10 A shunt selected	Перегрузка: шунт 10 A	M
+Voltage on V jack, no current	Напряжение на V, тока нет	M
+Voltage on circuit - power off	Снимите напряжение с цепи	M
+DC voltage here: use DC V?	Постоянное U: DC V?	M
+AC voltage here: use AC V?	Переменное U: AC V?	M
+0 A for 60 s: check the fuse?	0 A 60 с: предохранитель?	M
+Current too high: reduce it	Ток велик: уменьшите	M
+Lead from V/ohm jack to A	Щуп из гнезда V/Ω в A	M
+nothing else connected	больше ничего не подкл.	M
+OL: no path from V to A	OL: нет цепи от V к A	M
+Replace: 10 A ceramic fuse	Замена: керам. 10 A	M
+One lead V/ohm to A only	Только один щуп: V/Ω в A	M
+A input path intact	Цепь входа A цела	M
+No ohm reading	Нет показания Ω	M
+expect ~48 \u{3a9}	ожидается ~48 \u{3a9}	M
+Runt	Runt	E

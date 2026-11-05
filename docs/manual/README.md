@@ -2365,6 +2365,7 @@ goes back to the main menu.
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | The view after power-on. |
 | **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
+| Language | English / the image's language | English | In the localized images only: `dm40_opendm40_v<version>-zh.bin`, `-ru`, `-it`, `-fr`. |
 
 ### Alerts tab
 

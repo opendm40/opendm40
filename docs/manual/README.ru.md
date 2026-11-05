@@ -2428,6 +2428,7 @@ Windows и macOS: не проверялось.
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Притушает подсветку через это время без действий ([Питание, аккумулятор и сон](#питание-аккумулятор-и-сон)). |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | Экран после включения. |
 | **DMM row** | Bargraph, History | Bargraph | [Шкала и строка истории](#шкала-и-строка-истории). |
+| Language | English / язык образа | English | Только в локализованных образах: `dm40_opendm40_v<version>-zh.bin`, `-ru`, `-it`, `-fr`. |
 
 ### Вкладка Alerts
 
