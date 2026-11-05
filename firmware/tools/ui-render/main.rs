@@ -1135,7 +1135,7 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
         (ui::S_SMOOTH, "OFF"), (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, "Off (stock)"),
         (ui::S_PRESS, "ON"), (ui::S_TAP_STEP, "Corners"), (ui::S_JACK, "ON"), (ui::S_ALARM, "Loud"),
         (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, "OFF (stock)"), (ui::S_ACC, "ON"), (ui::S_OHM_NEG, "OFF (stock)"),
-        (ui::S_REMEMBER, "OFF"),
+        (ui::S_REMEMBER, "OFF"), (ui::S_CONT, "With volume"),
     ] {
         v[id as usize] = t;
     }
@@ -1153,6 +1153,7 @@ fn set_vals_worst() -> Vec<&'static str> {
         (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, "OFF (stock)"),
         (ui::S_TAP_STEP, "Halves (stock)"), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, "Volume"),
         (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, "OFF (stock)"),
+        (ui::S_CONT, "With volume"),
     ])
 }
 

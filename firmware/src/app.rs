@@ -364,6 +364,9 @@ pub struct App {
     /// the readings are above the 10 A rating.
     alarm: crate::danger::Alarm,
     pub alarm_mode: u8,
+    /// Settings > Alerts "Continuity beep": Always (true) or with the volume
+    /// (false, the default; `ui::S_CONT`).
+    cont_always: bool,
     danger_rd: bool,
     i10_since: Option<u64>,
     /// A fuse check was running at the last tick (`fuse_tick`).
@@ -724,6 +727,7 @@ impl App {
             alert_buzz: false,
             alarm: crate::danger::Alarm::NEW,
             alarm_mode: crate::danger::LOUD,
+            cont_always: false,
             danger_rd: false,
             i10_since: None,
             fuse_busy: false,
@@ -1034,6 +1038,7 @@ impl App {
                 vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { "ON" } else { "OFF" };
                 vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" };
                 vals[ui::S_REMEMBER as usize] = if self.mode_remember { "ON" } else { "OFF" };
+                vals[ui::S_CONT as usize] = if self.cont_always { "Always" } else { "With volume" };
                 ui::settings(self.set_tab, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
@@ -1700,8 +1705,10 @@ impl App {
         }
         self.alert_beep(now);
         // The continuity / diode beeper (HY3131 CMP pin) has no loudness:
-        // off at volume 0 % (Dmm::poll applies a change).
         crate::hy3131::set_beeper(self.volume > 0);
+        // its own level, or off at volume 0 % unless "Continuity beep" is
+        // Always (Dmm::poll applies a change).
+        crate::hy3131::set_beeper(self.volume > 0 || self.cont_always);
         if !can_draw {
             self.note_host_activity(now);
         }
@@ -2302,6 +2309,7 @@ impl App {
             | if self.dmm.ohm_neg { crate::meter::EXT_OHM_NEG } else { 0 }
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT
             | if self.mode_remember { crate::meter::EXT_MODE_REMEMBER } else { 0 }
+            | if self.cont_always { crate::meter::EXT_CONT_ALWAYS } else { 0 }
             | ui::trend_code(self.chart_rate) << crate::meter::EXT_TREND_SHIFT
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
@@ -2360,6 +2368,8 @@ impl App {
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
         crate::hy3131::set_beeper(self.volume > 0); // before the first DMM row
+        self.cont_always = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_CONT_ALWAYS != 0;
+        crate::hy3131::set_beeper(self.volume > 0 || self.cont_always); // before the first DMM row
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
@@ -4187,6 +4197,7 @@ impl App {
                         };
                         self.dmm.set_alert_mask(clk, j);
                     }
+                    ui::S_CONT => self.cont_always = !self.cont_always,
                     ui::S_ALARM => {
                         // Danger alarm (doc 4.10): Loud -> Volume -> Off.
                         self.alarm_mode = (self.alarm_mode + 1) % 3;
