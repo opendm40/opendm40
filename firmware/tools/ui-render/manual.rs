@@ -171,10 +171,12 @@ pub fn run(out: &str) -> usize {
 
     // Settings, every section, with the defaults of a new meter.
     let sv = set_vals(&[]);
-    for (tab, (name, _)) in ui::SET_TABS.iter().enumerate() {
+    // File names in English in every image (the tab names are translated).
+    let names = ["display", "alerts", "power", "multimeter", "scope", "other"];
+    for (tab, name) in names.iter().enumerate().take(ui::SET_TABS.len()) {
         host::reset(0);
         ui::settings(tab as u8, &sv);
-        let n = format!("settings-{}", name.to_lowercase());
+        let n = format!("settings-{name}");
         ck.check_opts(&format!("manual/{n}"), &page, false);
         save1(out, &n);
     }

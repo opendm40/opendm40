@@ -10,13 +10,16 @@ OUT=${1:-$(mktemp -d)}; shift
 LANGS=${*:-zh ru it fr}
 for l in $LANGS; do
     mkdir -p "$OUT/$l"; : > "$OUT/$l/lang.log"
-    (UIR_NOSAVE=1 UIR_LANG=$l LANG_LOG=$OUT/$l/lang.log tools/ui-render/run.sh "$OUT/$l" > "$OUT/$l/run.log" 2>&1; echo $? > "$OUT/$l/rc") &
+    # The check matrix, then the manual's screens (some only these draw).
+    (UIR_NOSAVE=1 UIR_LANG=$l LANG_LOG=$OUT/$l/lang.log tools/ui-render/run.sh "$OUT/$l" > "$OUT/$l/run.log" 2>&1 &&
+        UIR_LANG=$l LANG_LOG=$OUT/$l/lang.log tools/ui-render/run.sh "$OUT/$l/manual" --manual >> "$OUT/$l/run.log" 2>&1
+        echo $? > "$OUT/$l/rc") &
 done
 wait
 rc=0
 for l in $LANGS; do
-    echo "$l: $(grep -m1 '^cases' "$OUT/$l/run.log"), translations that do not fit: $(grep -c '^wide' "$OUT/$l/lang.log"), drawn in English: $(grep -c '^english' "$OUT/$l/lang.log")"
+    echo "$l: $(grep -m1 '^cases' "$OUT/$l/run.log"), translations that do not fit: $(grep -a -c '^wide' "$OUT/$l/lang.log"), drawn in English: $(grep -a -c '^english' "$OUT/$l/lang.log")"
     [ "$(cat "$OUT/$l/rc")" = 0 ] || { rc=1; grep -E ' x  ' "$OUT/$l/run.log" | head -20; }
-    grep '^wide' "$OUT/$l/lang.log" && rc=1
+    grep -a '^wide' "$OUT/$l/lang.log" && rc=1
 done
 exit $rc
