@@ -52,6 +52,13 @@ ours ([`tools/mkwglyph.py`](../tools/mkwglyph.py), `stockfont_w.rs`): "kW",
 "kΩ", "kHz" instead of the stock "KW"; ASCII26 (the dialogs) an Ω; TEXT22
 (the menu text) ℃ and ℉: its own C / F after a 4 x 4 ring, 1 bpp.
 
+## 2b. Another face
+
+[`tools/mkstockfont.py`](../tools/mkstockfont.py) `--face FACE.ttf` re-rasterises the text
+fonts in an outline face ([`tools/mkfaceglyph.py`](../tools/mkfaceglyph.py)), each glyph
+fitted to its stock box, so every layout stays. Icons stay stock. The current
+data is Comfortaa Bold (wght 700), SIL OFL 1.1; the font file is not in the repository.
+
 ## 3. Storage
 
 `mkstockfont.py` emits:

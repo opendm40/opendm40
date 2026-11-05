@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Display:** the text fonts are redrawn in Comfortaa Bold.
 ## v0.4.0 (2026-11-02)
 
 ### New
