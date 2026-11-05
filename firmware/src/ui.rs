@@ -1880,6 +1880,9 @@ pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result
         Some(3) => return Some(Err(2)),
         _ => {}
     }
+    if (139..180).contains(&y) && x >= 241 && b == Button::Ohm {
+        return Some(Err(8));
+    }
     if (139..180).contains(&y) && (160..315).contains(&x) && b == Button::Amp {
         return Some(Err(5));
     }
