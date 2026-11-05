@@ -1148,7 +1148,7 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
 /// The widest value of every setting (the fit checks).
 fn set_vals_worst() -> Vec<&'static str> {
     set_vals(&[
-        (ui::S_DIM, "10 min"), (ui::S_SHUTDOWN, "1 hour"), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, "OFF"),
+        (ui::S_DIM, "10 min"), (ui::S_SHUTDOWN, "10 hours"), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, "OFF"),
         (ui::S_START, "DMM + Scope"), (ui::S_RATE, "SLOW (n/a here)"), (ui::S_SMOOTH, "HIGH"),
         (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, "OFF (stock)"),
         (ui::S_TAP_STEP, "Halves (stock)"), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, "Volume"),

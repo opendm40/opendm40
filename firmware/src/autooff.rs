@@ -19,6 +19,41 @@ pub fn idle_ms(now: u64, last_input: u64, last_host: u64) -> u64 {
     now.saturating_sub(last_input.max(last_host))
 }
 
+/// The Shutdown setting's codes (p[0] bits 4..7). 0..3 are the stock's four,
+/// as records from before the longer list hold them (bits 6..7 were 0 there);
+/// new values only take new codes.
+pub const OFF_MS: [u64; 15] = [
+    600_000, 1_800_000, 3_600_000, 0, // 10 min, 30 min, 1 hour, Never
+    60_000, 300_000, // 1, 5 min
+    2 * H, 3 * H, 4 * H, 5 * H, 6 * H, 7 * H, 8 * H, 9 * H, 10 * H,
+];
+const H: u64 = 3_600_000;
+pub const OFF_TXT: [&str; 15] = [
+    "10 min", "30 min", "1 hour", "Never", "1 min", "5 min", "2 hours", "3 hours", "4 hours", "5 hours", "6 hours", "7 hours",
+    "8 hours", "9 hours", "10 hours",
+];
+/// The default code (30 min).
+pub const OFF_DEFAULT: usize = 1;
+/// The row's order when tapped, shortest first.
+const OFF_ORDER: [u8; 15] = [4, 5, 0, 1, 2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 3];
+
+/// The code in p[0]; an unknown one (15) reads as the default.
+pub fn off_code(p0: u32) -> usize {
+    let c = (p0 >> 4 & 0xF) as usize;
+    if c < OFF_MS.len() { c } else { OFF_DEFAULT }
+}
+
+/// The code after `code` when the row is tapped.
+pub fn off_next(code: usize) -> usize {
+    let i = OFF_ORDER.iter().position(|&c| c as usize == code).unwrap_or(0);
+    OFF_ORDER[(i + 1) % OFF_ORDER.len()] as usize
+}
+
+/// The warning before the shutdown (App::off_warn), ms.
+pub const OFF_WARN_MS: u64 = 30_000;
+/// The shortest choice leaves the whole warning a place: it starts at 30 s idle.
+const _: () = assert!(60_000 >= 2 * OFF_WARN_MS);
+
 /// The shutdown is due: not held (App::off_held, which covers Never) and
 /// idle longer than the shutdown time.
 pub fn off_due(idle: u64, off_ms: u64, held: bool) -> bool {

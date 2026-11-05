@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
+
 ## v0.4.0 (2026-11-02)
 
 ### New
