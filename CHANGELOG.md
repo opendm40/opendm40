@@ -8,6 +8,12 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 - **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
+### New
+
+- **Chinese README and user manual** (machine translation, not yet reviewed
+  by a native speaker): [README.zh.md](README.zh.md),
+  [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
 ## v0.4.0 (2026-11-02)
 
 ### New
