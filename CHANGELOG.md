@@ -10,6 +10,12 @@ section named after the tag as the release notes; how to cut a release:
 - **Gallery: select several files and delete them together**
   ([manual](docs/manual/README.md#the-gallery)).
 
+### New
+
+- **Chinese README and user manual** (machine translation, not yet reviewed
+  by a native speaker): [README.zh.md](README.zh.md),
+  [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
 ## v0.4.0 (2026-11-02)
 
 ### New
