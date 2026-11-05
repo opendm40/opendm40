@@ -9,6 +9,7 @@ section named after the tag as the release notes; how to cut a release:
 
 - Settings > Other > Reset settings: back to the defaults after a confirm; calibration, files and Bluetooth pairing stay.
 
+- **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
 ### New
 
 - **Chinese README and user manual** (machine translation, not yet reviewed

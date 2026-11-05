@@ -18,7 +18,7 @@ opendm40 是 Alientek（正点原子）DM40 万用表、示波器和信号发生
 
 1. [快速上手](#快速上手)：安装和升级、按键、手势、主菜单、状态栏、触摸锁定、电池和休眠。
 2. [与原厂固件相比的新功能](#与原厂固件相比的新功能)
-3. [万用表](#万用表)：所有功能、量程、速率和分辨率、HOLD、AutoHold、REL、MIN/MAX/AVG、限值、柱状图和趋势图、负担电压。
+3. [万用表](#万用表)：所有功能、量程、速率和分辨率、HOLD、AutoHold、REL、MIN/MAX/AVG、限值、柱状图和趋势图、负荷电压。
 4. [安全与告警](#安全与告警)：接错线告警、危险警报、保险丝自检。
 5. [示波器](#示波器)：时基、V/div、触发、光标、测量项、FFT、Save CSV、[协议解码器](#协议解码器)，以及万用表输入端上的 [Wave 视图](#wave-视图万用表输入端上的示波器)。
 6. [组合视图](#组合视图)：万用表和示波器在同一屏；模拟电源。
@@ -220,12 +220,12 @@ opendm40 替换原厂固件 V2.6。它保留其外观、触摸操作和蓝牙手
 | 统计会话 | — | 带计时器的 [MIN/MAX/AVG 会话](#minmaxavg)；进行中不会自动关机 |
 | 柱状图 | — | 50 段[柱状图](#柱状图和历史行)，默认显示 |
 | 温度传感器 | K 型热电偶 | 另有 [PT100、PT1000、三种 NTC 和自定义 NTC](#温度) |
-| 温度偏置 | — | 每种传感器一个偏置 |
+| 温度偏移 | — | 每种传感器一个偏移 |
 | °F | 乘以 1.82 而不是 1.8：100.3 °C 时显示 214.5 °F | °F 计算正确（212.5 °F），屏幕和蓝牙都如此 |
 | 4-20 mA % | 总是显示，也会显示负值 | 带标签，只在有用的范围内显示 |
 | 60 mV 量程 | 量程页上没有，AUTO 从不选择 | 量程页上有；AUTO 会进入 |
 | 60 Ω 量程 | 从不选择 | 量程页上有；AUTO 会进入（仅 0.90 mA） |
-| 负担电压 | — | 可选 |
+| 负荷电压 | — | 可选 |
 | 读数的准确度 | — | [显示](#准确度)在单位下方 |
 | 切换功能 | 新单位下显示旧值或 0.0000 | 立即显示灰色横杠，数值确定前保持灰色 |
 | HOLD 时的历史 | 不能存储保持的值 | 可以存储 |
@@ -317,8 +317,8 @@ opendm40 替换原厂固件 V2.6。它保留其外观、触摸操作和蓝牙手
 | 显示的频率 | 输入的值 | 实际输出频率 |
 | 锯齿波 | 下降，与图标相反 | 上升 |
 | 幅度 | 0.5 到 3 Vpp | 0 到 3 Vpp |
-| 偏置 | 固定 | [可调](#偏置) |
-| 直流输出 | — | 0 Vpp 加偏置 |
+| 偏移 | 固定 | [可调](#偏移) |
+| 直流输出 | — | 0 Vpp 加偏移 |
 | 运行 | 与示波器页一起 | 在所有页面 |
 
 ![显示 50 kHz 限制；围绕 1.5 V 的三角波](img/new-gen.png)
@@ -450,7 +450,7 @@ AUTO 耦合根据信号显示直流部分或交流部分：
 - 量程：600 µA、6 mA、60 mA、600 mA、6 A、10 A。
 - DC A：带符号的电流。在 mA 量程上，上方的值显示 **4-20 mA** 环路百分比：4 mA = 0 %，20 mA = 100 %。低于 3.6 mA 和高于 125 % 时隐藏。
 - AC A：有效值电流，并显示频率和占空比。
-- 可选：[负担电压](#负担电压)。
+- 可选：[负荷电压](#负荷电压)。
 
 A 功能以自动量程从 mA 量程开始。在 AUTO 下，对 µA 或 mA 量程过大的电流会直接跳到 6 A 量程。在固定的 µA 或 mA 量程上，过载会让表切到 10 A 分流器并显示 [**OVLD**](#过载10-a-分流器)。
 
@@ -557,12 +557,12 @@ A 功能以自动量程从 mA 量程开始。在 AUTO 下，对 µA 或 mA 量�
 | 点 R25：键盘，单位 kΩ | 点 Beta：键盘，单位 K |
 
 - 读数上方的值是传感器电阻（电阻型传感器）或冷端温度（TC K）；右侧的标签显示传感器名称。
-- **Offset**：-20 到 +20 °C，步进 0.1 °C，每种传感器一个。点 **-** / **+**，或点数值直接输入。对 TC K，偏置修正的是冷端。
+- **Offset**：-20 到 +20 °C，步进 0.1 °C，每种传感器一个。点 **-** / **+**，或点数值直接输入。对 TC K，偏移修正的是冷端。
 - **Unit: ℃** / **Unit: ℉** 在整台表上切换 °C 和 °F（也可在 **Settings > Multimeter > Temp unit** 设置）。
-- 两线制表笔会引入自身电阻：在 PT100 上每 0.1 Ω 约 0.4 °C。用偏置或 REL 修正。
+- 两线制表笔会引入自身电阻：在 PT100 上每 0.1 Ω 约 0.4 °C。用偏移或 REL 修正。
 - 随附的热电偶额定 300 °C。
 
-有用户反映，早期的表热电偶读数偏低 3.6 到 6 °C：设置一次偏置即可。
+有用户反映，早期的表热电偶读数偏低 3.6 到 6 °C：设置一次偏移即可。
 
 ### 量程：量程页（MF）
 
@@ -628,7 +628,7 @@ opendm40 在所有型号上都使用 60000 计数（量程 60 mV、600 mV、6 V 
 
 每种速率都能抑制直流读数上的 50 Hz 和 60 Hz 工频干扰：每次转换对输入积分 100 ms（FAST、MED）或 200 ms（SLOW），正好是两者的整数个周期。
 
-在 DC V、DC mV 和 DC A 下，FAST 跳过转换器内置的偏置抵消，因此比 MED 快一倍；表在功能或量程切换 2 秒后，以及之后每 30 秒，在输入稳定时自行测量该偏置（每次读数暂停 0.2 秒）。在某量程上最初 2 秒的读数可能略有偏差。FAST 的噪声比 MED 略大；要附加位请用 MED 或 SLOW。
+在 DC V、DC mV 和 DC A 下，FAST 跳过转换器内置的偏移抵消，因此比 MED 快一倍；表在功能或量程切换 2 秒后，以及之后每 30 秒，在输入稳定时自行测量该偏移（每次读数暂停 0.2 秒）。在某量程上最初 2 秒的读数可能略有偏差。FAST 的噪声比 MED 略大；要附加位请用 MED 或 SLOW。
 
 在 Ω 的 60 Ω 到 60 kΩ 上，平均时间更长（MED 6.4 秒，SLOW 12.8 秒；60 Ω 没有附加位）。输入跳变或换量程后平均重新开始，所以变化会立即显示。
 
@@ -702,7 +702,7 @@ opendm40 在所有型号上都使用 60000 计数（量程 60 mV、600 mV、6 V 
 
 ### 柱状图和历史行
 
-**Settings > Display > DMM row** 选择读数下方这一行显示什么：**Bargraph**（默认）或 **History**。
+**Settings > Display > DMM row** 选择读数下方这一行显示什么：**Bargraph**（默认）或 **History**。在趋势图的绘图区双击也可切换（功率计下无效）。
 
 - **Bargraph**：50 段，每段为量程的 2 %；DC V 和 DC A 下零点居中（每边 25 段，每段 4 %），其他功能从零开始，温度时为空。它随每次测量更新，不经平滑和 REL，HOLD 时也继续移动。
 - **History**：五个方框。点这一行存储显示的值（也包括保持的值）；最新的为橙色。长按这一行清除。
@@ -755,19 +755,19 @@ opendm40 在所有型号上都使用 60000 计数（量程 60 mV、600 mV、6 V 
 - 读数旁边：绿色 **OK**，红色 **HI** 或 **LO**。
 - 读数越出限值时发出越限蜂鸣，每秒最多一次。
 
-### 负担电压
+### 负荷电压
 
-电流表会在分流器上产生一个小压降（负担电压），被测电路因此损失这部分电压。要显示它：**Settings > Multimeter > Burden voltage: ON (A, mA, uA)**。默认 OFF。
+电流表会在分流器上产生一个小压降（负荷电压），被测电路因此损失这部分电压。要显示它：**Settings > Multimeter > Burden voltage: ON (A, mA, uA)**。默认 OFF。
 
-- DC：负担电压显示在读数上方左侧，标有 **Burden**。
+- DC：负荷电压显示在读数上方左侧，标有 **Burden**。
 - AC：显示在读数上方右侧，代替占空比。
 - AC+DC、AUTO 耦合和功率计中不显示。
 - 它只根据分流器电阻算出（A 为 10 mΩ，mA 为 0.5 Ω，µA 为 47.5 Ω）；保险丝和接线还会再增加一点。
 - 满量程时：100 mV（10 A）、60 mV（6 A）、300 mV（600 mA）、30 mV（60 mA）、285 mV（6 mA）、28.5 mV（600 µA）。
 
-![123.45 µA；上方是负担电压 5.9 mV](img/burden.png)
+![123.45 µA；上方是负荷电压 5.9 mV](img/burden.png)
 
-*123.45 µA；上方是负担电压 5.9 mV。*
+*123.45 µA；上方是负荷电压 5.9 mV。*
 
 ## 安全与告警
 
@@ -1251,7 +1251,7 @@ Wave 视图在 AC+DC、AUTO 耦合和功率计中不可用，记录进行中也�
 - 功能（**DC V**、**AC V**、**AC+DC**、**AutoDC** / **AutoAC**、**DC A**、**FREQ**、**TEMP**、**POWER** ...）；
 - 一个状态徽标，取以下最重要的一个：**HOLD** / **A-HOLD**、[告警](#告警一览)、**HV**（30 V 及以上）、**REL**、限值结论（**PASS**、**HI**、**LO**）、量程（**AUTO+**、**AUTO** 或固定量程，例如 **6V**）。告警每秒与 HOLD 交替显示；
 - 读数及其单位；
-- 最多两个小值：交流和直流部分、频率和占空比、负担电压（**Bd**）、4-20 mA 百分比、冷端温度，或功率计的电压和电流；
+- 最多两个小值：交流和直流部分、频率和占空比、负荷电压（**Bd**）、4-20 mA 百分比、冷端温度，或功率计的电压和电流；
 - 发生器运行时显示 **GEN** 和频率。
 
 从 100 V 起表条带红框。
@@ -1342,7 +1342,7 @@ DM40 的万用表和示波器 / 发生器有各自独立的电源。**Settings >
 | 占空比 | 0 到 100 %，仅方波 |
 
 - 高于 50 kHz 时，正弦波、三角波或锯齿波以 50 kHz 运行。设定值保留并显示为灰色，带 **max 50 kHz**；切回 Square 时它再次生效。
-- 高于 50 kHz 的方波是逻辑电平方波：不能设置幅度和偏置（灰色，**logic level**）。
+- 高于 50 kHz 的方波是逻辑电平方波：不能设置幅度和偏移（灰色，**logic level**）。
 - 频率框显示实际输出频率，可能与输入值略有差异：低于 1 kHz 时 3 位小数，低于 100 kHz 时 2 位，低于 1 MHz 时 1 位。
 - 占空比框显示实际占空比。
 
@@ -1351,16 +1351,16 @@ DM40 的万用表和示波器 / 发生器有各自独立的电源。**Settings >
 
 *设为 75 kHz 的正弦波以 50 kHz 运行。*
 
-### 偏置
+### 偏移
 
 - **auto**（默认）：波形从 0 V 到 Vpp，与原厂固件相同。
-- 设定的偏置是波形的中心电平。它保持在 Vpp/2 和 3 V − Vpp/2 之间，因此波形不会超出 0 到 3 V。
-- 0 Vpp 加偏置时，输出是直流电压。
+- 设定的偏移是波形的中心电平。它保持在 Vpp/2 和 3 V − Vpp/2 之间，因此波形不会超出 0 到 3 V。
+- 0 Vpp 加偏移时，输出是直流电压。
 - 要回到 auto：打开 Offset 键盘，删除数值，在空白状态下点 **OK**。
 
-![偏置 auto、设定的偏置、直流输出](img/gen-offset.png)
+![偏移 auto、设定的偏移、直流输出](img/gen-offset.png)
 
-*偏置 auto、设定的偏置、直流输出。*
+*偏移 auto、设定的偏移、直流输出。*
 
 ### 键盘
 
@@ -1368,7 +1368,7 @@ DM40 的万用表和示波器 / 发生器有各自独立的电源。**Settings >
 
 - 第一个数字替换整个数值，第一次按 **<** 清空；之后 **<** 删除最后一个字符；
 - 频率：输入整数，并用 **H**（Hz）、**K**（kHz）或 **M**（MHz）选择单位。要得到 32.768 kHz，输入 `32768` 和 **H**；
-- Vpp、偏置和占空比：数字和小数点；
+- Vpp、偏移和占空比：数字和小数点；
 - **OK** 应用；点键盘外取消。
 
 
@@ -1494,7 +1494,7 @@ V 和 A 输入共用 **COM**，所以电流流过 COM：
 | **V** 量程 6V、60V、600V、1000V、AUTO | 固定电压量程，或自动量程。 |
 | **A** 量程 600uA、6mA、60mA、600mA、6A、10A、AUTO | 固定电流量程，或自动量程。 |
 | **At load** | OFF（默认）：V 和 P 是插孔处的值。ON：减去表自身的压降，V 和 P 是负载处的值。**@load** 标记这些值。当 V 表笔接在电源一侧（常规接法）时使用。 |
-| **Zero** | 测量并保存零点偏置。断开表笔，A 中不接任何东西；约需 12 秒。有信号时拒绝执行。 |
+| **Zero** | 测量并保存零点偏移。断开表笔，A 中不接任何东西；约需 12 秒。有信号时拒绝执行。 |
 | **V cal** | 在当前量程上，以万用表自身的 DC V 或 AC V 为基准校准功率计的电压：施加量程 10 % 到 70 %（DC：最高 100 %）的稳定电压；约需 8 秒。 |
 | **DC / AC / AC+DC** | 耦合；帮助行解释所选的耦合。 |
 | **Reset Wh** | 立即复位 Wh、VAh 和时间。 |
@@ -1802,7 +1802,7 @@ Windows 和 macOS：未测试。
 | **DMM rate** | SLOW、MED、FAST | MED | [速率](#速率fastmedslow)；显示每秒读数，当前功能速率固定时显示 **(n/a here)**。 |
 | **Smoothing** | OFF、LOW、HIGH | OFF | [平滑](#平滑)。 |
 | **Temp unit** | ℃（摄氏）、℉（华氏） | ℃ | 所有地方的温度单位。 |
-| **Burden voltage** | OFF (stock)、ON (A, mA, uA) | OFF | 显示[负担电压](#负担电压)。 |
+| **Burden voltage** | OFF (stock)、ON (A, mA, uA) | OFF | 显示[负荷电压](#负荷电压)。 |
 | **Accuracy** | ON、OFF | ON | 显示读数的[准确度](#准确度)。 |
 | **Negative ohm** | OFF (stock)、ON | OFF | ON：显示低于 0 Ω 的读数（例如表笔短接时 -0.028 Ω）；OFF：显示 0。 |
 
@@ -2230,9 +2230,9 @@ sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<address> --samples 10
 | 关机后保留（偏好） | 关机后恢复默认（重启后保留） | 从不保留 |
 |---|---|---|
 | 除 **USB disk** 外的所有[设置](#设置)；危险警报、告警选择、按键音量、亮度、关机定时器、启动页、蓝牙 | 万用表功能（DC V）、自动量程选择、速率和平滑、趋势图时基、AutoHold、限值 | **USB disk**（回到 Files live）；HOLD、REL、MIN/MAX/AVG、历史、固定量程（表以自动量程启动；**Mode Remember** ON 时保留） |
-| 万用表：每个功能按钮的子模式（V 和 A 的耦合、二极管 / 通断、Hz / °C）和 Ω 测试电流、DMM row、温度传感器和单位、热电偶偏置和 NTC 数值、限值的越限蜂鸣 | 示波器：时基、V/div、耦合、探头、触发设置、位置、测量项和 FFT 设置（**Mode Remember** ON 时保留） | 示波器：触发模式（示波器以运行状态启动，触发模式为 Auto） |
+| 万用表：每个功能按钮的子模式（V 和 A 的耦合、二极管 / 通断、Hz / °C）和 Ω 测试电流、DMM row、温度传感器和单位、热电偶偏移和 NTC 数值、限值的越限蜂鸣 | 示波器：时基、V/div、耦合、探头、触发设置、位置、测量项和 FFT 设置（**Mode Remember** ON 时保留） | 示波器：触发模式（示波器以运行状态启动，触发模式为 Auto） |
 | 示波器：显示和触摸设置（颜色、亮度、网格、余辉、点击模式） | 功率计的设置及其零点；Record 页的间隔和时长 | 发生器：输出（开机后为关闭） |
-| 发生器：波形、频率、幅度、偏置和占空比 | | |
+| 发生器：波形、频率、幅度、偏移和占空比 | | |
 
 **Mode Remember** ON（Settings > Power，与原厂相同）还会在关机后保留：万用表功能和耦合、AUTO / AUTO+ 选择或固定的 V、A 或 Ω 量程、速率和平滑、趋势图时基，以及上述示波器设置。AutoHold 和限值仍重新开始。
 
@@ -2245,7 +2245,7 @@ sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<address> --samples 10
 未在实机上测试：
 
 - 快速上手：通过原厂固件的 **USB Connect** 磁盘安装。
-- 万用表：A 插孔有电流时的过载处理、AUTO 耦合和负担电压；二极管蜂鸣；PT1000 和 100 kΩ NTC（PT100 和 10 kΩ NTC 只在电阻校准器上运行过）。
+- 万用表：A 插孔有电流时的过载处理、AUTO 耦合和负荷电压；二极管蜂鸣；PT1000 和 100 kΩ NTC（PT100 和 10 kΩ NTC 只在电阻校准器上运行过）。
 - 告警：A 插孔有电流时的 [A-PROT 和 OVLD](#告警一览)。
 - 示波器：脉宽和 Runt 触发、光标、捏合、双击、长按居中、按住角落连续步进、余辉模式、自动设置保持 AC 耦合。
 - 组合视图：长按表条。
@@ -2267,11 +2267,11 @@ multimeter → 万用表; oscilloscope, scope → 示波器; signal generator �
 stock firmware → 原厂固件; update loader → 升级加载器; update file → 升级文件; bootloader → bootloader; calibration → 校准; meter → 表
 jack → 插孔; test lead → 表笔; probe → 探头（万用表语境：表笔）; shunt → 分流器; fuse → 保险丝; fuse check → 保险丝自检
 range → 量程; range page → 量程页; autorange → 自动量程; counts → 计数; rate → 速率; reading → 读数; extra digit → 附加位; overflow (0L) → 超量程; overload → 过载; open leads → 表笔开路
-continuity → 通断; capacitance → 电容; duty cycle → 占空比; burden voltage → 负担电压; bargraph → 柱状图; history row → 历史行; trend chart → 趋势图; limits → 限值; fail beep → 越限蜂鸣; accuracy → 准确度; smoothing → 平滑; offset → 偏置; cold junction → 冷端
-timebase → 时基; trigger → 触发; pulse → 脉宽; runt → Runt（欠幅脉冲）; coupling → 耦合; cursor → 光标; auto-set → 自动设置; persistence → 余辉; capture → 采集; sample → 采样; roll mode → 滚动模式; popup → 弹窗; tab → 标签页; marker → 标记; protocol decoder → 协议解码器
+continuity → 通断; capacitance → 电容; duty cycle → 占空比; burden voltage → 负荷电压; bargraph → 柱状图; history row → 历史行; trend chart → 趋势图; limits → 限值; fail beep → 越限蜂鸣; accuracy → 准确度; smoothing → 平滑; offset → 偏移; cold junction → 冷端
+timebase → 时基; trigger → 触发; trigger source → 触发源; pulse → 脉宽; runt → Runt（欠幅脉冲）; coupling → 耦合; cursor → 光标; auto-set → 自动设置; persistence → 余辉; capture → 采集; sample → 采样; roll mode → 滚动模式; popup → 弹窗; tab → 标签页; marker → 标记; protocol decoder → 协议解码器
 alert → 告警; badge → 徽标; hint → 提示; danger alarm → 危险警报; armed → 预备状态
 status bar → 状态栏; view → 视图; key → 按键; tap → 点击; long press → 长按; swipe → 滑动; drag → 拖动; pinch → 捏合; touch lock → 触摸锁定; top bar → 顶栏
-recording → 记录; fast recording → 快速记录; screenshot → 截图; gallery → 图库; USB disk → U 盘; eject → 弹出; sleep → 休眠; backup → 备份; phone app → 手机 App
+recording → 记录; fast recording → 快速记录; screenshot → 截图; gallery → 图库; USB disk → U 盘（设置项：U盘模式）; eject → 弹出; sleep → 休眠; backup → 备份; phone app → 手机 App
 sine / square / triangle / ramp → 正弦波 / 方波 / 三角波 / 锯齿波; keypad → 键盘; energy → 电能
 *inferred* → *推断*; *unknown* → *未知*; untested → 未测试; untested on the meter → 未经实机测试
 -->
