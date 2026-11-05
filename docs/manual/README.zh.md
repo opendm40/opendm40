@@ -1766,6 +1766,7 @@ Windows 和 macOS：未测试。
 | **Dim screen** | 5 min、10 min、30 min、Never | 5 min | 这段时间没有输入后背光变暗（[电源、电池和休眠](#电源电池和休眠)）。 |
 | **Start page** | Multimeter、Oscilloscope、Signal、Main menu | Multimeter | 开机后的视图。 |
 | **DMM row** | Bargraph、History | Bargraph | [柱状图和历史行](#柱状图和历史行)。 |
+| Language | English / 固件的语言 | English | 仅本地化固件：`dm40_opendm40_v<version>-zh.bin`、`-ru`、`-it`、`-fr`。 |
 
 ### Alerts 标签页
 
