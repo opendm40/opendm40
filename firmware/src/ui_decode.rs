@@ -371,26 +371,28 @@ pub const PAGE_H: i16 = 162;
 /// The frame log (Mode Log) is built in (firmware: feature `dec-log`; the
 /// host tests always).
 const LOG: bool = cfg!(any(feature = "dec-log", not(target_os = "none")));
+// The left column at x 24, the right one at MF_C2 (scope_ui.rs).
+const C2: i16 = MF_C2;
 pub const SU_PROTO: Rect = rect(24, 81, 180, 24);
-pub const SU_MODE: Rect = rect(214, 81, 120, 24);
+pub const SU_MODE: Rect = rect(C2, 81, 120, 24);
 pub const SU_FMT: Rect = rect(24, 125, 176, 24);
-pub const SU_POL: Rect = rect(214, 125, 176, 24);
+pub const SU_POL: Rect = rect(C2, 125, 176, 24);
 pub const SU_BMINUS: Rect = rect(24, 169, 36, 24);
 pub const SU_BVAL: Rect = rect(64, 169, 104, 24);
 pub const SU_BPLUS: Rect = rect(172, 169, 36, 24);
-pub const SU_TAUTO: Rect = rect(214, 169, 120, 24);
-pub const SU_TMINUS: Rect = rect(214, 197, 36, 20);
-pub const SU_TVAL: Rect = rect(254, 197, 104, 20);
-pub const SU_TPLUS: Rect = rect(362, 197, 36, 20);
+pub const SU_TAUTO: Rect = rect(C2, 169, 120, 24);
+pub const SU_TMINUS: Rect = rect(MF_STEP[0].0, 197, MF_STEP[0].1, 20);
+pub const SU_TVAL: Rect = rect(MF_STEP[1].0, 197, MF_STEP[1].1, 20);
+pub const SU_TPLUS: Rect = rect(MF_STEP[2].0, 197, MF_STEP[2].1, 20);
 /// The page's labels.
-pub const SU_LABELS: [Rect; 6] = [rect(24, 61, 180, 20), rect(214, 61, 189, 20), rect(24, 105, 180, 20), rect(214, 105, 189, 20), rect(24, 149, 180, 20), rect(214, 149, 189, 20)];
+pub const SU_LABELS: [Rect; 6] = [rect(24, 61, 180, 20), rect(C2, 61, MF_C2_W, 20), rect(24, 105, 180, 20), rect(C2, 105, MF_C2_W, 20), rect(24, 149, 180, 20), rect(C2, 149, MF_C2_W, 20)];
 const SU_TEXTS: [&str; 6] = ["Protocol:", "Mode:", "Format:", "Polarity:", "Baud:", "Threshold:"];
 /// DALI's page: no Format / Baud (UART only); the fixed bit rate in
 /// Format's place, Threshold on the third row (Auto / Manual left, its
 /// stepper right).
 pub const DL_RATE: Rect = rect(24, 125, 176, 24);
 const DL_TEXTS: [&str; 6] = ["Protocol:", "Mode:", "Bit rate:", "Polarity:", "Threshold:", ""];
-const DL_THR: [Rect; 4] = [rect(24, 169, 120, 24), rect(214, 169, 36, 24), rect(254, 169, 104, 24), rect(362, 169, 36, 24)];
+const DL_THR: [Rect; 4] = [rect(24, 169, 120, 24), rect(MF_STEP[0].0, 169, MF_STEP[0].1, 24), rect(MF_STEP[1].0, 169, MF_STEP[1].1, 24), rect(MF_STEP[2].0, 169, MF_STEP[2].1, 24)];
 
 /// The Threshold row's rects: Auto / Manual, -, the value, +.
 pub fn thr_rects(dali: bool) -> [Rect; 4] {

@@ -2337,10 +2337,13 @@ impl App {
         self.sp.tb_drawn = (255, false);
         self.sp.rec_drawn = None;
         if !self.redraw {
-            // The CH1 / math pill label shows the open popup (0x7bef).
-            let m = self.sp_model(self.now);
-            su::panel_part(&m, 3 * su::BLK_CH1);
-            su::panel_part(&m, 3 * su::BLK_MATH);
+            // The CH1 / math pill label shows the open popup (0x7bef); the
+            // MF popup covers the panel.
+            if !matches!(p, su::Popup::Mf(_)) {
+                let m = self.sp_model(self.now);
+                su::panel_part(&m, 3 * su::BLK_CH1);
+                su::panel_part(&m, 3 * su::BLK_MATH);
+            }
             self.sp_popup_draw();
         }
     }
