@@ -579,6 +579,7 @@ impl App {
                 }
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgRow => {
                 // 22 row bytes R20..R35 then R36, hex; the R34 in force.
                 const H: &[u8; 16] = b"0123456789ABCDEF";
@@ -592,29 +593,37 @@ impl App {
                 out.put_bytes(if on { b";ON" } else { b";OFF" });
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgPoke(i, v) => {
                 if !self.dmm.pw_poke(clk, i, v) {
                     out.set_err("Illegal parameter value");
                 }
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgStat(s) => {
                 self.dmm.pw_freeze(clk, s);
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgRaw => {
                 let n = self.dmm.pw.ring_text(&mut out.buf[..]);
                 out.len = n;
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgDisc(Some(d)) => {
                 self.dmm.pw.disc = d;
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgDisc(None) => {
                 put_i(out, &mut t, self.dmm.pw.disc as i64);
                 true
             }
+            // Without the feature `dbg-dev` never parsed (scpi.rs).
+            #[cfg(not(feature = "dbg-dev"))]
+            Pow::DbgRow | Pow::DbgPoke(..) | Pow::DbgStat(_) | Pow::DbgRaw | Pow::DbgDisc(_) => false,
         }
     }
 

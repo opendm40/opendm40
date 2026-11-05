@@ -9,11 +9,31 @@ section named after the tag as the release notes; how to cut a release:
 
 - **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
 
+- **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
 ### New
 
 - **Chinese README and user manual** (machine translation, not yet reviewed
   by a native speaker): [README.zh.md](README.zh.md),
   [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
+### Changed
+
+- **Scope: long DMM units** ("mWh") on the strip in the panel's
+  16 px font; the 20 px font is gone (2.3 KB of flash).
+
+### Changed
+
+- **Release images without the developer `DBG:` commands** (`DBG:IDLE`,
+  `DBG:READout?`, `DBG:FLASH?`, `DBG:CAP...`, `DBG:VDISK...` and more,
+  [list](docs/manual/scpi-reference.md#developer-image-only)): they answer
+  "Undefined header"; ~15 KB more room for new features. `DBG:VIEW?`,
+  `DBG:TAP`, `DBG:KEY`, `DBG:BOOT?` and the update commands stay.
+
+### Tools
+
+- `firmware/build.sh --dev` builds the developer image with them;
+  [`firmware/tools/reload.sh`](firmware/tools/reload.sh) and the emulator
+  build it by default (`reload.sh --release` for the release image).
 
 ## v0.4.0 (2026-11-02)
 

@@ -2,7 +2,7 @@
 """opendm40 battery charging blink and the "USB" host badge in the DMM status
 bar (firmware/src/power.rs shown_bars / pins, src/ui.rs status_right).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/chargetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 The charge status pins are driven from the Renode monitor (run.py --script):
