@@ -2654,7 +2654,8 @@ pub fn update(m: &Model) {
     // The trigger badge after the graph: a level drag step repaints both
     // (the badge ~3.3 ms on the device model, emu --mips 110), the marker
     // under the finger first.
-    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
+    // (The source too: its colour.)
+    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps || ol.tsrc != m.tsrc) {
         trig_badge(m);
     }
     // A repainted graph (a popup closed: `uncover`) leaves its holes as
