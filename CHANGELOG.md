@@ -8,6 +8,12 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 - **Combined view:** the meter strip's reading is orange, as on the multimeter page.
+### New
+
+- **Chinese README and user manual** (machine translation, not yet reviewed
+  by a native speaker): [README.zh.md](README.zh.md),
+  [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
 ## v0.4.0 (2026-11-02)
 
 ### New
