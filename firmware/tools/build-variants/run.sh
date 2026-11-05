@@ -10,10 +10,11 @@
 #   memprobe          DBG:PEEK? / POKE / MTEST? ... (src/memprobe.rs)
 # Each one is a full build.sh run (link asserts: TCM stack, SRAM, regions
 # A2 / B / C; stackdepth.py --check 20480; pack + whole 128-byte blocks) into
-# its own DM40_TDIR / DM40_OUT under target/variants/, so firmware/target/native
-# and opendm40.bin (the image tools/reload.sh installs) are never
-# replaced. Not run on any device. One line per variant, then PASS / FAIL.
-# ~1-2 min per variant (a full release link each).
+# one DM40_TDIR shared by the variants (dependencies built once; cargo keeps
+# each feature set's crate apart, the linked ELF is the last variant's) and
+# its own DM40_OUT, under target/variants/, so firmware/target/native and
+# opendm40.bin (the image tools/reload.sh installs) are never replaced. Not
+# run on any device. One line per variant, then PASS / FAIL.
 set -u
 cd "$(dirname "$0")/../.."
 V=target/variants
@@ -21,7 +22,8 @@ mkdir -p "$V"
 fail=0
 run() { # name, build.sh args...
     local n=$1; shift
-    if DM40_TDIR=$V/$n DM40_OUT=$V/$n/opendm40-$n.bin ./build.sh "$@" > "$V/$n.log" 2>&1; then
+    mkdir -p "$V/$n"
+    if DM40_TDIR=$V/target DM40_OUT=$V/$n/opendm40-$n.bin ./build.sh "$@" > "$V/$n.log" 2>&1; then
         echo "ok   $n: $(grep -m1 '^stack:' "$V/$n.log" | sed 's/.*headroom/stack headroom/'); $(grep -m1 'region B free' "$V/$n.log" | sed 's/ *(.*//; s/^ *//; s/  *= */ /'); $(grep -m1 'region C free' "$V/$n.log" | sed 's/ *(.*//; s/^ *//; s/  *= */ /')"
     else
         echo "FAIL $n (build.sh $*): $V/$n.log"
