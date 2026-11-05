@@ -1695,7 +1695,7 @@ From the left:
   limit verdict (**PASS**, **HI**, **LO**), the range (**AUTO+**,
   **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD
   every second;
-- the reading and its unit;
+- the reading and its unit, orange as on the multimeter page;
 - up to two small values: the AC and DC parts, frequency and duty cycle,
   the burden voltage (**Bd**), the 4-20 mA percentage, the cold junction,
   or the voltage and current of the power meter;

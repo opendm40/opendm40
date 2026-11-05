@@ -129,7 +129,7 @@ significant ones in the normal colour (orange, the >= 30 V red)
   A). Accuracy OFF: unchanged.
 - **Colour:** `ui::VALUE_LOW` (104, 104, 104), darker than the
   provisional grey `VALUE_PROV` (144, 152, 152, the whole reading), so
-  the two stay apart. The combined view's strip greys its value (yellow,
+  the two stay apart. The combined view's strip greys its value (orange,
   no extra digit) the same way in the same colour.
 - **Redraw:** a cell whose colour changes is repainted with the digits
   that change; the result equals a full draw (ui-render ag15 / ag16).
