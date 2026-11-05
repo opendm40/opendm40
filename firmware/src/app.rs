@@ -596,20 +596,84 @@ pub fn finish_disk_writes(now: u64) {
 }
 
 impl App {
+    /// Reset settings (Settings > Other): the confirm, unless a recording or
+    /// a host's logger session runs (toast). In region B: the feature variants
+    /// (acdc-meth, memprobe) have no room in C for it.
+    #[inline(never)]
+    fn reset_ask(&mut self, now: u64) {
+        if !self.reset_refused(now) {
+            self.overlay = Some(crate::dialog::Overlay::SettingsReset { until: now + crate::dialog::ENERGY_MS });
+            self.redraw = true;
+            crate::dialog::settings_reset();
+            self.beep(now, 50);
+        }
+    }
+
+    /// A tap on that confirm. Yes: the disk writers done, the record asking
+    /// for the defaults into the backup SRAM and the settings file (App::new,
+    /// persist::reset_record), then the restart, as DBG:RESET (main.rs).
+    #[inline(never)]
+    fn reset_answer(&mut self, x: u16, y: u16, now: u64, clk: &mut Clock) {
+        match crate::dialog::power_off_hit(x, y) {
+            Some(true) => {
+                self.overlay_close();
+                if self.reset_refused(now) {
+                    return;
+                }
+                finish_disk_writes(now);
+                self.persist_now();
+                crate::persist::request_reset();
+                crate::setfile::flush();
+                self.quiesce_for_reset(clk);
+                unsafe { w32(0xE000_ED0C, 0x05FA_0004) };
+                loop {}
+            }
+            Some(false) => self.overlay_close(),
+            None => {}
+        }
+    }
+
+    /// No reset during a recording or a host's logger session (toast).
+    #[inline(never)]
+    fn reset_refused(&mut self, now: u64) -> bool {
+        let busy = self.session_runs() || self.logger_busy;
+        if busy {
+            self.toast(now, "Stop the recording first", false);
+        }
+        busy
+    }
+
+    /// At boot, a record asking for the defaults: this fresh App's words
+    /// with the old calibration (persist::reset_record). `persist_now` puts
+    /// the fresh words in the backup SRAM; a power cut now finds the request
+    /// in the settings file, so it resets again.
+    #[inline(never)]
+    fn reset_apply(&self, rec: &mut crate::persist::Record) {
+        self.persist_now();
+        crate::persist::reset_record(&mut rec.words, crate::persist::word);
+    }
+
     /// Before a reset (main.rs `reset_at`: DBG:RESET, DBG:UPDATE, an
-    /// install from the disk): backlight, generator output and scope
-    /// acquisition off, then 20 ms for the supply to settle. A reset releases
-    /// the power-hold pins (PE2 / PC4) until the ROM drives them again; a
-    /// DBG:UPDATE right after a scope Save CSV sometimes ended in a power
-    /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
-    /// loader never ran; why the load matters is inferred).
+    /// install from the disk; Reset settings): backlight, generator output
+    /// and scope acquisition off, the SPI flash idle, and the rails as on the
+    /// DMM page: PE2 on, PC4 off (`Scope::rails`), then 150 ms for the DMM
+    /// supply to come up. A reset releases the power-hold pins (PE2 / PC4)
+    /// until the ROM drives both high again. With PE2 off (the scope and
+    /// generator pages, SYST:RAIL AUTO) Reset settings lost the power in 4 of
+    /// 5 tries (device 2026-11-06, on USB: 3 restarts with POR, once the
+    /// meter stayed off; 1 SW), from the DMM page it restarted with SW.
+    /// That the DMM supply starting from off inside the reset is the cause
+    /// is inferred.
+    #[inline(always)] // main.rs and the cold reset_answer
     pub fn quiesce_for_reset(&mut self, clk: &mut Clock) {
         backlight(0);
         let mut g = self.gen.s;
         g.on = false;
         self.gen.apply(g);
         self.scope.stop_hw();
-        clk.delay_ms(20);
+        let _ = crate::spiflash::wait_idle(3000);
+        self.scope.rails(true, false, clk);
+        clk.delay_ms(150);
     }
 }
 
@@ -794,9 +858,15 @@ impl App {
         // 2026-10-25): DC V and the measurement settings at their defaults;
         // only a reset (the backup SRAM) continues them, or Mode Remember ON
         // (restore).
-        if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
+        if let Some(mut rec) = crate::setfile::pick(crate::persist::load()) {
             let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
-            a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
+            // Reset settings: the defaults, except the calibration. As a
+            // continued session, for the power meter's values.
+            let reset = rec.words[crate::persist::W_REC] & crate::persist::REC_RESET != 0;
+            if reset {
+                a.reset_apply(&mut rec);
+            }
+            a.restore(&rec, reset || from_bkp && crate::persist::same_session(), clk);
         }
         backlight(a.backlight);
         let g = a.gen.s;
@@ -3054,6 +3124,7 @@ impl App {
                     Some(false) => self.overlay_close(),
                     None => {}
                 },
+                (crate::dialog::Overlay::SettingsReset { .. }, Gesture::Tap(p)) => self.reset_answer(p.x, p.y, now, clk),
                 (crate::dialog::Overlay::FuseCheck { stage, .. }, Gesture::Tap(p)) => match (stage, crate::dialog::fuse_hit(p.x, p.y)) {
                     // Start / Again.
                     (0, Some(true)) | (2, Some(false)) => {
@@ -3086,7 +3157,7 @@ impl App {
                     self.func_changed();
                     self.overlay_close();
                 }
-                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. } | crate::dialog::Overlay::PowJob { .. }, Gesture::KeyDown(_)) => {
+                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. } | crate::dialog::Overlay::SettingsReset { .. } | crate::dialog::Overlay::PowJob { .. }, Gesture::KeyDown(_)) => {
                     self.overlay_close()
                 }
                 _ => {}
@@ -3294,8 +3365,12 @@ impl App {
     /// watch a bus). Dimming still applies. USB power holds it off through `idle` (`tick`,
     /// autooff.rs).
     fn off_held(&self) -> bool {
-        self.off_ms() == 0
-            || self.meter.stats.rec
+        self.off_ms() == 0 || self.session_runs()
+    }
+
+    /// A recording or another session the user left running.
+    fn session_runs(&self) -> bool {
+        self.meter.stats.rec
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
@@ -4239,6 +4314,10 @@ impl App {
                         self.tt_open(clk);
                         return;
                     }
+                    ui::S_RESET => {
+                        self.reset_ask(clk.now_ms());
+                        return;
+                    }
                     ui::S_ACC => {
                         // Accuracy label (doc dmm-accuracy.md): from the
                         // next reading on.
@@ -4322,6 +4401,7 @@ impl App {
             Some(
                 crate::dialog::Overlay::PowerEntry { .. }
                     | crate::dialog::Overlay::EnergyReset { .. }
+                    | crate::dialog::Overlay::SettingsReset { .. }
                     | crate::dialog::Overlay::PowJob { .. }
                     | crate::dialog::Overlay::FuseCheck { stage: 0 | 2, .. }
             )

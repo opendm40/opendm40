@@ -10,6 +10,8 @@ section named after the tag as the release notes; how to cut a release:
 - **Gallery: select several files and delete them together**
   ([manual](docs/manual/README.md#the-gallery)).
 
+- Settings > Other > Reset settings: back to the defaults after a confirm; calibration, files and Bluetooth pairing stay.
+
 - **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
 - **Scope:** the MF menu spans the screen to the right edge, over the right panel, with wider columns; the panel is drawn again when it closes.
 ### New
