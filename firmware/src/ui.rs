@@ -344,16 +344,17 @@ pub struct DmmView {
     short_drawn: u8,
 }
 
-/// Bargraph geometry in the history row's place (rows 150..172 between the
+/// Bargraph geometry in the history row's place (rows 152..174 between the
 /// F78 ink, which ends at 146, and the chart frame at 176):
-///   segments  12..410 x 150..158 (50 x 8 px pitch, bargraph.rs)
-///   labels    F14 row 161..172 under the scale: 0 / half / full scale
+///   segments  12..410 x 152..160 (50 x 8 px pitch, bargraph.rs), 5 px under
+///             the digits' ink
+///   labels    F14 row 163..174 under the scale: 0 / half / full scale
 ///             (bipolar: -FS / 0 / +FS), the full scale with its unit
-///   OL marker 418..472 x 147..160 (red "OL" on overload)
-pub const BAR_RECT: (u16, u16, u16, u16) = (12, 150, 400, 9);
-const BAR_LBL_Y: i16 = 161;
+///   OL marker 418..472 x 149..162 (red "OL" on overload)
+pub const BAR_RECT: (u16, u16, u16, u16) = (12, 152, 400, 9);
+const BAR_LBL_Y: i16 = 163;
 const BAR_LBL_H: i16 = 12;
-const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
+const BAR_OL: sf::Rect = rect(418, 149, 54, 14);
 /// The accuracy label (../docs/dmm-accuracy.md): F14 grey in the label row,
 /// right-aligned under the unit, 5 px after the full-scale label (which
 /// ends at the bar's end, 410); `pm` draws the "+-" sign before the text.
