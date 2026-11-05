@@ -17,6 +17,7 @@ section named after the tag as the release notes; how to cut a release:
   dashes and "Unstable: unplug USB?". The ripple case is checked in the
   emulator only.
 
+- **Multimeter:** the reading with the extra digit sits 4 px further right.
 ## v0.4.0 (2026-11-02)
 
 ### New
