@@ -62,8 +62,8 @@ const TIM13_CCR1: u32 = 0x4000_1C34;
 /// Offered stock options: dim 5/10/30 min/never, shutdown 10/30/60 min/never.
 const DIM_MS: [u64; 4] = [300_000, 600_000, 1_800_000, 0];
 const OFF_MS: [u64; 4] = [600_000, 1_800_000, 3_600_000, 0];
-const DIM_TXT: [&str; 4] = ["5 min", "10 min", "30 min", "Never"];
-const OFF_TXT: [&str; 4] = ["10 min", "30 min", "1 hour", "Never"];
+const DIM_TXT: [&str; 4] = [crate::tr!("5 min"), crate::tr!("10 min"), crate::tr!("30 min"), crate::tr!("Never")];
+const OFF_TXT: [&str; 4] = [crate::tr!("10 min"), crate::tr!("30 min"), crate::tr!("1 hour"), crate::tr!("Never")];
 /// Wake gate (stock FUN_08020248, stock/re/stock-ui-notes/interaction.md D.3):
 /// after an idle dim the first touch / side key only restores the backlight,
 /// and input is ignored for this long from it. opendm40 also drops the rest of
@@ -116,9 +116,9 @@ fn alert_mask_name(b: &mut [u8; 16], m: u8) -> &str {
     use crate::sentinel::{M_AJACK, M_JACK};
     let m = m & M_JACK;
     match m {
-        M_JACK => "ON",
+        M_JACK => crate::tr!("ON"),
         M_AJACK => "A-JACK only",
-        0 => "OFF",
+        0 => crate::tr!("OFF"),
         _ => {
             let t = b"Mask ";
             b[..5].copy_from_slice(t);
@@ -959,7 +959,7 @@ impl App {
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
             View::Decode => self.log_page(),
-            View::Menu => ui::main_menu(ui::view_name(self.combo)),
+            View::Menu => ui::main_menu(ui::view_label(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {
                 self.with_temp_page(None);
                 self.temp_info_tick(true);
@@ -974,7 +974,7 @@ impl App {
                 // UF-21: AUTO+ (never steps down to mV) is the recommended V
                 // autorange; warn while the mV-first AUTO is in use.
                 let note = (b == Button::Volt).then(|| {
-                    if self.dmm.mv_auto_warn() { (dmm::MV_AUTO_WARN, true) } else { ("AUTO+ recommended: never steps to mV", false) }
+                    if self.dmm.mv_auto_warn() { (dmm::MV_AUTO_WARN, true) } else { (crate::tr!("AUTO+ recommended: never steps to mV"), false) }
                 });
                 let sub = if b == Button::Ohm { self.dmm.ohm_var() } else { self.dmm.sub() };
                 ui::range_page(b, sel, sub, note);
@@ -1017,23 +1017,23 @@ impl App {
                 vals[ui::S_SHUTDOWN as usize] = OFF_TXT[self.off_idx];
                 vals[ui::S_BACKLIGHT as usize] = core::str::from_utf8(&b0[..n0]).unwrap_or("");
                 vals[ui::S_VOLUME as usize] = core::str::from_utf8(&b1[..n1]).unwrap_or("");
-                vals[ui::S_BT as usize] = if self.bt_on { "ON" } else { "OFF" };
-                vals[ui::S_START as usize] = ui::view_name(START[self.start_page]);
-                vals[ui::S_RAILS as usize] = if self.rails_both { "Both always" } else { "Auto (per view)" };
+                vals[ui::S_BT as usize] = if self.bt_on { crate::tr!("ON") } else { crate::tr!("OFF") };
+                vals[ui::S_START as usize] = ui::view_label(START[self.start_page]);
+                vals[ui::S_RAILS as usize] = if self.rails_both { crate::tr!("Both always") } else { crate::tr!("Auto (per view)") };
                 vals[ui::S_RATE as usize] = core::str::from_utf8(&vb[..n]).unwrap_or("");
                 vals[ui::S_SMOOTH as usize] = crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize];
-                vals[ui::S_DMM_ROW as usize] = if self.dmm_view.bar_on { "Bargraph" } else { "History" };
+                vals[ui::S_DMM_ROW as usize] = if self.dmm_view.bar_on { crate::tr!("Bargraph") } else { crate::tr!("History") };
                 vals[ui::S_TEMP_UNIT as usize] = if self.dmm.temp_f() { "\u{2109} (Fahrenheit)" } else { "\u{2103} (Celsius)" };
-                vals[ui::S_SWIPE as usize] = if self.sp.swipes { "Top bar" } else { "Off (stock)" };
-                vals[ui::S_PRESS as usize] = if self.sp.press_fx { "ON" } else { "OFF (stock)" };
+                vals[ui::S_SWIPE as usize] = if self.sp.swipes { crate::tr!("Top bar") } else { crate::tr!("Off (stock)") };
+                vals[ui::S_PRESS as usize] = if self.sp.press_fx { crate::tr!("ON") } else { crate::tr!("OFF (stock)") };
                 vals[ui::S_TAP_STEP as usize] = crate::scope_ui::TAP_NAMES[self.sp.tap_mode.min(2) as usize];
                 vals[ui::S_JACK as usize] = alert_mask_name(&mut ab, self.dmm.alert_mask());
                 vals[ui::S_ALARM as usize] = crate::danger::NAMES[self.alarm_mode.min(2) as usize];
                 vals[ui::S_USB as usize] = ui::usb_disk_name(self.usb_ro_drawn.0, self.usb_ro_drawn.1);
-                vals[ui::S_BURDEN as usize] = if self.dmm.burden_show { "ON (A, mA, uA)" } else { "OFF (stock)" };
-                vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { "ON" } else { "OFF" };
-                vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" };
-                vals[ui::S_REMEMBER as usize] = if self.mode_remember { "ON" } else { "OFF" };
+                vals[ui::S_BURDEN as usize] = if self.dmm.burden_show { "ON (A, mA, uA)" } else { crate::tr!("OFF (stock)") };
+                vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { crate::tr!("ON") } else { crate::tr!("OFF") };
+                vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { crate::tr!("ON") } else { crate::tr!("OFF (stock)") };
+                vals[ui::S_REMEMBER as usize] = if self.mode_remember { crate::tr!("ON") } else { crate::tr!("OFF") };
                 ui::settings(self.set_tab, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
@@ -1082,12 +1082,12 @@ impl App {
                 }
                 let mcu = if tn > 0 { core::str::from_utf8(&tb[..tn]).unwrap_or("--") } else { "--" };
                 let lines = [
-                    ("Vendor", "Alientek"),
-                    ("Model", model_name),
-                    ("SN", sn),
-                    ("Bootloader", bl),
-                    ("Software", fw),
-                    ("Hardware", hw),
+                    (crate::tr!("Vendor"), "Alientek"),
+                    (crate::tr!("Model"), model_name),
+                    (crate::tr!("SN"), sn),
+                    (crate::tr!("Bootloader"), bl),
+                    (crate::tr!("Software"), fw),
+                    (crate::tr!("Hardware"), hw),
                     ("Board temp", mcu),
                 ];
                 ui::device_page(&lines);
@@ -1307,7 +1307,7 @@ impl App {
         let (mut hb, mut lb) = ([0u8; 32], [0u8; 32]);
         let hn = fmt(&mut hb, l.hi);
         let ln = fmt(&mut lb, l.lo);
-        let onoff = |b: bool| if b { "ON" } else { "OFF" };
+        let onoff = |b: bool| if b { crate::tr!("ON") } else { crate::tr!("OFF") };
         let vals: [&str; 9] = [
             onoff(self.meter.ahold),
             onoff(l.on),
@@ -1499,11 +1499,11 @@ impl App {
                 t[10] = b'0' + (n / 100 % 10) as u8;
                 t[11] = b'0' + (n / 10 % 10) as u8;
                 t[12] = b'0' + (n % 10) as u8;
-                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+                (core::str::from_utf8(&t).unwrap_or(crate::tr!("Saved")), true)
             }
             (State::Done, None) => ("Fast log cancelled", true),
-            (State::Full, None) => ("Disk full", false),
-            (State::NoDisk, _) => ("No disk", false),
+            (State::Full, None) => (crate::tr!("Disk full"), false),
+            (State::NoDisk, _) => (crate::tr!("No disk"), false),
             _ => ("Fast log failed", false),
         };
         self.toast(now, txt, ok);
@@ -2126,19 +2126,19 @@ impl App {
 
     fn kp_labels(&self) -> (&'static str, &'static str) {
         match self.kp_target {
-            0 => ("Frequency", match self.kp_mult {
+            0 => (crate::tr!("Frequency"), match self.kp_mult {
                 b'M' => "MHz",
                 b'K' => "kHz",
                 _ => "Hz",
             }),
             1 => ("Vpp", "V"),
-            2 => ("Duty", "%"),
-            5 => ("Offset", "V"),
-            KP_T_OFFS => ("Offset", "\u{2103}"),
+            2 => (crate::tr!("Duty"), "%"),
+            5 => (crate::tr!("Offset"), "V"),
+            KP_T_OFFS => (crate::tr!("Offset"), "\u{2103}"),
             KP_NTC_R25 => ("R25", "k"),
             KP_NTC_BETA => ("Beta", "K"),
-            3 => ("Upper", kp_unit_text(self.kp_unit)),
-            _ => ("Lower", kp_unit_text(self.kp_unit)),
+            3 => (crate::tr!("Upper"), kp_unit_text(self.kp_unit)),
+            _ => (crate::tr!("Lower"), kp_unit_text(self.kp_unit)),
         }
     }
 
@@ -3030,7 +3030,7 @@ impl App {
                         crate::vwrite::answer(yes);
                         self.overlay_close();
                         if yes {
-                            self.toast(now, "Installing firmware...", true);
+                            self.toast(now, crate::tr!("Installing firmware..."), true);
                         }
                     }
                 }
@@ -3538,7 +3538,7 @@ impl App {
             self.beep(now, 60);
         } else if self.rec_start(now) {
             self.beep(now, 60);
-            self.toast(now, "Recording CSV", true);
+            self.toast(now, crate::tr!("Recording CSV"), true);
         } else {
             self.beep(now, 300);
             self.toast(now, "No reading to log", false);
@@ -3554,11 +3554,11 @@ impl App {
                 t[9] = b'0' + (n / 100 % 10) as u8;
                 t[10] = b'0' + (n / 10 % 10) as u8;
                 t[11] = b'0' + (n % 10) as u8;
-                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+                (core::str::from_utf8(&t).unwrap_or(crate::tr!("Saved")), true)
             }
             (State::Full, _) => ("Disk full: log ended", false),
-            (State::NoDisk, _) => ("No disk", false),
-            _ => ("Log failed", false),
+            (State::NoDisk, _) => (crate::tr!("No disk"), false),
+            _ => (crate::tr!("Log failed"), false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -3573,12 +3573,12 @@ impl App {
                 t[7] = b'0' + (n / 100 % 10) as u8;
                 t[8] = b'0' + (n / 10 % 10) as u8;
                 t[9] = b'0' + (n % 10) as u8;
-                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+                (core::str::from_utf8(&t).unwrap_or(crate::tr!("Saved")), true)
             }
-            Shot::NoDisk => ("No disk", false),
-            Shot::Full => ("Disk full", false),
-            Shot::Error => ("Screenshot failed", false),
-            Shot::Busy => ("Disk busy", false),
+            Shot::NoDisk => (crate::tr!("No disk"), false),
+            Shot::Full => (crate::tr!("Disk full"), false),
+            Shot::Error => (crate::tr!("Screenshot failed"), false),
+            Shot::Busy => (crate::tr!("Disk busy"), false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -4073,12 +4073,12 @@ impl App {
                         // A running recording keeps its settings.
                         if crate::csvlog::active() {
                             self.beep(now, 300);
-                            self.toast(now, "Stop the recording first", false);
+                            self.toast(now, crate::tr!("Stop the recording first"), false);
                             return;
                         }
                         if crate::fastlog::active() {
                             self.beep(now, 300);
-                            self.toast(now, "Stop the recording first", false);
+                            self.toast(now, crate::tr!("Stop the recording first"), false);
                             return;
                         }
                         let (_, mut di) = crate::csvlog::next();

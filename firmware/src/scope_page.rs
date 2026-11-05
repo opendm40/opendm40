@@ -949,11 +949,11 @@ impl App {
     pub(super) fn sp_save_csv(&mut self, now: u64) {
         let rec = self.scope.record();
         if self.scope.s.run || rec.is_empty() {
-            self.toast(now, if self.scope.s.run { "Stop the scope first" } else { "No record to save" }, false);
+            self.toast(now, if self.scope.s.run { crate::tr!("Stop the scope first") } else { "No record to save" }, false);
             return;
         }
         if crate::screenshot::busy() || crate::csvlog::writing() {
-            self.toast(now, "Disk busy, try again", false);
+            self.toast(now, crate::tr!("Disk busy, try again"), false);
             return;
         }
         // The record's own settings (a stopped change only re-renders it);
@@ -1008,11 +1008,11 @@ impl App {
         });
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
-            self.toast(now, "CSV save failed", false);
+            self.toast(now, crate::tr!("CSV save failed"), false);
             return;
         }
         self.scope.hold = true;
-        self.toast(now, "Saving CSV...", true);
+        self.toast(now, crate::tr!("Saving CSV..."), true);
     }
 
     /// Trigger type text of the CSV header.
@@ -1045,11 +1045,11 @@ impl App {
                 t[10] = b'0' + (n / 100 % 10) as u8;
                 t[11] = b'0' + (n / 10 % 10) as u8;
                 t[12] = b'0' + (n % 10) as u8;
-                (core::str::from_utf8(&t).unwrap_or("Save CSV OK"), true)
+                (core::str::from_utf8(&t).unwrap_or(crate::tr!("Save CSV OK")), true)
             }
-            crate::screenshot::Shot::NoDisk => ("No disk", false),
-            crate::screenshot::Shot::Full => ("Disk full", false),
-            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("CSV save failed", false),
+            crate::screenshot::Shot::NoDisk => (crate::tr!("No disk"), false),
+            crate::screenshot::Shot::Full => (crate::tr!("Disk full"), false),
+            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => (crate::tr!("CSV save failed"), false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -2652,7 +2652,7 @@ impl App {
                 st.tsrc = t.min(1);
                 self.scope_set(st, now);
                 if st.tsrc == scope::TSRC_GEN && !self.gen.s.on {
-                    self.toast(now, "Generator is off", false);
+                    self.toast(now, crate::tr!("Generator is off"), false);
                 }
             }
             su::MfHit::Ch2(on) => {

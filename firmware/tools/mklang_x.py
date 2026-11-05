@@ -247,25 +247,22 @@ def font_use():
     return use
 
 
-def build(lang, rows, check, meta, text_tables, fnv, rs_str, rs_bytes):
-    name, row, tr, minl = meta
+def build(lang, rows, check, rs_bytes):
+    """rows: {English as in the sources: translation} -> ({English: encoded
+    translation}, the glyph tables, stats)."""
     enc = lambda s: ''.join(LOOKALIKE.get(c, c) for c in s) if lang == 'ru' else s
     enc_rows = {k: enc(z) for k, z in rows.items()}
     freq = collections.Counter(c for z in enc_rows.values() for c in z if ord(c) >= 0x80 and c != 'Ω')
     code = {c: CTRL[i] for i, (c, _) in enumerate(sorted(freq.items(), key=lambda e: (-e[1], e[0]))[:len(CTRL)])}
     one = lambda s: ''.join(chr(code[c]) if c in code else c for c in enc(s))
-    lang_row = 'Language ' + one(row)
-    ent = sorted([(fnv(k.encode()), one(z)) for k, z in rows.items()] + [(fnv(lang_row.encode()), one(tr))])
-    tb, ntxt = text_tables(ent)
-    head = 'pub const NAME: &str = "%s";\npub const LANG_ROW: &str = "%s";\npub const MIN_LINE: u16 = %d;\n' % (rs_str(one(name)), rs_str(lang_row), minl)
+    out_rows = {k: one(z) for k, z in rows.items()}
     if check:
-        return head + tb, None
+        return out_rows, None, None
     img = stock_image()
     use = font_use()
     need = {a: set() for a in FONTS}
-    need[0x0806B13C] |= {c for c in enc(name) + enc(row) + enc(tr) if ord(c) >= 0x80}
     for k, z in enc_rows.items():
-        for a in use.get(k, {0x0806B13C}):
+        for a in use.get(re.sub(r'\\u\{([0-9a-fA-F]+)\}', lambda m: chr(int(m.group(1), 16)), k), {0x0806B13C}):
             if a in need:
                 # Omega: the stock fonts' own (stockfont_w.rs).
                 need[a] |= {c for c in z if ord(c) >= 0x80 and c != 'Ω'}
@@ -294,4 +291,5 @@ def build(lang, rows, check, meta, text_tables, fnv, rs_str, rs_bytes):
         extra.append('(0x%08X, FontData { line_h: %d, descent: %d, fmt: %s, entries: &X_%s_E, blob: &X_%s_B })' % (a, lh, de, 'HUF' if four else 'BIT1', nm, nm))
     s += 'pub const N: usize = 0;\npub const SIZE: u8 = 0;\npub const GB: usize = 1;\npub static G: [u8; 0] = [];\n'
     s += 'pub static EXTRA: [(u32, FontData); %d] = [%s];\n' % (len(extra), ', '.join(extra))
-    return head + tb, s, 'strings %d, text %d B, tables %d B, glyphs %d B: %s' % (len(ent), ntxt, 6 * len(ent) + 2, total, '; '.join(sizes))
+    ntxt = sum(len(z.encode()) for z in out_rows.values())
+    return out_rows, s, 'strings %d, text %d B, glyphs %d B: %s' % (len(out_rows), ntxt, total, '; '.join(sizes))

@@ -181,7 +181,7 @@ pub fn run(out: &str) -> usize {
 
     // Voltage range page: AUTO+ selected, DC, the AUTO+ note, Wave.
     host::reset(0);
-    ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
+    ui::range_page(Button::Volt, Some(6), 0, Some((crate::tr!("AUTO+ recommended: never steps to mV"), false)));
     ui::wave_button();
     ck.check_opts("manual/range-v", &page, false);
     save1(out, "range-v");
@@ -214,17 +214,17 @@ pub fn run(out: &str) -> usize {
 
     // Hold & Limits of DC V: limits 4.8 .. 5.2 V on.
     host::reset(0);
-    ui::list_page("Hold & Limits: DC V", &ui::LIMIT_ROWS, &["OFF", "ON", "5.2000 V", "4.8000 V", "", "", "", "ON", "Every reading"]);
+    ui::list_page("Hold & Limits: DC V", &ui::LIMIT_ROWS, &[crate::tr!("OFF"), crate::tr!("ON"), "5.2000 V", "4.8000 V", "", "", "", crate::tr!("ON"), crate::tr!("Every reading")]);
     ck.check_opts("manual/limits", &page, false);
     save1(out, "limits");
 
     // Record page: on change, until stopped; and the fast recorder.
     host::reset(0);
-    ui::record_page(["On change", "1 %", "Until stopped"], "about 240 h left", false);
+    ui::record_page([crate::tr!("On change"), "1 %", crate::tr!("Until stopped")], "about 240 h left", false);
     ck.check_opts("manual/record", &page, false);
     save1(out, "record");
     host::reset(0);
-    ui::record_page(["Fast", "1 %", "1 h"], "4800/s, 25 min left", false);
+    ui::record_page([crate::tr!("Fast"), "1 %", "1 h"], "4800/s, 25 min left", false);
     ck.check_opts("manual/record-fast", &page, false);
     save1(out, "record-fast");
 
@@ -239,12 +239,12 @@ pub fn run(out: &str) -> usize {
     let mut fwb = [0u8; 48];
     let ver = ui::device_software(&mut fwb);
     ui::device_page(&[
-        ("Vendor", "Alientek"),
-        ("Model", "DM40A"),
-        ("SN", "12345678"),
-        ("Bootloader", "V4.0"),
-        ("Software", ver),
-        ("Hardware", "V1.1"),
+        (crate::tr!("Vendor"), "Alientek"),
+        (crate::tr!("Model"), "DM40A"),
+        (crate::tr!("SN"), "12345678"),
+        (crate::tr!("Bootloader"), "V4.0"),
+        (crate::tr!("Software"), ver),
+        (crate::tr!("Hardware"), "V1.1"),
         ("Board temp", "31.5 C (MCU)"),
     ]);
     ck.check_opts("manual/device", &page, false);
@@ -317,7 +317,7 @@ pub fn run(out: &str) -> usize {
     {
         use ui::inr::{Vals, C_ARMED};
         host::reset(0);
-        let v = Vals { thr: "+1.0 A", rms: "", peak: "", info: "Armed: 0.123 A now", info_fg: C_ARMED, idle: "", file: "", btn: "Cancel", btn_bg: 0xF800, enabled: true };
+        let v = Vals { thr: "+1.0 A", rms: "", peak: "", info: "Armed: 0.123 A now", info_fg: C_ARMED, idle: "", file: "", btn: crate::tr!("Cancel"), btn_bg: 0xF800, enabled: true };
         ui::inr::page(&v);
         ui::inr::trace(None, 0.0, 125.0f32 / 262_144.0 * 8.0);
         ck.check_opts("manual/inrush-armed", &page, false);
@@ -405,7 +405,7 @@ pub fn run(out: &str) -> usize {
     let mut tb = [0u8; 40];
     let (n, ext) = dmm::rate_window(dmm::Rate::Medium, false, dcv.mode, dcv.range);
     let rate_msg = ui::rate_toast(&mut tb, dmm::Rate::Medium as u8, dmm::rate_period(dmm::Rate::Medium, dcv.mode), n, ext);
-    for (name, msg, ok) in [("dmm-rate", rate_msg, true), ("rec-start", "Recording CSV", true)] {
+    for (name, msg, ok) in [("dmm-rate", rate_msg, true), ("rec-start", crate::tr!("Recording CSV"), true)] {
         dmm_page(&Dp { csv: name == "rec-start", ..dp(dcv) });
         dialog::toast(msg, ok);
         ck.check(&format!("manual/{name}"), &DMM_REGIONS);
@@ -442,7 +442,7 @@ pub fn run(out: &str) -> usize {
             ("gen-triangle", g(true, gen::Wave::Triangle, 100, 2.0, 5000, Some(1.5)), None),
             ("gen-ramp", g(true, gen::Wave::Ramp, 10_000, 3.0, 5000, None), None),
             ("gen-clamped", g(true, gen::Wave::Sine, 75_000, 2.0, 5000, None), None),
-            ("gen-keypad", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_FREQ, "Frequency", "1", "kHz"))),
+            ("gen-keypad", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_FREQ, crate::tr!("Frequency"), "1", "kHz"))),
             ("gen-keypad-vpp", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_NUM, "Vpp", "2.00", "V"))),
         ] {
             gen_page(s, kp);

@@ -510,25 +510,51 @@ struct Placed {
     cur: Cur,
 }
 
-/// `text` in the UI language; the English when the translation lacks a glyph
-/// of `font`, takes more than `max` glyphs or is wider than `w`.
+/// The text as drawn (translated at build time, src/lang.rs). ui-render with
+/// UIR_LANG checks every translation here: it fits `w` and `max` glyphs, has
+/// every glyph of `font`, and `font` is at least the language's MIN_LINE tall
+/// (tools/lang-render fails on a `wide` line).
 #[inline(always)]
-fn ui_text<'a>(font: Font, text: &'a str, w: i16, spacing: i8, max: usize) -> &'a str {
-    let t = lang::tr(|| font.line_h(), text);
+fn ui_text(font: Font, text: &str, w: i16, spacing: i8, max: usize) -> &str {
     #[cfg(lang_log)]
-    lang_log("drawn", font, text);
-    if core::ptr::eq(t, text) {
-        return text;
-    }
-    ui_text_check(font, t, text, w, spacing, max)
+    lang_check(font, text, w, spacing, max);
+    #[cfg(not(lang_log))]
+    let _ = (font, w, spacing, max);
+    text
 }
 
-#[inline(never)]
-fn ui_text_check<'a>(font: Font, t: &'a str, en: &'a str, w: i16, spacing: i8, max: usize) -> &'a str {
-    let ok = t.chars().count() <= max && t.chars().all(|c| glyph_or_twin(font, c).is_some()) && width_of(font, t, spacing) <= w;
-    #[cfg(lang_log)]
-    lang_log(if ok { "fits" } else { "wide" }, font, en);
-    if ok { t } else { en }
+#[cfg(lang_log)]
+fn lang_check(font: Font, t: &str, w: i16, spacing: i8, max: usize) {
+    let tr = &lang::tr::PAIRS;
+    match tr.iter().find(|p| p.1 == t) {
+        Some(&(en, _)) => {
+            lang_log("drawn", font, en);
+            let why = if font.line_h() < lang::tr::MIN_LINE {
+                "font under MIN_LINE"
+            } else if t.chars().count() > max {
+                "too many glyphs"
+            } else if !t.chars().all(|c| glyph_or_twin(font, c).is_some()) {
+                "glyph missing"
+            } else if width_of(font, t, spacing) > w {
+                "too wide"
+            } else {
+                ""
+            };
+            if why.is_empty() {
+                lang_log("fits", font, en);
+            } else {
+                lang_log("wide", font, &format!("{en}\t{why}"));
+            }
+        }
+        None => {
+            lang_log("drawn", font, t);
+            // A string with a translation drawn in English (no tr! at its
+            // site): fine under MIN_LINE, a report otherwise.
+            if tr.iter().any(|p| p.0 == t) && font.line_h() >= lang::tr::MIN_LINE {
+                lang_log("english", font, t);
+            }
+        }
+    }
 }
 
 /// ui-render with UIR_LANG: each distinct (kind, font, English text) once.
@@ -549,7 +575,6 @@ fn lang_log(kind: &str, font: Font, en: &str) {
 
 /// Every character of `s` has a glyph in `font` (W, k: ours where missing).
 pub fn has_all(font: Font, s: &str) -> bool {
-    let s = ui_text(font, s, i16::MAX, 0, MAXG);
     s.chars().all(|c| glyph_or_twin(font, c).is_some())
 }
 

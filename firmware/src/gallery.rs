@@ -1124,7 +1124,7 @@ fn r4(r: (u16, u16, u16, u16)) -> Rect {
 /// ui.rs page_title: bar, "< Back".
 fn title_bar() {
     fill((0, 0, 480, BAR_H), BAR);
-    sf::glyphs(sf::TEXT22, rect(BACK_X, 0, 110, BAR_H), "< Back", FG, BAR, 1, 0);
+    sf::glyphs(sf::TEXT22, rect(BACK_X, 0, 110, BAR_H), crate::tr!("< Back"), FG, BAR, 1, 0);
 }
 
 /// Word space of F14 text, px from the last glyph box of a word to the next
@@ -1191,13 +1191,13 @@ fn dialog_box(title: &str, body: &str, yes: Option<&str>) {
     frame(b, D_FRAME);
     match yes {
         Some(y) => {
-            lab(crate::dialog::NO, "Cancel", D_BTN);
+            lab(crate::dialog::NO, crate::tr!("Cancel"), D_BTN);
             frame(crate::dialog::NO, D_FRAME);
             lab(crate::dialog::YES, y, D_RED);
             frame(crate::dialog::YES, D_FRAME);
         }
         None => {
-            lab(OK_BTN, "OK", D_BTN);
+            lab(OK_BTN, crate::tr!("OK"), D_BTN);
             frame(OK_BTN, D_FRAME);
         }
     }
@@ -1786,7 +1786,7 @@ impl Gallery {
                 }
             }
             None => {
-                self.vmsg = Some(("Read error", 0, 0));
+                self.vmsg = Some((crate::tr!("Read error"), 0, 0));
                 self.paint |= P_ALL;
             }
         }
@@ -1802,10 +1802,10 @@ impl Gallery {
         let r = match r {
             Ok(()) => Ok(()),
             // The file being recorded (csvlog::delete_on): retrying cannot help.
-            Err(GErr::Busy) if csvlog::recording_name() == Some(self.cur.name) => Err(("Cannot delete", "Stop the recording")),
-            Err(GErr::Busy) => Err(("Cannot delete", "Disk busy, try again")),
-            Err(GErr::NotFound) => Err(("Cannot delete", "File not found")),
-            Err(_) => Err(("Cannot delete", "Delete failed")),
+            Err(GErr::Busy) if csvlog::recording_name() == Some(self.cur.name) => Err((crate::tr!("Cannot delete"), crate::tr!("Stop the recording"))),
+            Err(GErr::Busy) => Err((crate::tr!("Cannot delete"), crate::tr!("Disk busy, try again"))),
+            Err(GErr::NotFound) => Err((crate::tr!("Cannot delete"), crate::tr!("File not found"))),
+            Err(_) => Err((crate::tr!("Cannot delete"), crate::tr!("Delete failed"))),
         };
         match r {
             Ok(()) => {
@@ -1827,7 +1827,7 @@ impl Gallery {
             Err((t, m)) => {
                 self.dlg = Dlg::Info(t, m);
                 self.paint |= P_DLG;
-                if m == "File not found" {
+                if m == crate::tr!("File not found") {
                     self.need |= N_LIST | N_FIND;
                 }
             }
@@ -1920,7 +1920,7 @@ impl Gallery {
         match (e.kind, self.job.ph) {
             (Kind::Bmp, Ph::Head) => {
                 if size == 0 || !read_fb(io, &mut self.job.chain, 0) {
-                    return self.fail(if size == 0 { "Empty file" } else { "Read error" }, 0, 0);
+                    return self.fail(if size == 0 { crate::tr!("Empty file") } else { crate::tr!("Read error") }, 0, 0);
                 }
                 let b = match Bmp::parse(&io.data[..], size) {
                     Ok(b) => b,
@@ -1966,7 +1966,7 @@ impl Gallery {
             (Kind::Bmp, _) => {
                 let fb = self.job.i;
                 if !read_fb(io, &mut self.job.chain, fb) {
-                    return self.fail("Read error", 0, 0);
+                    return self.fail(crate::tr!("Read error"), 0, 0);
                 }
                 let len = (size - fb * BLK).min(BLK) as usize;
                 self.job.pix_block(&io.data[..len], fb);
@@ -2004,7 +2004,7 @@ impl Gallery {
             let mut t = [0u8; 160];
             let n = (hl as usize).min(t.len());
             if !src.read(dlog::FHDR as u32, &mut t[..n]) {
-                return self.fail("Read error", 0, 0);
+                return self.fail(crate::tr!("Read error"), 0, 0);
             }
             j.csv.header(&t[..n]);
             let k = ul.min(j.csv.unit.len());
@@ -2081,7 +2081,7 @@ impl Gallery {
         let j = &mut self.job;
         let c = j.csv;
         // The recording in progress: only its committed part is read.
-        let none = if csvlog::recording_name() == Some(j.ent.name) { "Recording" } else { "No data" };
+        let none = if csvlog::recording_name() == Some(j.ent.name) { crate::tr!("Recording") } else { crate::tr!("No data") };
         let mut func = Tb::new();
         func.bytes(if c.fl > 0 { &c.func[..c.fl as usize] } else { b"Log" });
         let mut rows = Tb::new();
@@ -2200,24 +2200,24 @@ impl Gallery {
         match self.mode {
             Mode::Grid => {
                 title_bar();
-                sf::glyphs(sf::TEXT22, rect(0, 0, 480, BAR_H), "Gallery", FG, BAR, 8, 0);
+                sf::glyphs(sf::TEXT22, rect(0, 0, 480, BAR_H), crate::tr!("Gallery"), FG, BAR, 8, 0);
                 fill((0, BAR_H, 480, 320 - BAR_H), M_BG);
                 self.job = JOB0;
                 self.todo = 0;
                 match self.st {
                     St::Listing => {
                         let (m, d) = match self.busy {
-                            Some(b) => ("Disk busy", busy_text(b)),
+                            Some(b) => (crate::tr!("Disk busy"), busy_text(b)),
                             None => ("Reading the disk", ""),
                         };
                         message(M_BG, m, d);
                     }
-                    St::NoDisk => message(M_BG, "No disk", "The SPI flash disk is missing or not FAT16"),
-                    St::Error => message(M_BG, "Disk read error", "Leave and open the gallery again to retry"),
+                    St::NoDisk => message(M_BG, crate::tr!("No disk"), "The SPI flash disk is missing or not FAT16"),
+                    St::Error => message(M_BG, crate::tr!("Disk read error"), "Leave and open the gallery again to retry"),
                     St::Ok => {
                         self.grid_info();
                         if self.total == 0 {
-                            message(M_BG, "No screenshots or logs", "Swipe down with 3 fingers to save a screenshot");
+                            message(M_BG, crate::tr!("No screenshots or logs"), "Swipe down with 3 fingers to save a screenshot");
                         } else {
                             for i in 0..self.n {
                                 self.tile(i);
@@ -2282,7 +2282,7 @@ impl Gallery {
                 }
                 message(bg, m, t.str());
             }
-            (None, Some(b)) => message(bg, "Disk busy", busy_text(b)),
+            (None, Some(b)) => message(bg, crate::tr!("Disk busy"), busy_text(b)),
             _ => {}
         }
     }
@@ -2305,21 +2305,23 @@ impl Gallery {
     fn nav(&self) {
         fill((0, NAV_Y - 2, 480, NAV_H + 4), M_BG);
         let pages = self.pages();
-        for (x, txt, on) in [(PREV_X, "< Prev", self.page > 0), (NEXT_X, "Next >", self.page + 1 < pages)] {
+        for (x, txt, on) in [(PREV_X, crate::tr!("< Prev"), self.page > 0), (NEXT_X, crate::tr!("Next >"), self.page + 1 < pages)] {
             sf::rbox(rect(x, NAV_Y, NAV_W, NAV_H), 6, M_TILE, M_BG);
             sf::glyphs(sf::TEXT22, rect(x, NAV_Y, NAV_W, NAV_H), txt, if on { FG } else { DIM }, M_TILE, 8, 0);
         }
         let mut t = Tb::new();
-        match self.busy {
-            Some(_) => t.s("Disk busy"),
+        // Tb keeps ASCII only: the translated text goes straight to the draw.
+        let s = match self.busy {
+            Some(_) => crate::tr!("Disk busy"),
             None => {
                 t.s("Page ");
                 t.u(self.page + 1);
                 t.s(" of ");
                 t.u(pages);
+                t.str()
             }
-        }
-        small(rect(PREV_X + NAV_W + 6, NAV_Y, NEXT_X - PREV_X - NAV_W - 12, NAV_H), t.str(), FG, M_BG, 8);
+        };
+        small(rect(PREV_X + NAV_W + 6, NAV_Y, NEXT_X - PREV_X - NAV_W - 12, NAV_H), s, FG, M_BG, 8);
     }
 
     /// Static part of tile `i` (frame, placeholder, name and size); its
@@ -2353,8 +2355,8 @@ impl Gallery {
     fn paint_dialog(&mut self) {
         match self.dlg {
             Dlg::Delete | Dlg::Deleting => {
-                let t = if self.cur.kind == Kind::Csv { "Delete this log?" } else { "Delete screenshot?" };
-                dialog_box(t, name_txt(&self.cur.name).str(), Some("Delete"))
+                let t = if self.cur.kind == Kind::Csv { crate::tr!("Delete this log?") } else { crate::tr!("Delete screenshot?") };
+                dialog_box(t, name_txt(&self.cur.name).str(), Some(crate::tr!("Delete")))
             }
             Dlg::Info(t, m) => dialog_box(t, m, None),
         }
@@ -2431,7 +2433,7 @@ fn title_bar_view(rank: u32, total: u32, e: &Ent) {
         small(rect(gx + wn + 10, 0, wi + 2, BAR_H), idx.str(), DIM, BAR, 1);
     }
     sf::rbox(rect(DEL.0, DEL.1, DEL.2, DEL.3), 6, D_RED, BAR);
-    sf::glyphs(sf::TEXT22, rect(DEL.0, DEL.1, DEL.2, DEL.3), "Delete", FG, D_RED, 8, 0);
+    sf::glyphs(sf::TEXT22, rect(DEL.0, DEL.1, DEL.2, DEL.3), crate::tr!("Delete"), FG, D_RED, 8, 0);
 }
 
 impl Job {

@@ -389,7 +389,7 @@ pub fn setup(v: &dec::SetupVals) {
     let r = rect(14, 21, 399, 40);
     fill_c(rect(14, 21, 399, 38), screen, C_POP_BG);
     fill_c(rect(14, 59, 399, 2), screen, C_POP_TAB);
-    let t = Ink::new(sf::SC_F16, r, "Decode", 8, 0);
+    let t = Ink::new(sf::SC_F16, r, crate::tr!("Decode"), 8, 0);
     paint(isect(t.bx, r), &[(K_TEXT, C_POP_BG)], |x, y| match t.at(x, y) {
         Some(g) => (C_FILL, tag(1, g)),
         None => (C_POP_BG, 0),

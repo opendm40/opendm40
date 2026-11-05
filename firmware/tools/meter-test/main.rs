@@ -2,6 +2,14 @@
 // UF-21): the modules are compiled for the host with their register-level
 // dependencies; the tests only call pure logic (no MMIO is touched).
 #![allow(dead_code, unused_imports, clippy::all)]
+// src/lang.rs `tr!` as in the English image (stockfont.rs, which has it, is not here).
+#[macro_export]
+macro_rules! tr {
+    ($s:literal) => {
+        $s
+    };
+}
+
 #[path = "../../src/pack10.rs"]
 mod pack10;
 #[path = "../../src/mmio.rs"]

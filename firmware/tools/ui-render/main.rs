@@ -1130,12 +1130,12 @@ pub fn touchcal_scene(k: u8, long: bool) {
 pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
     let mut v = vec![""; ui::SET_N];
     for (id, t) in [
-        (ui::S_DIM, "5 min"), (ui::S_SHUTDOWN, "30 min"), (ui::S_BACKLIGHT, "55%"), (ui::S_VOLUME, "50%"), (ui::S_BT, "ON"),
-        (ui::S_START, "Multimeter"), (ui::S_RAILS, "Auto (per view)"), (ui::S_RATE, "MED  5.0/s"),
-        (ui::S_SMOOTH, "OFF"), (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, "Off (stock)"),
-        (ui::S_PRESS, "ON"), (ui::S_TAP_STEP, "Corners"), (ui::S_JACK, "ON"), (ui::S_ALARM, "Loud"),
-        (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, "OFF (stock)"), (ui::S_ACC, "ON"), (ui::S_OHM_NEG, "OFF (stock)"),
-        (ui::S_REMEMBER, "OFF"),
+        (ui::S_DIM, crate::tr!("5 min")), (ui::S_SHUTDOWN, crate::tr!("30 min")), (ui::S_BACKLIGHT, "55%"), (ui::S_VOLUME, "50%"), (ui::S_BT, crate::tr!("ON")),
+        (ui::S_START, crate::tr!("Multimeter")), (ui::S_RAILS, crate::tr!("Auto (per view)")), (ui::S_RATE, "MED  5.0/s"),
+        (ui::S_SMOOTH, crate::tr!("OFF")), (ui::S_DMM_ROW, crate::tr!("Bargraph")), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, crate::tr!("Off (stock)")),
+        (ui::S_PRESS, crate::tr!("ON")), (ui::S_TAP_STEP, crate::tr!("Corners")), (ui::S_JACK, crate::tr!("ON")), (ui::S_ALARM, crate::tr!("Loud")),
+        (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, crate::tr!("OFF (stock)")), (ui::S_ACC, crate::tr!("ON")), (ui::S_OHM_NEG, crate::tr!("OFF (stock)")),
+        (ui::S_REMEMBER, crate::tr!("OFF")),
     ] {
         v[id as usize] = t;
     }
@@ -1148,11 +1148,11 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
 /// The widest value of every setting (the fit checks).
 fn set_vals_worst() -> Vec<&'static str> {
     set_vals(&[
-        (ui::S_DIM, "10 min"), (ui::S_SHUTDOWN, "1 hour"), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, "OFF"),
+        (ui::S_DIM, crate::tr!("10 min")), (ui::S_SHUTDOWN, crate::tr!("1 hour")), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, crate::tr!("OFF")),
         (ui::S_START, "DMM + Scope"), (ui::S_RATE, "SLOW (n/a here)"), (ui::S_SMOOTH, "HIGH"),
-        (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, "OFF (stock)"),
-        (ui::S_TAP_STEP, "Halves (stock)"), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, "Volume"),
-        (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, "OFF (stock)"),
+        (ui::S_DMM_ROW, crate::tr!("Bargraph")), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, crate::tr!("OFF (stock)")),
+        (ui::S_TAP_STEP, crate::tr!("Halves (stock)")), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, crate::tr!("Volume")),
+        (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, crate::tr!("OFF (stock)")),
     ])
 }
 
@@ -1295,7 +1295,6 @@ fn save(out: &str, name: &str) {
 }
 
 fn main() {
-    stockfont::lang::set(cfg!(any(feature = "zh", feature = "ru", feature = "it", feature = "fr")));
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
     host::map_flash();
     // `main <out> --stock <dir>`: only the replica scope scenes, 1x, for the
@@ -2518,7 +2517,7 @@ fn main() {
             // Prefilled current value, selected (ui-review #10).
             ui::keypad_input(true, "2", "MHz", true);
             ck.check_opts("gen/keypad-freq-sel", &gen_regions, false);
-            ui::keypad(ui::KP_FREQ, "Frequency", "2", "MHz", true);
+            ui::keypad(ui::KP_FREQ, crate::tr!("Frequency"), "2", "MHz", true);
             save(&out, "g03-keypad-freq-sel");
             host::reset(0);
             ui::gen_static(&w.gen);
@@ -2529,9 +2528,9 @@ fn main() {
         }
     }
     w.gen.apply(gen::Settings::DEFAULT);
-    for title in ["Hold & Limits: Temperature", "Settings", "Hold & Limits: Capacitance"] {
+    for title in ["Hold & Limits: Temperature", crate::tr!("Settings"), "Hold & Limits: Capacitance"] {
         host::reset(0);
-        ui::list_page(title, &ui::LIMIT_ROWS, &["ON"; 9]);
+        ui::list_page(title, &ui::LIMIT_ROWS, &[crate::tr!("ON"); 9]);
         let keep = 40 * W;
         for p in emu().owner[keep..].iter_mut() {
             *p = 0;
@@ -2654,7 +2653,7 @@ fn main() {
         // Hold & Limits of the power meter (the W limits; widest values).
         for (hi, lo) in [("10600 W", "-10600 W"), ("-9999.99 mW", "-63.650 W")] {
             host::reset(0);
-            ui::list_page("Hold & Limits: Power", &ui::LIMIT_ROWS, &["ON", "ON", hi, lo, "", "", "", "ON", "Every reading"]);
+            ui::list_page("Hold & Limits: Power", &ui::LIMIT_ROWS, &[crate::tr!("ON"), crate::tr!("ON"), hi, lo, "", "", "", crate::tr!("ON"), crate::tr!("Every reading")]);
             ck.check_opts(&format!("limits-power/{hi}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))], false);
         }
         save(&out, "p18-power-limits-page");
@@ -2725,9 +2724,9 @@ fn main() {
     let set_cases = [
         set_vals_worst(),
         set_vals(&[]),
-        set_vals(&[(ui::S_RATE, "FAST  37/s"), (ui::S_SMOOTH, "LOW"), (ui::S_DMM_ROW, "History"), (ui::S_ALARM, "Volume"), (ui::S_USB, ui::usb_disk_name(false, true))]),
-        set_vals(&[(ui::S_RATE, "MED  --/s"), (ui::S_JACK, "Mask 5"), (ui::S_ALARM, "Off"), (ui::S_USB, ui::usb_disk_name(false, false))]),
-        set_vals(&[(ui::S_JACK, "OFF"), (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BACKLIGHT, "10%"), (ui::S_VOLUME, "0%")]),
+        set_vals(&[(ui::S_RATE, "FAST  37/s"), (ui::S_SMOOTH, "LOW"), (ui::S_DMM_ROW, crate::tr!("History")), (ui::S_ALARM, crate::tr!("Volume")), (ui::S_USB, ui::usb_disk_name(false, true))]),
+        set_vals(&[(ui::S_RATE, "MED  --/s"), (ui::S_JACK, "Mask 5"), (ui::S_ALARM, crate::tr!("Off")), (ui::S_USB, ui::usb_disk_name(false, false))]),
+        set_vals(&[(ui::S_JACK, crate::tr!("OFF")), (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BACKLIGHT, "10%"), (ui::S_VOLUME, "0%")]),
     ];
     for (k, vals) in set_cases.iter().enumerate() {
         for tab in 0..ui::SET_TABS.len() as u8 {
@@ -2740,26 +2739,26 @@ fn main() {
     // the widest limit values.
     for rec in ui::REC_INTERVALS {
         host::reset(0);
-        ui::list_page("Hold & Limits: Diode", &ui::LIMIT_ROWS, &["OFF", "OFF", "-99999.9 mA", "-99999.9 mA", "", "", "", "OFF", rec]);
+        ui::list_page("Hold & Limits: Diode", &ui::LIMIT_ROWS, &[crate::tr!("OFF"), crate::tr!("OFF"), "-99999.9 mA", "-99999.9 mA", "", "", "", crate::tr!("OFF"), rec]);
         ck.check_opts(&format!("limits/{rec}"), &page_regions, false);
-        if rec == "Every reading" {
+        if rec == crate::tr!("Every reading") {
             save(&out, "m11-hold-limits");
         }
     }
     // Record page: every interval x duration value in the steppers (they
     // fit the 134 px between the keys), the estimate texts, Start / Stop.
     for (k, (iv, ch, du, free, on)) in [
-        ("Every reading", "1 %", "Until stopped", "about 1193 h (limit)", false),
-        ("1 min", "1 %", "24 h", "about 62 h left", true),
-        ("On change", "0.1 %", "Until stopped", "about 62 h left", false),
-        ("On change", "5 %", "24 h", "< 1 h left", true),
-        ("10 s", "1 %", "10 min", "-- (disk busy)", false),
+        (crate::tr!("Every reading"), "1 %", crate::tr!("Until stopped"), "about 1193 h (limit)", false),
+        (crate::tr!("1 min"), "1 %", "24 h", "about 62 h left", true),
+        (crate::tr!("On change"), "0.1 %", crate::tr!("Until stopped"), "about 62 h left", false),
+        (crate::tr!("On change"), "5 %", "24 h", "< 1 h left", true),
+        ("10 s", "1 %", crate::tr!("10 min"), "-- (disk busy)", false),
         ("1 s", "5 %", "8 h", "< 1 h left", true),
-        ("Every reading", "0.1 %", "1 h", "-- (no disk)", false),
+        (crate::tr!("Every reading"), "0.1 %", "1 h", "-- (no disk)", false),
         // the fast logger (fastlog.rs): its estimate texts
-        ("Fast", "1 %", "Until stopped", "-- (DC/AC V or A only)", false),
-        ("Fast", "1 %", "10 min", "38400/s, 119 min left", true),
-        ("Fast", "1 %", "24 h", "640/s, 1234 h left", false),
+        (crate::tr!("Fast"), "1 %", crate::tr!("Until stopped"), "-- (DC/AC V or A only)", false),
+        (crate::tr!("Fast"), "1 %", crate::tr!("10 min"), "38400/s, 119 min left", true),
+        (crate::tr!("Fast"), "1 %", "24 h", "640/s, 1234 h left", false),
     ]
     .into_iter()
     .enumerate()
@@ -2780,7 +2779,7 @@ fn main() {
         }
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
-        for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: never steps to mV", false))] {
+        for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some((crate::tr!("AUTO+ recommended: never steps to mV"), false))] {
             // The app draws a note on the Voltage page only; the Resistor
             // page's note row holds its 600 Mohm item.
             if b == Button::Ohm && note.is_some() {
@@ -2915,12 +2914,12 @@ fn main() {
     }
 
     // Deferred fills (lcd.rs): pages and popups in a batch = drawn directly.
-    defer_check(&mut ck, "defer/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
+    defer_check(&mut ck, "defer/menu", || ui::main_menu(ui::view_label(ui::View::DmmScope)));
     let sv = set_vals_worst();
     for tab in 0..ui::SET_TABS.len() as u8 {
         defer_check(&mut ck, &format!("defer/settings{tab}"), || ui::settings(tab, &sv));
     }
-    defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
+    defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some((crate::tr!("AUTO+ recommended: never steps to mV"), false))));
     defer_check(&mut ck, "defer/help", || ui::help_page(0));
     defer_check(&mut ck, "defer/gen", || ui::gen_static(&w.gen));
     defer_check(&mut ck, "defer/dmm", || {
@@ -2936,11 +2935,11 @@ fn main() {
     }
 
     // Strip rendering (lcd.rs): the pages App::repaint draws in strips.
-    strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
+    strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_label(ui::View::DmmScope)));
     for tab in 0..ui::SET_TABS.len() as u8 {
         strip_check(&mut ck, &format!("strip/settings{tab}"), || ui::settings(tab, &sv));
     }
-    strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
+    strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some((crate::tr!("AUTO+ recommended: never steps to mV"), false))));
     strip_check(&mut ck, "strip/help", || ui::help_page(0));
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
     // The generator page's first strip draw after a boot (#153), each wave
@@ -2982,11 +2981,11 @@ fn main() {
     // 6d. Main menu (gallery row on top, four tiles, combined-view row).
     for combo in [ui::View::DmmScope, ui::View::Dmm] {
         host::reset(0);
-        ui::main_menu(ui::view_name(combo));
+        ui::main_menu(ui::view_label(combo));
         ck.check_opts(&format!("menu/{}", ui::view_name(combo)), &[("screen", Bx::new(0, 0, 480, 320))], false);
     }
     host::reset(0);
-    ui::main_menu(ui::view_name(ui::View::DmmScope));
+    ui::main_menu(ui::view_label(ui::View::DmmScope));
     save(&out, "m04-main-menu");
 
     // 6c. Toasts (dialog.rs) over the DMM page: the longest texts. The tap
@@ -3021,8 +3020,8 @@ fn main() {
         ("Saved LOG000.DLG", true),
         ("Disk full: log ended", false),
         ("No reading to log", false),
-        ("Recording CSV", true),
-        ("Screenshot failed", false),
+        (crate::tr!("Recording CSV"), true),
+        (crate::tr!("Screenshot failed"), false),
         (dialog::AUTO_DC, true),
         ("Auto power-off in 30 s", false),
         // Tap on the DMM value (resolution / rate), widest variants.
@@ -3036,8 +3035,8 @@ fn main() {
         (sentinel::Alert::Overload.toast(), false),
         // Firmware file on the USB disk (vwrite.rs, app.rs).
         (dialog::FW_BAD, false),
-        ("Installing firmware...", true),
-        // Settings 3/3 "USB disk" (decision 2026-10-22 #6).
+        (crate::tr!("Installing firmware..."), true),
+        // Settings 3/3 crate::tr!("USB disk") (decision 2026-10-22 #6).
         ("Re-plug USB to apply", true),
         (sentinel::Alert::Dc.toast(), false),
         (sentinel::Alert::Ac.toast(), false),
@@ -3050,7 +3049,7 @@ fn main() {
         ("DC coupling (DC V row)", true),
         ("AC coupling (AC V row)", true),
         ("DC-coupled AC row", true),
-        ("Current too high: reduce it", false),
+        (crate::tr!("Current too high: reduce it"), false),
         // Refusals while a data-logger session runs (scope_page.rs source
         // badge, main.rs inrush).
         ("Wave: data logger running", false),
@@ -3095,7 +3094,7 @@ fn main() {
             ck.check(&format!("fuse/{k}"), &[("screen", Bx::new(0, 0, 480, 320)), ("box", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
             save(&out, &format!("f0{k}-fuse-check"));
         }
-        for t in ["Lead from V/ohm jack to A", "nothing else connected", "OL: no path from V to A", "Replace: 10 A ceramic fuse", "One lead V/ohm to A only", "599.9 ohm, expect ~48"] {
+        for t in [crate::tr!("Lead from V/ohm jack to A"), crate::tr!("nothing else connected"), crate::tr!("OL: no path from V to A"), crate::tr!("Replace: 10 A ceramic fuse"), crate::tr!("One lead V/ohm to A only"), "599.9 ohm, expect ~48"] {
             ck.cases += 1;
             let w = stockfont::text_width(stockfont::ASCII26, t, 2);
             if w > dialog::FBOX.2 as i16 - 16 {
@@ -3575,17 +3574,19 @@ fn main() {
         save(&out, "g01-gen");
         // Settings: every section (widest values).
         let sv = set_vals_worst();
-        for (tab, (name, _)) in ui::SET_TABS.iter().enumerate() {
+        // File names in English in every image (the tab names are translated).
+        let names = ["display", "alerts", "power", "multimeter", "scope", "other"];
+        for (tab, name) in names.iter().enumerate().take(ui::SET_TABS.len()) {
             host::reset(0);
             ui::settings(tab as u8, &sv);
-            save(&out, &format!("m01-settings-{tab}-{}", name.to_lowercase()));
+            save(&out, &format!("m01-settings-{tab}-{name}"));
         }
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
         {
-            let combo = ui::view_name(ui::View::DmmScope);
+            let combo = ui::view_label(ui::View::DmmScope);
             let sv = set_vals(&[(ui::S_USB, ui::usb_disk_name(false, false))]);
-            let lim = ["ON", "ON", "1.000 V", "--", "", "", "", "OFF", "1 s"];
+            let lim = [crate::tr!("ON"), crate::tr!("ON"), "1.000 V", "--", "", "", "", crate::tr!("OFF"), "1 s"];
             let row = |r: u8, part: i8, on: bool, f: &dyn Fn()| {
                 ui::set_row_only(Some(ui::RowPress { row: r, part, on }));
                 f();
@@ -3622,7 +3623,7 @@ fn main() {
             // MF range pages (V with Wave, A with Wave / Inrush / Fuse check,
             // ohm) and the Power Settings page: every button.
             let d_rv = || {
-                ui::range_page(Button::Volt, Some(5), 3, Some(("AUTO+ recommended: never steps to mV", false)));
+                ui::range_page(Button::Volt, Some(5), 3, Some((crate::tr!("AUTO+ recommended: never steps to mV"), false)));
                 ui::wave_button();
             };
             let d_ra = || {
@@ -3726,7 +3727,7 @@ fn main() {
         save(&out, "m03b-range-a-wave");
         // AUTO coupling selected (the fourth coupling button, "AC/DC").
         host::reset(0);
-        ui::range_page(Button::Volt, Some(5), 3, Some(("AUTO+ recommended: never steps to mV", false)));
+        ui::range_page(Button::Volt, Some(5), 3, Some((crate::tr!("AUTO+ recommended: never steps to mV"), false)));
         ui::wave_button();
         save(&out, "m03c-range-v-auto");
         // Second ohm mode ("ON" low current): Resistor Settings with it
@@ -3740,7 +3741,7 @@ fn main() {
         // While recording: the Record button red (V, power, temperature).
         ui::set_rec_on(true);
         host::reset(0);
-        ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
+        ui::range_page(Button::Volt, Some(6), 0, Some((crate::tr!("AUTO+ recommended: never steps to mV"), false)));
         ui::wave_button();
         save(&out, "m03i-range-v-recording");
         host::reset(0);
@@ -4123,9 +4124,9 @@ fn main() {
             btn_bg: btn.1,
             enabled: btn.2,
         };
-        let arm = ("Arm", ui::SEL, true);
-        let cancel = ("Cancel", 0xF800u16, true);
-        let saving = ("Saving ...", ui::BTN, false);
+        let arm = (crate::tr!("Arm"), ui::SEL, true);
+        let cancel = (crate::tr!("Cancel"), 0xF800u16, true);
+        let saving = (crate::tr!("Saving ..."), ui::BTN, false);
         let cases: Vec<(&str, Vals, Option<&Vec<u16>>)> = vec![
             ("i01-inrush-armed", v("+1.0 A", "", "", "Armed: 0.123 A now", C_ARMED, "", "", cancel), None),
             ("i02-inrush-dc", v("+1.0 A", "7.912", "11.786", "Saved LOGS/FAST003.DLG", C_OK, "0.050", "FAST003", arm), Some(&dc)),
