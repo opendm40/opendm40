@@ -8,6 +8,12 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 - **Scope:** a second tap on the CH1 title with its popup open hides CH1.
+### New
+
+- **Chinese README and user manual** (machine translation, not yet reviewed
+  by a native speaker): [README.zh.md](README.zh.md),
+  [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
 ## v0.4.0 (2026-11-02)
 
 ### New
