@@ -2586,11 +2586,13 @@ impl App {
                     self.sp.popup = su::Popup::Mf(t);
                     let new = su::popup_box(self.sp.popup);
                     if let (View::Scope, Some(o), Some(n)) = (self.view, old, new) {
-                        // The new box, then the graph rows the old one
-                        // covered and the new one does not.
-                        self.sp_popup_draw();
+                        // The graph rows (and the panel) the old box
+                        // covered and the new one does not, then the new
+                        // box over them: the MF box reaches into the
+                        // panel, which must not end up over it.
                         let m = self.sp_model(now);
                         su::regraph_rows(&m, n, n.y + n.h, o.y + o.h);
+                        self.sp_popup_draw();
                     } else {
                         // The combined view (its popups cover the meter
                         // strip): the whole page, the graph skipping the

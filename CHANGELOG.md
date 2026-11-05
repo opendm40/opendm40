@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** the MF menu leaves nothing on the right panel, and the panel is no longer drawn over it after a tab change.
 ## v0.4.0 (2026-11-02)
 
 ### New

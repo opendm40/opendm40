@@ -1168,6 +1168,10 @@ pub fn top_bar(m: &Model) {
 }
 
 pub fn panel(m: &Model) {
+    // The background first: the parts paint their own rects only, and the
+    // MF box (to x 413) reaching into the panel left its pixels in the gaps
+    // between them.
+    lcd::fill_rect(PANEL_X as u16, 20, (480 - PANEL_X) as u16, 281, C_BAR);
     for k in 0..NPANEL {
         panel_part(m, k);
     }
