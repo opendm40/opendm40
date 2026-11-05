@@ -146,8 +146,7 @@ fn confirm(title: &str, body: &str) {
     button(YES, "Yes", BTN_RED);
 }
 
-/// Draw the Reset settings confirm; hit test = `power_off_hit`. .cold.
-#[inline(never)]
+/// Draw the Reset settings confirm; hit test = `power_off_hit`.
 pub fn settings_reset() {
     confirm("Reset settings?", "Calibration, files stay");
 }

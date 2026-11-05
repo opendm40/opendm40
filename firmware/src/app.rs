@@ -598,8 +598,8 @@ impl App {
     /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
     /// loader never ran; why the load matters is inferred).
     /// Reset settings (Settings > Other): the confirm, unless a recording or
-    /// a host's logger session runs (toast). .cold (link-native.x), as the
-    /// other reset_* functions: a tap, a boot; never on a measurement path.
+    /// a host's logger session runs (toast). In region B: the feature variants
+    /// (acdc-meth, memprobe) have no room in C for it.
     #[inline(never)]
     fn reset_ask(&mut self, now: u64) {
         if !self.reset_refused(now) {

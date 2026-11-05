@@ -134,7 +134,7 @@ const _: () = assert!(W_POWER == 48 && W_POWER_ZD == 59 && W_TOUCH_CAL == 64);
 
 /// The record after Reset settings, in place: `old` is the record that asked
 /// for it, `defaults` a fresh App's words; the calibration stays, the function
-/// is DC V. .cold.
+/// is DC V.
 #[inline(never)]
 pub fn reset_record(old: &mut [u32; WORDS], defaults: impl Fn(usize) -> u32) {
     const ZERO_BITS: u32 = 0x1_FFFF; // pw_words w[6]: zy, zero_ok
@@ -150,7 +150,7 @@ pub fn reset_record(old: &mut [u32; WORDS], defaults: impl Fn(usize) -> u32) {
     old[W_POWER + 6] = old[W_POWER + 6] & !ZERO_BITS | z & ZERO_BITS;
 }
 
-/// Mark the backup SRAM record as asking for the defaults (REC_RESET; .cold).
+/// Mark the backup SRAM record as asking for the defaults (REC_RESET).
 #[inline(never)]
 pub fn request_reset() {
     let mut w = [0u32; WORDS];
@@ -232,7 +232,6 @@ pub fn same_session() -> bool {
     crate::boot::info().is_some_and(|i| i.last == LAST_NORMAL || crate::boot::updated_to_this(i.last))
 }
 
-#[inline(always)] // one per main-loop save and one in the cold `request_reset`
 pub fn save(p: &[u32; WORDS]) {
     unsafe {
         w32(BKP, MAGIC);
