@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- Overflow names the range: **>60V**, **>600MΩ** beside the big 0L, in manual ranges and at the top of AUTO.
+
 ## v0.4.0 (2026-11-02)
 
 ### New

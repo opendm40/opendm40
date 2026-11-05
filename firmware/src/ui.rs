@@ -325,6 +325,9 @@ pub struct DmmView {
     /// The "Overflow" caption next to the main readout's "0L" is drawn
     /// (`ol_word`).
     ol_word: bool,
+    /// What the caption's range line shows (a hash of the text): a new
+    /// range while the reading stays 0L redraws it.
+    ol_range: u32,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
     /// history row (Settings > Display "DMM row": History) and the power meter
@@ -632,6 +635,7 @@ impl DmmView {
             ohm_on: false,
             last_iohm: 254,
             ol_word: false,
+            ol_range: 0,
             acc: Some(Acc { model: 2, tc: true }),
             acc_on: true,
             acc_k: None,
@@ -720,14 +724,7 @@ impl DmmView {
         if unit.is_empty() {
             return;
         }
-        let num = |b: &mut [u8; 16], v: f32| -> usize {
-            let mut t = [0u8; 16];
-            let s = crate::dmm::format(&mut t, v, 2);
-            let s = if s.as_bytes().contains(&b'.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
-            let n = s.len().min(16);
-            b[..n].copy_from_slice(&s.as_bytes()[..n]);
-            n
-        };
+        let num = scale_num;
         // The unit as the readout and the accuracy label beside it spell
         // it (F14 has the ohm glyph): "600 KΩ", not "600 kOhm".
         let mut ub = [0u8; 16];
@@ -909,13 +906,20 @@ impl DmmView {
         let ow = rect(OL_WORD.x, OL_WORD.y + md, OL_WORD.w, OL_WORD.h);
         let ok = r.main.ol;
         if !ok && self.ol_word {
-            lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
+            let top = ow.y - OL_RANGE_H;
+            lcd::fill_rect(ow.x as u16, top as u16, ow.w as u16, (ow.h + OL_RANGE_H) as u16, BG);
             self.ol_word = false;
         }
         sf::cells_diff(sf::F78, rect(x0, 68 + md, w, 80), t, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
-        if ok && (!same_layout || !self.ol_word) {
-            ol_word(ow, color);
-            self.ol_word = true;
+        if ok {
+            let mut rb = [0u8; 24];
+            let rt = if self.power { "" } else { ol_range_text(&mut rb, r) };
+            let rk = rt.bytes().fold(0x811c_9dc5u32, |a, b| (a ^ b as u32).wrapping_mul(0x0100_0193));
+            if !same_layout || !self.ol_word || rk != self.ol_range {
+                self.ol_range = rk;
+                ol_word(ow, rt, color);
+                self.ol_word = true;
+            }
         }
         if self.last_unit != r.main.unit || self.last_mode != mkey {
             self.last_unit = r.main.unit;
@@ -1197,14 +1201,48 @@ impl DmmView {
 /// The "0L" caption's box on the DMM page: the empty cells after the
 /// "0L" of the main readout (CELLS[4]: "0L" ends at x 304), bottom-aligned
 /// on the digits' baseline; left of the limit badge / unit box (x >= 403).
-const OL_WORD: sf::Rect = rect(312, VALUE_BASE as i16 - 22, 86, 22);
+pub const OL_WORD: sf::Rect = rect(310, VALUE_BASE as i16 - 22, 88, 22);
+/// The range line's height, directly above OL_WORD.
+const OL_RANGE_H: i16 = 24;
+
+/// A scale value as the bargraph's labels write it ("60", "0.6"), bytes in `b`.
+fn scale_num(b: &mut [u8; 16], v: f32) -> usize {
+    let mut t = [0u8; 16];
+    let s = crate::dmm::format(&mut t, v, 2);
+    let s = if s.as_bytes().contains(&b'.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
+    let n = s.len().min(16);
+    b[..n].copy_from_slice(&s.as_bytes()[..n]);
+    n
+}
+
+/// The range that overflowed, as the bargraph's full-scale label: ">60V",
+/// ">600MΩ". Empty where a reading has no such range (temperature, Hz).
+pub fn ol_range_text<'a>(b: &'a mut [u8; 24], r: &Reading) -> &'a str {
+    if matches!(r.mode, 14 | 15) || r.main.unit.is_empty() {
+        return "";
+    }
+    let fs = crate::bargraph::mode_full_scale(r.mode, r.range, r.main.dec, r.main.unit);
+    // The 6 / 60 mF ranges read in uF: ">60mF" fits the box, ">60000uF" not.
+    let mf = r.mode == 13 && fs >= 6000.0 && r.main.unit != "nF";
+    let mut v = [0u8; 16];
+    let k = scale_num(&mut v, if mf { fs / 1000.0 } else { fs });
+    let mut ub = [0u8; 16];
+    let us = sf::unit_text(if mf { "mF" } else { r.main.unit }, &mut ub).as_bytes();
+    let n = 1 + k + us.len().min(5);
+    b[0] = b'>';
+    b[1..1 + k].copy_from_slice(&v[..k]);
+    b[1 + k..n].copy_from_slice(&us[..n - 1 - k]);
+    core::str::from_utf8(&b[..n]).unwrap_or("")
+}
 
 /// What "0L" means, in the readout's colour and F14 (the old "Overload"
-/// caption's font): "Overflow" in every function (owner 2026-11-01). Region B (F14: blob in
-/// A2, index in B), not .cold: an OL can start while the fast logger's AD2
+/// caption's font): "Overflow" in every function (owner 2026-11-01), under
+/// the range that overflowed in TEXT22. Region B (F14: blob in A2, index in
+/// B; TEXT22 in B), not .cold: an OL can start while the fast logger's AD2
 /// stream runs (V / A functions).
 #[inline(never)] // drawn on entering OL only
-fn ol_word(r: sf::Rect, c: Color) {
+fn ol_word(r: sf::Rect, range: &str, c: Color) {
+    sf::label(sf::TEXT22, rect(r.x, r.y - OL_RANGE_H, r.w, OL_RANGE_H), range, c, BG, 1, 1);
     sf::label(sf::F14, r, "Overflow", c, BG, 2, 1);
 }
 
