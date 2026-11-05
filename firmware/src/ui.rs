@@ -53,7 +53,7 @@ pub const SHORT_FG: Color = 0x07E0;
 /// The indicator's band over the aux row (y 38..63, as the temperature
 /// chip): 4 px under the status bar and above the digits' cells (68).
 pub const SHORT_RECT: sf::Rect = rect(8, 38, 464, 26);
-/// Indicator style, bit 0: the band with SHORT / BEEP; bit 1: the main
+/// Indicator style, bit 0: the band with BEEP; bit 1: the main
 /// digits green. The firmware draws SHORT_STYLE; ui-render also draws the
 /// others (`set_short_style`, the PR's comparison).
 pub const SHORT_STYLE: u8 = 3;
@@ -338,8 +338,8 @@ pub struct DmmView {
     acc_k: Option<(u32, u8, &'static str)>,
     acc_drawn: bool,
     /// The beeper indicator to show (set by the app, `App::beep_ind`): 0
-    /// none, 1 SHORT (a diode-mode short), 2 BEEP (continuity, a diode
-    /// pattern); and the band as drawn (`short_sync`).
+    /// none, 1 continuity or a diode-mode short, 2 a diode pattern, the band
+    /// says BEEP for all (chat 675); and the band as drawn (`short_sync`).
     pub short: u8,
     short_drawn: u8,
 }
@@ -659,7 +659,7 @@ impl DmmView {
         if want != 0 {
             sf::rbox(b, 6, SHORT_BG, BG);
             // The scope's 26 px face (the status bar's F21 lacks B / E).
-            sf::glyphs(sf::ASCII26, b, if want == 1 { "SHORT" } else { "BEEP" }, 0xFFFF, SHORT_BG, 8, 2);
+            sf::glyphs(sf::ASCII26, b, "BEEP", 0xFFFF, SHORT_BG, 8, 2);
         } else {
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
         }

@@ -684,7 +684,7 @@ impl App {
         ui::strip_acc(&mut d, &r, self.acc_ctx());
         if self.dmm_view.short != 0 && r.alert == crate::sentinel::Alert::None {
             // The beeper indicator (`beep_ind`): the badge and the value green.
-            d.badge = if self.dmm_view.short == 1 { "SHORT" } else { "BEEP" };
+            d.badge = "BEEP";
             d.badge_col = ui::SHORT_BG;
             d.short = true;
         }

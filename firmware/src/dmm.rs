@@ -6055,9 +6055,8 @@ impl Dmm {
     }
 
     /// The continuity / diode beeper sounds now (or would, at volume 0 % /
-    /// `mute`): 1 = a short (diode's continuous tone below 22 mV), 2 = BEEP
-    /// (continuity's comparator, which also holds for a few ohms that are no
-    /// short: chat 675; a diode pattern's on phase), 0 = silent (and
+    /// `mute`): 1 = continuity's comparator or diode's continuous tone below
+    /// 22 mV, 2 = a diode pattern's on phase, 0 = silent (and
     /// in every other function, while the source (DBG:SRC) or the power
     /// meter has the row).
     pub fn beeping(&self) -> u8 {
@@ -6065,7 +6064,7 @@ impl Dmm {
             return 0;
         }
         match self.mode {
-            11 => 2,
+            11 => 1,
             12 if self.beep_class == 0 => 1,
             12 => 2,
             _ => 0,

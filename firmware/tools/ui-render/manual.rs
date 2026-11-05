@@ -41,7 +41,7 @@ struct Dp {
     ohm_on: bool,
     /// The rate applies (DC V / A / ohm), else the chip reads n/a.
     rate: bool,
-    /// The beeper indicator (DmmView::short): 1 SHORT, 2 BEEP.
+    /// The beeper indicator (DmmView::short): 1 continuity or a short, 2 a pattern.
     short: u8,
 }
 
@@ -345,7 +345,7 @@ pub fn run(out: &str) -> usize {
         ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.2, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.21, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         // Continuity: below the threshold, the beeper indicator on.
-        ("dmm-cont", Dp { rate: false, short: 2, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
+        ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.

@@ -643,7 +643,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
   readings only. Silent at Key/alert volume 0 %.
-- The same green band while it beeps: **SHORT** below 22 mV, **BEEP** for a
+- The same green **BEEP** band while it beeps: below 22 mV and for a
   pattern.
 
 
