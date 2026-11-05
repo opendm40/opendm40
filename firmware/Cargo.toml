@@ -75,6 +75,16 @@ dbg-acdc = []
 # commands are refused (undefined header). Build with --features dbg-touch
 # for a touch session (docs/native-boot.md "SRAM audit").
 dbg-touch = []
+# The developer image: its DBG: commands for tests, tuning and experiments
+# (DBG:DRAG, IDLE, FLASH?, ISR?, FAST?, CAP..., CHG..., SCANLINE..., TE?,
+# VDISK..., PINCH, GEST?, READout?, ALARm?, SENTinel:LOG? / VARiant / PRECond,
+# CH2:LAG, GENTRIG..., HWTRIG..., POWer:ROW? / RAW? / POKE / STAT / DISC).
+# Off by default: the release images (English and every language) refuse
+# them as undefined headers and gain ~15 KB of region B. `./build.sh --dev`
+# builds the developer image; tools/reload.sh and the emulator build it by
+# default. The other DBG: commands (PING, BOOT?, VIEW?, TAP, SWIPE, KEY,
+# UPLoad, UPDATE, ...) are in every image.
+dbg-dev = []
 # DBG:PROF? / DBG:PROF:RESET, the main-loop profiler (src/prof.rs; 1 KB of
 # RAM and its hooks in every pass). Off by default: the hooks are empty and
 # the two commands are refused (undefined header).

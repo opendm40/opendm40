@@ -19,7 +19,7 @@ to the internal flash 0x08080000..0x080C1000 of that boot.
     reads the same bytes; an AD2 stream to the host while INFO/ is read: NOT
     READY from exactly the slow-bank sectors
 
-  cd firmware && ./build.sh && DM40_TDIR=target/ks DM40_OUT=/tmp/ks.bin ./build.sh --features keep-screen
+  cd firmware && ./build.sh --dev && DM40_TDIR=target/ks DM40_OUT=/tmp/ks.bin ./build.sh --dev --features keep-screen
   emu/mirrortest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 \\
       --app2 firmware/target/ks/thumbv7em-none-eabihf/release/opendm40
 

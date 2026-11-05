@@ -838,48 +838,19 @@ unless shown otherwise.
 | `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | USB |
 | `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>`; `4294967295` = no limit (the default after boot) | USB |
 | `DBG:BOOT?` | | `NONE`, or `B2,<57 words>,<renamed>`: boot and reset information ([below](#dbgboot)) | USB |
-| `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
-| `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
 | `DBG:VIEW?` | | `<page>,<Settings tab 1..6>,<wave view 1/0>,<trend chart ms/div>` | USB |
-| `DBG:READout?` | | `<kind F\|G\|P\|N>,<unit>,<value>,<hold>`: the DMM value as drawn | USB |
 | `DBG:TAP` | `<x>,<y>` | Taps the screen. | USB |
 | `DBG:SWIPE` | `L`, `R`, or `D,<fingers>` | Swipes (D,3 saves a screenshot, D,2 powers off). | USB |
-| `DBG:DRAG` | `<x0>,<y0>,<x1>,<y1>,<ms>[,<hold ms>[,<jitter px>]]` | One-finger drag; the jitter wobbles the path sideways. | USB |
 | `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
-| `DBG:TE?` | | Per phase (TE off; TE on, mode 0; TE on, mode 1; `;` between): `<samples>`, then `<level changes>,<samples high>` for PA3, PB13, PC1, PC15. Blocks ~0.3 s. ([LCD, TE](../../hw/README.md#lcd)) | USB |
-| `DBG:SCANLINE?` | | The panel's Get Scanline (0x45) and the pressed-feedback sync (it waits until the refresh scan has left the box): `<cal>,<lines>,<frame us>,<dir>,<sync>,<last box us>,<ns/px>,<last wait us>,<line at that write>,<window found>,<raw dummy>,<raw hi>,<raw lo>;` then 24 samples 1 ms apart, `<us>:<line>`. `<cal>` 1: the line moves (frame measured), 2: it does not (no sync). Blocks up to ~90 ms. | USB |
-| `DBG:SCANLINE:DIR` | `<n>` | The screen axis the scan sweeps `<n>`: 0 x, 1 479 - x, 2 y, 3 319 - y (1 at boot, inferred). | USB |
-| `DBG:SCANLINE:SYNC` | `0` or `1` | The pressed-feedback sync off or on. | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes. Only in builds with the `dbg-diag` feature. | USB |
-| `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
-| `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
-| `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
-| `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text. Only in builds with the `dbg-touch` feature. | USB |
 | `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |
 | `DBG:TOUCH:CAL[?]` | `RESET`, or `a,b,c,d,e,f` | The [touch calibration](README.md#touch-calibration) x' = a x + b y + c, y' = d x + e y + f; the query returns the six numbers (`1,0,0,0,1,0` without a calibration). `RESET` removes it. A set outside the page's limits (a, e within 0.85..1.15, b, d within ±0.15, at most 40 px of shift at the targets) is refused with -222. Kept in the settings, as the page's **Save**. | USB |
 | `DBG:PROF[?]` | | Main loop timing table. Only in builds with the `dbg-prof` feature. | USB |
 | `DBG:PROF:RESET` | | Clears the timing table. Only in builds with the `dbg-prof` feature. | USB |
-| `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
-| `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
-| `DBG:CAP?` | | Capacitance internals, 22 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF (600 µF and up: the last half ramp's C, negative falling)>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<1 = no final value on this range yet>,<same-range restarts (another capacitor)>,<discharge experiment mode in force>,<node voltage read before the discharge, V (9.91E+37: none)>,<estimate from the discharge, uF>,<experiment fall-backs to mode 0>` | USB |
-| `DBG:CAP:CLASS[?]` | `0` .. `4` | The capacitance ramp comparator class (R21 swing) on 600 µF and up: `0` adaptive (class 2, the next wider class at once when one poll's ramp step is half the ramp's swing or more), `1` .. `3` fixed, `4` the stock choice from the slope. Not stored. | USB |
-| `DBG:CAP:IDIS[?]` | µA | The capacitor discharge current for the rough value during the discharge (C = I / slope; default 375, inferred from one capacitor). Not stored. | USB |
-| `DBG:CAP:JUMPN[?]` | n | Capacitance AUTO: the 600 µF ramp polls (0.25 s each) before one poll clearly over the range steps up at once (0 .. 255, default 0). Not stored. | USB |
-| `DBG:CAP:DISMS[?]` | ms | The poll period during the capacitor discharge (25 .. 1000, default 50; AD1 converts every 25 ms there). Not stored. | USB |
-| `DBG:CAP:DISMODE[?]` | `0` / `1` | The capacitor discharge: `0` the stock constant current (~0.38 mA), `1` (default) a larger constant current set by `DBG:CAP:DISREF` for a capacitor charged above the 1.2 V clamp whose voltage, read first on the DC V row, is 5 V or less; back to `0` if the node rises or after 60 s. Not stored. | USB |
-| `DBG:CAP:DISREF[?]` | `2` .. `6` | The OP3 reference (SFUVR) of discharge mode 1: `2` the stock row's, `3` .. `6` AGNDP9 .. AGNDP6 / AGNDN9 .. AGNDN6. Measured on one unit (~1 mF from 3.2 V): 0.38 / 0.72 / 0.88 / 0.95 / 1.05 mA (the discharge estimate takes 0.685 for `3`, from a second capacitor; inferred). Default 3. Not stored. | USB |
-| `DBG:CAP:DISEND[?]` | mV | The node voltage that ends the discharge and starts the ramp (1 .. 1300, default 30). Not stored. | USB |
-| `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>,<conversion period, ms (every conversion, the dropped ones too)>` | USB |
-| `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |
-| `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|POS <hpos>,<trig row>,<pos>\|AUTO...`: the last scope drags, the positions now | USB |
-| `DBG:ALARm?` | | `<sounding>,<silenced>,<events>,<setting>` | USB |
 | `DBG:SENTinel?` | | Wrong-connection detector state. Only in builds with the `dbg-sent` feature. | USB |
-| `DBG:SENTinel:LOG?` | | `<n>;<ALERT>,<KIND>,<ms>;...`: the last 8 alerts | USB |
 | `DBG:SENTinel:REG?` | | Measurement chip registers and relay state. Only in builds with the `dbg-sent` feature. | USB |
-| `DBG:SENTinel:VARiant[?]` | `0` .. `255` | `0` | USB |
-| `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
 | `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter; `dbg-src` builds) | | USB |
 | `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>`. Only in builds with the `dbg-src` feature. | USB |
 | `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md); `dbg-ohm6` builds) | | USB |
@@ -891,14 +862,6 @@ unless shown otherwise.
 | `DBG:ACDC:R0[?]` | `1` or `2` | `1`. Only in builds with the `acdc-meth` feature. | USB |
 | `DBG:ACDC:RANG` | `<item 0..5>` or `AUTO` | Sets the range item. | USB |
 | `DBG:ACDC:TRACE[?]` | `0`, `1` or `2`; query `[<from>]` | `<n>,<held>,<trig>,<on>;<hex>...`. Only in builds with the `acdc-trace` feature. | USB |
-| `DBG:HWTRIG?` | | Comparator trigger state | USB |
-| `DBG:HWTRIG:ENABLE` | `1` or `0` | | USB |
-| `DBG:HWTRIG:CAL?` | | Calibration result or the error name | USB |
-| `DBG:HWTRIG:STAT?` | | `<hits>,<misses>,<last>,<min>,<max>,<mean>` | USB |
-| `DBG:HWTRIG:STAT:RESET` | | Clears the statistics. | USB |
-| `DBG:GENTRIG:LAG[?]` | ns the generator's output reaches CH1 later than its timers say (GEN trigger and trace; not kept) | `+1.850000E+02` (37 ticks of 5 ns) | USB |
-| `DBG:GENTRIG:STAT?` | | `<readings>,<failed>,<last window>,<failed window>`: the generator phase readings for the GEN trigger and trace (failed = no consistent reading; the windows in CPU cycles: the last reading's, the narrowest try of the last failure) | USB |
-| `DBG:CH2:LAG[?]` | us the DMM CH2's conversion is older than its stamp (CH2 against CH1; not kept) | `+0.000000E+00` | USB |
 | `DBG:HYSPI:SELF?` | `<n>[,<div>[,<cpha>]]` | Measurement chip bus self-test report. Only in builds with the `dbg-hyspi` feature. | USB |
 | `DBG:HYSPI:WR?` | `<mode 0..3>[,<div>]` | Bus write test report. Only in builds with the `dbg-hyspi` feature. | USB |
 | `DBG:AD2:TORN?` | `<r26>,<n>[,SYNChronous]` | Converter read test report (AC rows) | USB |
@@ -908,17 +871,6 @@ unless shown otherwise.
 | `DBG:AD2:DRAW` | `0`, `1` or `2` | Logger panel redraw level. | USB |
 | `DBG:AD2:DIV` | `0`, `8`, `16` or `32`[,`<cpha>`] | Stream read divider (0 = automatic). | USB |
 | `DBG:AD2:DMA[?]` | `0` or `1` | `1` | USB |
-| `DBG:POWer:ROW?` | | Power meter chip row, hex | USB |
-| `DBG:POWer:RAW?` | | Power meter raw sample ring | USB |
-| `DBG:POWer:POKE` | `<register 0..21>,<value>` or `CLEar` | | USB |
-| `DBG:POWer:STAT` | `XY`, `XX`, `YY` or `AUTO` | | USB |
-| `DBG:POWer:DISC[?]` | `0` .. `8` | `2` | USB |
-| `DBG:VDISK:EJECT[?]` | `<n>` | `<ejected>,<start-stops>,<last>` | USB |
-| `DBG:VDISK:STAT?` | | `<files>,<next free cluster>,<files left out>` | USB |
-| `DBG:VDISK:RO[?]` | `0` or `1` | `<read-only>,<pending>` | USB |
-| `DBG:VDISK:RD?` | | USB disk read counters | USB |
-| `DBG:VDISK:MIR?` | | USB disk mirror state | USB |
-| `DBG:VDISK:WR?` | | Host write counters (13 fields) | USB |
 | `DBG:UPLoad:BEGin` | `<size>,<crc32>` (decimal) | Starts a firmware file upload. | USB |
 | `DBG:UPLOAD:DATA` | `<offset>,<raw bytes>` | One piece of the file (see notes). | USB |
 | `DBG:UPLoad:END?` | | `<size>,<crc32>` when the file is complete and checked | USB |
@@ -939,6 +891,61 @@ unless shown otherwise.
   copied there.
 - `DBG:LOADER`: a staged file is installed; switching the meter off and on
   leaves the loader and starts opendm40.
+
+### Developer image only
+
+Only in the developer image (`./build.sh --dev`, [firmware/README.md](../../firmware/README.md#build)); a release image answers them with `-113,"Undefined header"`.
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
+| `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
+| `DBG:READout?` | | `<kind F\|G\|P\|N>,<unit>,<value>,<hold>`: the DMM value as drawn | USB |
+| `DBG:DRAG` | `<x0>,<y0>,<x1>,<y1>,<ms>[,<hold ms>[,<jitter px>]]` | One-finger drag; the jitter wobbles the path sideways. | USB |
+| `DBG:TE?` | | Per phase (TE off; TE on, mode 0; TE on, mode 1; `;` between): `<samples>`, then `<level changes>,<samples high>` for PA3, PB13, PC1, PC15. Blocks ~0.3 s. ([LCD, TE](../../hw/README.md#lcd)) | USB |
+| `DBG:SCANLINE?` | | The panel's Get Scanline (0x45) and the pressed-feedback sync (it waits until the refresh scan has left the box): `<cal>,<lines>,<frame us>,<dir>,<sync>,<last box us>,<ns/px>,<last wait us>,<line at that write>,<window found>,<raw dummy>,<raw hi>,<raw lo>;` then 24 samples 1 ms apart, `<us>:<line>`. `<cal>` 1: the line moves (frame measured), 2: it does not (no sync). Blocks up to ~90 ms. | USB |
+| `DBG:SCANLINE:DIR` | `<n>` | The screen axis the scan sweeps `<n>`: 0 x, 1 479 - x, 2 y, 3 319 - y (1 at boot, inferred). | USB |
+| `DBG:SCANLINE:SYNC` | `0` or `1` | The pressed-feedback sync off or on. | USB |
+| `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
+| `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
+| `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
+| `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
+| `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
+| `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
+| `DBG:CAP?` | | Capacitance internals, 22 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF (600 µF and up: the last half ramp's C, negative falling)>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<1 = no final value on this range yet>,<same-range restarts (another capacitor)>,<discharge experiment mode in force>,<node voltage read before the discharge, V (9.91E+37: none)>,<estimate from the discharge, uF>,<experiment fall-backs to mode 0>` | USB |
+| `DBG:CAP:CLASS[?]` | `0` .. `4` | The capacitance ramp comparator class (R21 swing) on 600 µF and up: `0` adaptive (class 2, the next wider class at once when one poll's ramp step is half the ramp's swing or more), `1` .. `3` fixed, `4` the stock choice from the slope. Not stored. | USB |
+| `DBG:CAP:IDIS[?]` | µA | The capacitor discharge current for the rough value during the discharge (C = I / slope; default 375, inferred from one capacitor). Not stored. | USB |
+| `DBG:CAP:JUMPN[?]` | n | Capacitance AUTO: the 600 µF ramp polls (0.25 s each) before one poll clearly over the range steps up at once (0 .. 255, default 0). Not stored. | USB |
+| `DBG:CAP:DISMS[?]` | ms | The poll period during the capacitor discharge (25 .. 1000, default 50; AD1 converts every 25 ms there). Not stored. | USB |
+| `DBG:CAP:DISMODE[?]` | `0` / `1` | The capacitor discharge: `0` the stock constant current (~0.38 mA), `1` (default) a larger constant current set by `DBG:CAP:DISREF` for a capacitor charged above the 1.2 V clamp whose voltage, read first on the DC V row, is 5 V or less; back to `0` if the node rises or after 60 s. Not stored. | USB |
+| `DBG:CAP:DISREF[?]` | `2` .. `6` | The OP3 reference (SFUVR) of discharge mode 1: `2` the stock row's, `3` .. `6` AGNDP9 .. AGNDP6 / AGNDN9 .. AGNDN6. Measured on one unit (~1 mF from 3.2 V): 0.38 / 0.72 / 0.88 / 0.95 / 1.05 mA (the discharge estimate takes 0.685 for `3`, from a second capacitor; inferred). Default 3. Not stored. | USB |
+| `DBG:CAP:DISEND[?]` | mV | The node voltage that ends the discharge and starts the ramp (1 .. 1300, default 30). Not stored. | USB |
+| `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>,<conversion period, ms (every conversion, the dropped ones too)>` | USB |
+| `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |
+| `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|POS <hpos>,<trig row>,<pos>\|AUTO...`: the last scope drags, the positions now | USB |
+| `DBG:ALARm?` | | `<sounding>,<silenced>,<events>,<setting>` | USB |
+| `DBG:SENTinel:LOG?` | | `<n>;<ALERT>,<KIND>,<ms>;...`: the last 8 alerts | USB |
+| `DBG:SENTinel:VARiant[?]` | `0` .. `255` | `0` | USB |
+| `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
+| `DBG:HWTRIG?` | | Comparator trigger state | USB |
+| `DBG:HWTRIG:ENABLE` | `1` or `0` | | USB |
+| `DBG:HWTRIG:CAL?` | | Calibration result or the error name | USB |
+| `DBG:HWTRIG:STAT?` | | `<hits>,<misses>,<last>,<min>,<max>,<mean>` | USB |
+| `DBG:HWTRIG:STAT:RESET` | | Clears the statistics. | USB |
+| `DBG:GENTRIG:LAG[?]` | ns the generator's output reaches CH1 later than its timers say (GEN trigger and trace; not kept) | `+1.850000E+02` (37 ticks of 5 ns) | USB |
+| `DBG:GENTRIG:STAT?` | | `<readings>,<failed>,<last window>,<failed window>`: the generator phase readings for the GEN trigger and trace (failed = no consistent reading; the windows in CPU cycles: the last reading's, the narrowest try of the last failure) | USB |
+| `DBG:CH2:LAG[?]` | us the DMM CH2's conversion is older than its stamp (CH2 against CH1; not kept) | `+0.000000E+00` | USB |
+| `DBG:POWer:ROW?` | | Power meter chip row, hex | USB |
+| `DBG:POWer:RAW?` | | Power meter raw sample ring | USB |
+| `DBG:POWer:POKE` | `<register 0..21>,<value>` or `CLEar` | | USB |
+| `DBG:POWer:STAT` | `XY`, `XX`, `YY` or `AUTO` | | USB |
+| `DBG:POWer:DISC[?]` | `0` .. `8` | `2` | USB |
+| `DBG:VDISK:EJECT[?]` | `<n>` | `<ejected>,<start-stops>,<last>` | USB |
+| `DBG:VDISK:STAT?` | | `<files>,<next free cluster>,<files left out>` | USB |
+| `DBG:VDISK:RO[?]` | `0` or `1` | `<read-only>,<pending>` | USB |
+| `DBG:VDISK:RD?` | | USB disk read counters | USB |
+| `DBG:VDISK:MIR?` | | USB disk mirror state | USB |
+| `DBG:VDISK:WR?` | | Host write counters (13 fields) | USB |
 
 ### DBG:BOOT?
 

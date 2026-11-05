@@ -257,7 +257,10 @@ def build_fwrs(worktree=None, rev='HEAD'):
             ['git', 'log', '-1', '--format=%s', commit], cwd=ROOT, text=True).strip()))
         # `native`: the only build now (a no-op argument); older commits (--rev)
         # need it to select the native image instead of their RAM default.
-        subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, sub))
+        # DM40_DEV=1: the developer image (the tests' DBG: commands; older
+        # build.sh ignore it, their default image has them).
+        subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, sub),
+                              env=dict(os.environ, DM40_DEV='1'))
         with open(stamp, 'w') as f:
             f.write(tree + '\n')
     return elf
