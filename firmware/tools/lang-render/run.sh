@@ -6,7 +6,7 @@ cd "$(dirname "$0")/../.." || exit 1
 OUT=${1:-$(mktemp -d)}; shift
 LANGS=${*:-zh ru it fr}
 for l in $LANGS; do
-    mkdir -p "$OUT/$l"
+    mkdir -p "$OUT/$l"; : > "$OUT/$l/lang.log"
     (UIR_NOSAVE=1 UIR_LANG=$l LANG_LOG=$OUT/$l/lang.log tools/ui-render/run.sh "$OUT/$l" > "$OUT/$l/run.log" 2>&1; echo $? > "$OUT/$l/rc") &
 done
 wait
