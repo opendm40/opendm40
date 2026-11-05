@@ -83,7 +83,7 @@ fn lowbat_tests() {
     for _ in 0..confirm + 2 {
         l.feed(0.5, false);
     }
-    t("cut: countdown runs", l.take_cut_warn().is_some());
+    t("cut: countdown runs", l.cut_warning() && l.take_cut_warn().is_some());
     l.feed(0.5, true);
     t("cut: USB power ends it", !l.cut_due() && l.take_cut_warn().is_none());
     for _ in 0..confirm - 1 {
