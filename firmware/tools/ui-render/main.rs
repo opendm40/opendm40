@@ -2901,7 +2901,7 @@ fn main() {
 
     // 6e. Confirm dialogs (dialog.rs, one box and Yes / No): power off,
     // energy reset, the firmware install question (vwrite.rs).
-    for (k, f) in [("power-off", dialog::power_off as fn()), ("energy-reset", dialog::energy_reset), ("fw-install", dialog::fw_install)] {
+    for (k, f) in [("power-off", dialog::power_off as fn()), ("energy-reset", dialog::energy_reset), ("settings-reset", dialog::settings_reset), ("fw-install", dialog::fw_install)] {
         host::reset(0);
         f();
         let (x, y, w2, h2) = dialog::BOX;

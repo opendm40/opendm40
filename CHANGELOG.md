@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- Settings > Other > Reset settings: back to the defaults after a confirm; calibration, files and Bluetooth pairing stay.
+
 ## v0.4.0 (2026-11-02)
 
 ### New

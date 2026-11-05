@@ -64,6 +64,10 @@ const V7_WORDS: usize = 58;
 /// (0 = 1 %, the default, 1 = 0.1 %, 2 = 5 %; app.rs swap01). Older
 /// records read 0 there = the defaults: no version change.
 pub const W_REC: usize = 58;
+/// p[W_REC] bit 31: this record asks for the defaults at the next boot
+/// (Settings > Other > Reset settings; App::new, `reset_record`). In the
+/// record, so a power cut before the restart still resets.
+pub const REC_RESET: u32 = 1 << 31;
 const V6_WORDS: usize = 52;
 /// First word of the power-meter block (app_power::PW_WORDS words).
 pub const W_POWER: usize = 48;
@@ -117,6 +121,24 @@ pub fn words_of(version: u32) -> Option<usize> {
         2 => V2_WORDS,
         _ => return None,
     })
+}
+
+/// The record after Reset settings: `defaults` (a fresh App's words, DC V),
+/// with what is calibration and not a setting taken from `old`: the
+/// thermocouple offsets and the NTC values, the touch calibration, the power
+/// meter's shunt values, V gains and zeros (app_power.rs pw_words).
+pub fn reset_record(defaults: &[u32; WORDS], old: &[u32; WORDS]) -> [u32; WORDS] {
+    let mut w = *defaults;
+    w[2] = w[2] & !0xFF | 1;
+    w[W_REC] &= !REC_RESET;
+    w[12..18].copy_from_slice(&old[12..18]);
+    w[W_TOUCH_CAL..W_TOUCH_CAL + 6].copy_from_slice(&old[W_TOUCH_CAL..W_TOUCH_CAL + 6]);
+    w[W_POWER + 1..W_POWER + 6].copy_from_slice(&old[W_POWER + 1..W_POWER + 6]);
+    const ZERO_BITS: u32 = 0x1_FFFF; // pw_words w[6]: zy, zero_ok
+    w[W_POWER + 6] = w[W_POWER + 6] & !ZERO_BITS | old[W_POWER + 6] & ZERO_BITS;
+    w[W_POWER + 7..W_POWER + 10].copy_from_slice(&old[W_POWER + 7..W_POWER + 10]);
+    w[W_POWER_ZD..W_POWER_ZD + 3].copy_from_slice(&old[W_POWER_ZD..W_POWER_ZD + 3]);
+    w
 }
 
 /// CRC-32 (IEEE, as calbackup::crc32) of the words' little-endian bytes.
