@@ -907,6 +907,7 @@ impl App {
     /// What a page draw takes from the app state, before drawing.
     fn draw_state(&mut self) {
         self.dmm_view.label = self.t_label();
+        self.dmm_view.ohm_null = self.dmm.ohm_null() > 0.0;
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
         // The power meter's AC+DC parts layout (doc 3.17): this page only.
@@ -983,6 +984,9 @@ impl App {
                 }
                 if app_wave::WAVE_BUILD && b == Button::Amp {
                     ui::inrush_button();
+                }
+                if b == Button::Ohm {
+                    ui::ohm_null_button(self.dmm.ohm_null());
                 }
             }
             View::Settings => {
@@ -2085,6 +2089,29 @@ impl App {
         self.scope_invalidate();
     }
 
+    /// Resistor Settings "Null": on, the reading now (the shorted leads,
+    /// 0 .. dmm::OHM_NULL_MAX ohm, settled, without the null) becomes the
+    /// null; on again: off. Independent of REL; kept in the settings.
+    fn ohm_null_tap(&mut self, now: u64) {
+        if self.dmm.ohm_null() > 0.0 {
+            self.dmm.set_ohm_null(0.0);
+            self.toast(now, "Null off", true);
+            return;
+        }
+        let r = self.meter.live().copied();
+        match r {
+            Some(r) if r.mode == 10 && !r.main.ol && !r.prov && r.range < 7 && r.si > 0.0 && r.si <= crate::dmm::OHM_NULL_MAX => {
+                self.dmm.set_ohm_null(r.si);
+                let mut t = crate::scope_ui::Txt::new("Null ");
+                let mut b = [0u8; 16];
+                t.push(crate::dmm::format(&mut b, self.dmm.ohm_null(), 3));
+                t.push(" ohm");
+                self.toast(now, t.as_str(), true);
+            }
+            _ => self.toast(now, "Null: short the leads first", false),
+        }
+    }
+
     /// Open the keypad for `target`. The generator targets open with the
     /// current value (and unit) prefilled and selected (ui-review #10); the
     /// DMM limits (3 / 4) open empty.
@@ -2266,8 +2293,9 @@ impl App {
         // persist::W_GEN_OFFS.
         // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
         // records); bits 28..29: the V/div zoom of range 0 (Settings::vzoom,
-        // 0 in older records: 10 mV/div); p[11] bits 16..31: the removed scope
-        // drag hold-to-grab ms (written 0, ignored on load).
+        // 0 in older records: 10 mV/div); p[11] bits 16..31: the ohm null in
+        // mohm (below; once the removed scope drag hold-to-grab ms, written
+        // 0 then, so older records read "off").
         let m = &self.meter;
         p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
         // v10: the power slot's values at persist::W_LIM_W (its bits as the
@@ -2287,6 +2315,8 @@ impl App {
         self.sp_persist(&mut p1, &mut p11);
         p[1] = p1;
         p[11] = p11;
+        // p[11] bits 16..31: the ohm null in mohm (0 = off).
+        p[11] |= ((self.dmm.ohm_null() * 1000.0 + 0.5) as u32).min(0xFFFF) << 16;
         self.sp_persist_ext(&mut p[crate::persist::W_SCOPE_EXT..]);
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
         let w = self.pw_words();
@@ -2391,6 +2421,7 @@ impl App {
         // Sensor and autorange flags before the mode, so a restored mode
         // enters with them.
         self.dmm.set_t_sensor(clk, (p[11] >> 8 & 0xF) as u8);
+        self.dmm.set_ohm_null((p[11] >> 16) as f32 * 1e-3);
         // FR-05 rate / smoothing; UF-21: a V autorange stored before the
         // AUTO+ default (no "trusted" bit in W_DMM_EXT) restores as AUTO+.
         let ext = crate::meter::ext_settings(p[crate::persist::W_DMM_EXT]);
@@ -3913,6 +3944,10 @@ impl App {
                     Some(Err(4)) => self.show(View::Limits, clk),
                     Some(Err(7)) => self.record_open(clk),
                     Some(Err(5)) if b == Button::Amp => self.fuse_dialog(now, 0),
+                    Some(Err(8)) if b == Button::Ohm => {
+                        self.ohm_null_tap(now);
+                        self.redraw = true;
+                    }
                     Some(Err(k @ 0..=1)) if b == Button::Ohm => {
                         if k != self.dmm.ohm_var() {
                             self.dmm.set_ohm_var(clk, k);

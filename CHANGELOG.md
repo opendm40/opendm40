@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Multimeter:** Null on the Resistor Settings page takes the test leads' resistance off the ohm reading.
 ## v0.4.0 (2026-11-02)
 
 ### New

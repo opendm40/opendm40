@@ -600,6 +600,9 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
+- **Null** (range page): takes your test leads' resistance off every reading.
+  Short the leads, wait for a steady reading, tap **Null**; tap again for off.
+  Up to 10 Ω, not on 600 MΩ, independent of REL, kept over a power-off.
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |
