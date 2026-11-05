@@ -3910,7 +3910,7 @@ fn main() {
         for style in 1..=3u8 {
             ui::set_short_style(style);
             for (name, r, b) in &short_cases {
-                let k = if *name == "diode-pn" { 2 } else { 1 };
+                let k = match *name { "diode-pn" => 2, "diode" => 3, _ => 1 };
                 for bar in [true, false] {
                     for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
                         page(r, *b, k, bar, lim);
@@ -3942,7 +3942,7 @@ fn main() {
         // Renders: off, then each style; continuity, a diode short, a
         // diode pattern (BEEP).
         let mut n = 1;
-        for (name, k) in [("cont", 1u8), ("diode", 1), ("diode-pn", 2)] {
+        for (name, k) in [("cont", 1u8), ("diode", 3), ("diode-pn", 2)] {
             let (_, r, b) = short_cases.iter().find(|c| c.0 == name).unwrap();
             for style in [0u8, 1, 2, 3] {
                 if style == 0 && name == "diode-pn" {

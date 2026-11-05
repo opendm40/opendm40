@@ -53,6 +53,9 @@ pub const SHORT_FG: Color = 0x07E0;
 /// The indicator's band over the aux row (y 38..63, as the temperature
 /// chip): 4 px under the status bar and above the digits' cells (68).
 pub const SHORT_RECT: sf::Rect = rect(8, 38, 464, 26);
+/// The band in diode: over the aux1 slot only, the Ω value (aux2, from x 260)
+/// stays readable: a low resistance is what the mode is used for.
+pub const SHORT_RECT_DIODE: sf::Rect = rect(8, 38, 240, 26);
 /// Indicator style, bit 0: the band with SHORT / BEEP; bit 1: the main
 /// digits green. The firmware draws SHORT_STYLE; ui-render also draws the
 /// others (`set_short_style`, the PR's comparison).
@@ -338,8 +341,8 @@ pub struct DmmView {
     acc_k: Option<(u32, u8, &'static str)>,
     acc_drawn: bool,
     /// The beeper indicator to show (set by the app, `App::beep_ind`): 0
-    /// none, 1 SHORT (continuity, a diode-mode short), 2 BEEP (a diode
-    /// pattern); and the band as drawn (`short_sync`).
+    /// none, 1 SHORT (continuity), 2 BEEP (a diode pattern), 3 SHORT (a
+    /// diode-mode short); and the band as drawn (`short_sync`).
     pub short: u8,
     short_drawn: u8,
 }
@@ -641,9 +644,15 @@ impl DmmView {
         }
     }
 
-    /// The beeper indicator's band holds the aux row: `reading` leaves it.
+    /// The beeper indicator's band holds the aux row (in diode its aux1
+    /// slot: `short_rect`): `reading` leaves it.
     fn band(&self) -> bool {
         self.short_drawn != 0
+    }
+
+    /// The band's box for indicator value `k`.
+    fn short_rect(k: u8) -> sf::Rect {
+        if k == 1 { SHORT_RECT } else { SHORT_RECT_DIODE }
     }
 
     /// Draw or clear the beeper indicator's band (SHORT_RECT) after a
@@ -654,12 +663,12 @@ impl DmmView {
         if want == self.short_drawn {
             return;
         }
+        let b = Self::short_rect(if want != 0 { want } else { self.short_drawn });
         self.short_drawn = want;
-        let b = SHORT_RECT;
         if want != 0 {
             sf::rbox(b, 6, SHORT_BG, BG);
             // The scope's 26 px face (the status bar's F21 lacks B / E).
-            sf::glyphs(sf::ASCII26, b, if want == 1 { "SHORT" } else { "BEEP" }, 0xFFFF, SHORT_BG, 8, 2);
+            sf::glyphs(sf::ASCII26, b, if want == 2 { "BEEP" } else { "SHORT" }, 0xFFFF, SHORT_BG, 8, 2);
         } else {
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
         }
@@ -982,8 +991,9 @@ impl DmmView {
         let (mut aux, lp, bd) = aux_shown(r);
         let band = self.band();
         if band {
-            // The beeper indicator's band holds the row (`short_sync`).
-            aux = [None; 2];
+            // The beeper indicator's band holds the row, in diode all but
+            // the Ω value (`short_sync`).
+            aux = [None, if self.short_drawn == 1 { None } else { aux[1] }];
         }
         // Ohm / continuity / diode: the test current, small, in the empty aux1 slot
         // (`test_current_label`). Cleared before the aux rows (an aux1 that
