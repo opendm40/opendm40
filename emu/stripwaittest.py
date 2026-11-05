@@ -4,7 +4,7 @@ firmware/src/app_power.rs pw_strip_wait): the meter strip names the
 function at once (the purple POWER badge, the range badge, dimmed dashes)
 while the I channel ranges, instead of an empty strip.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/stripwaittest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
 
 5 V / 4 mA DC on the jacks. Main menu > Combined view, DC V, then

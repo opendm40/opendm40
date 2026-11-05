@@ -3,7 +3,7 @@
 USB power, PB10 = Power::on_charger, holds the shutdown timer off, and the
 timer counts afresh from the unplug).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/usbofftest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 PB10 (charger input power) is driven from the Renode monitor (run.py

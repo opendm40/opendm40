@@ -5,7 +5,7 @@ into the A jack (the DM40 front-end model's isrc source, switched at fixed
 virtual times), driven like a user (DBG:KEY / DBG:TAP) and over SCPI on one
 USB/IP connection.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/hy3131/inrushtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--shots DIR]
 
 Timeline (virtual seconds; the scheduled input changes; the client waits on
