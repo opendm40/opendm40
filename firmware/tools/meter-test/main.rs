@@ -20,6 +20,9 @@ mod danger;
 // FR-05 FAST: the unchopped AD1 offset (pure).
 #[path = "../../src/fastvos.rs"]
 mod fastvos;
+// The battery level on a charger (pure).
+#[path = "../../src/battlevel.rs"]
+mod battlevel;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/meter.rs"]

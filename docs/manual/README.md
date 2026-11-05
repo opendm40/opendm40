@@ -215,7 +215,9 @@ The top line of the multimeter page shows, from left to right:
    Bluetooth;
 7. the USB symbol while a computer has the meter connected (not with a charger);
 8. the battery level; green on the charger: the top segment blinks while
-   the battery charges and stays when it is full.
+   the battery charges and stays when it is full. On the charger the level
+   rises slowly, at most a bar per 15 min, and is exact again seconds after
+   unplugging.
 
 ### Touch lock
 

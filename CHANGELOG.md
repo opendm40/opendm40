@@ -23,6 +23,8 @@ section named after the tag as the release notes; how to cut a release:
 
 - Diode: the resistance stays on screen while the SHORT / BEEP band is on (0.4.0 hid it below 22 mV).
 
+- Battery level: no longer jumps up on the charger; it rises slowly with the real charge.
+
 ## v0.4.0 (2026-11-02)
 
 ### New

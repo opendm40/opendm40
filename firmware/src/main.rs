@@ -47,6 +47,7 @@ mod meter;
 mod memprobe;
 mod mmio;
 mod persist;
+mod battlevel;
 mod power;
 mod prof;
 mod pack10;

@@ -1,6 +1,7 @@
 //! Battery and power status (dmm_v2_6.h section 9).
 //! Battery: ADC0 channel 15 on PC5, Vbat = raw * 3.0 / 4096 * 2, read every 2 s;
-//! pct = (Vbat - 3.3) / 0.9; bars 0..5 at 85/70/50/25/0 % with 5 % hysteresis.
+//! pct = (Vbat - 3.3) / 0.9; bars 0..5 at 85/70/50/25/0 % with 5 % hysteresis
+//! (battlevel.rs, also what the charge current adds to the reading).
 //! Charger (TP4056, hw/README.md "Charge status pins"; device 2026-10-29,
 //! DBG:CHG:LOG? across a USB power cut): PB10 = 1 while the charger has
 //! input power (0 within ms of the cut; stays 1 against the pull-down);
@@ -105,6 +106,7 @@ pub struct Power {
     next: u64,
     pub vbat: f32,
     pub bars: u8,
+    level: crate::battlevel::Level,
     /// MCU die temperature, C (NaN until the first read).
     pub mcu_t: f32,
 }
@@ -139,7 +141,7 @@ impl Power {
             w32(ADC0 + 0x08, 1); // ADON
         }
         pins_init();
-        Power { next: 0, vbat: 4.2, bars: 5, mcu_t: f32::NAN }
+        Power { next: 0, vbat: 4.2, bars: 5, level: crate::battlevel::Level::new(), mcu_t: f32::NAN }
     }
 
     pub fn poll(&mut self, now: u64) -> bool {
@@ -161,17 +163,9 @@ impl Power {
         let v = convert(16) as f32 * 3.0 / 4096.0;
         unsafe { w32(ADC0 + 0x34, 15) };
         self.mcu_t = (TS_V25 - v) / TS_SLOPE + 25.0;
-        let pct = (self.vbat - 3.3) / 0.9 * 100.0;
-        let th = [0.0, 25.0, 50.0, 70.0, 85.0];
-        let mut b = self.bars;
-        while b < 5 && pct > th[b as usize] + 5.0 {
-            b += 1;
-        }
-        while b > 0 && pct < th[b as usize - 1] {
-            b -= 1;
-        }
-        let changed = b != self.bars;
-        self.bars = b;
+        self.level.feed(self.vbat, p);
+        let changed = self.level.bars != self.bars;
+        self.bars = self.level.bars;
         changed
     }
 
