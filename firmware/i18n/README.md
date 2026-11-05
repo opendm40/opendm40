@@ -7,7 +7,7 @@ string is written `crate::tr!("...")`, and the image holds only its translation.
 - `<lang>.tsv`: English, translation, source. `S`: the stock firmware's wording;
   `R`: the wording of [OpenDM40-Chinese](https://github.com/xingyan4117-sketch/OpenDM40-Chinese);
   `M`: machine-written, *needs a native speaker's review*; `E`: English on
-  purpose in this language. A new UI string goes to all four tables or to
+  purpose in this language; `O`: the owner's choice. A new UI string goes to all four tables or to
   [english.txt](english.txt) ([`tools/lang-check`](../tools/lang-check/run.sh)).
   Every translated string needs a `tr!` site; text that leaves the device
   (SCPI, DBG:VIEW?, files) stays a plain English literal.
@@ -42,3 +42,9 @@ Where sources disagree, the established instrument-brand term wins; the stock wo
 | Offset | 偏移 | Rigol DG4000, MSO5000 |
 
 The zh manual follows these terms: 负担电压 -> 负荷电压, 偏置 -> 偏移, 矮脉冲 -> 欠幅脉冲.
+
+## Russian terms
+
+| English | Russian | Source |
+|---|---|---|
+| Trigger | Триггер | the owner's choice (the manual follows: уровень триггера, источник триггера) |

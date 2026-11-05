@@ -64,7 +64,7 @@ Rising	Рост	M
 Falling	Спад	M
 Edge	Фронт	M
 Pulse	Имп.	M
-Trigger	Синхр.	M
+Trigger	Триггер	O
 Measure	Измерения	M
 Decode	Декодер	M
 Window	Окно	M

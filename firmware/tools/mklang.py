@@ -39,7 +39,7 @@ def read_tsv(lang):
             continue
         k, z, src = l.split('\t')
         assert (src == 'E') == (k == z) or src == 'M', 'line %d: E = the English on purpose' % n
-        assert src in ('S', 'R', 'M', 'E'), 'line %d: source' % n
+        assert src in ('S', 'R', 'M', 'E', 'O'), 'line %d: source' % n
         assert k not in rows, 'line %d: %r twice' % (n, k)
         if unesc(k) != unesc(z):  # the same in both: no macro arm
             rows[k] = unesc(z)
