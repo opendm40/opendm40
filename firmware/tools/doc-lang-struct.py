@@ -6,7 +6,7 @@ Whole file: the same heading levels in the same order, and identical ``` blocks.
 Per section (heading to heading, text before the H1 is skipped; it holds the
 language line and the translation note):
   - the same images, inline code spans and list items (count);
-  - the same tables: the rows and columns of each, in order;
+  - the same tables: the rows of each and the columns of each row, in order;
   - the same links. An anchor counts as the number of the heading it reaches,
     so a link has to point at the matching section under its translated title.
     README.<lang>.md counts as README.md.
@@ -92,17 +92,15 @@ def norm_link(t, path, anchors, cache):
 
 
 def tables(lines):
-    """(rows, columns of the header) of each table in the section."""
-    out, rows, cols = [], 0, 0
+    """The column count of each row, per table in the section."""
+    out, rows = [], []
     for line in lines + ['']:
-        s = CODE.sub('C', line.strip())
-        if s.startswith('|'):
-            if not rows:
-                cols = s.strip('|').count('|') + 1
-            rows += 1
+        t = CODE.sub('C', line.strip()).replace('\\|', 'P')
+        if t.startswith('|'):
+            rows.append(t.strip('|').count('|') + 1)
         elif rows:
-            out.append((rows, cols))
-            rows = 0
+            out.append(rows)
+            rows = []
     return out
 
 
@@ -184,7 +182,7 @@ def main():
             if ia != ib:
                 bad.append('%s: list items: %d / %d' % (where, ia, ib))
             if tables(a['lines']) != tables(b['lines']):
-                bad.append('%s: tables (rows, columns): %s / %s' % (where, tables(a['lines']), tables(b['lines'])))
+                bad.append('%s: tables (columns per row): %s / %s' % (where, tables(a['lines']), tables(b['lines'])))
     if markup:
         bad += markup_problems(tr)
     for b in bad:
