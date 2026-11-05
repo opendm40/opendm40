@@ -1124,9 +1124,17 @@ fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
     (dx - dy).abs() <= 2 && dx >= 7 && dx <= 14 && dy >= 7 && dy <= 14
 }
 
+/// First byte of a measurement cell's text: the item measures CH2 (its
+/// text in the CH2 colour; not drawn).
+pub const CELL_CH2: u8 = 0x02;
+
 /// Measurement cell i (0..3): ringed box with `text` in the trace colour.
 pub fn meas_cell(m: &Model, i: usize, text: &str) {
     let r = rect(MEAS_X + MEAS_STEP * i as i16, 302, MEAS_STEP - 2, 17);
+    let (text, ch2) = match text.strip_prefix(CELL_CH2 as char) {
+        Some(t) => (t, true),
+        None => (text, false),
+    };
     // The widest texts ("Freq:444.4kHz", 98 px) do not fit the 94 px cell
     // of the 39 px divisions: the label's first letter then ("F:444.4kHz").
     let text = match text.find(':') {
@@ -3026,6 +3034,8 @@ pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "
 pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
 /// The MF popup's tabs (stock four, opendm40 Decode).
 pub const MF_TABS: [&str; 5] = ["Measure", "Display", "Trigger", "Settings", "Decode"];
+/// MF > Measure: the grid place of the Source cell (after the 20 items).
+const MEAS_SRC_CELL: i16 = 20;
 /// Tab pitch (stock four tabs: 101 px; five: 80).
 const MF_TAB_W: i16 = 80;
 
@@ -3070,6 +3080,8 @@ pub struct PopVals {
     /// first start).
     pub ch2_on: bool,
     pub ch2_vdiv: Txt,
+    /// MF > Measure: the next picked item measures CH2 (the Source cell).
+    pub meas_src2: bool,
 }
 
 /// Which popup is open (tab).
@@ -3265,15 +3277,24 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
     match tab {
         0 => {
             fill_c(rect(15, 61, 398, 110), pc, C_POP_BG);
+            // The item names in the colour of the channel they measure.
+            let ink = if v.meas_src2 { C_CH2 } else { C_WHITE };
             for i in 0..20i16 {
                 let r = rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30);
                 let c = if v.pressed_cell == Some(i as u8) { C_DIS } else { C_BAR };
-                rbox_text(r, pc, 8, c, C_POP_BG, sf::SC_F16, MEAS_NAMES[i as usize], C_WHITE);
+                rbox_text(r, pc, 8, c, C_POP_BG, sf::SC_F16, MEAS_NAMES[i as usize], ink);
             }
+            // opendm40: the Source cell in the grid's free 21st place.
+            let i = MEAS_SRC_CELL;
+            let r = rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30);
+            let (t, c) = if v.meas_src2 { ("CH2", C_CH2) } else { ("CH1", C_YELLOW) };
+            rbox_text(r, pc, 8, C_POP_TAB, C_POP_BG, sf::SC_F16, t, c);
             fill_c(rect(15, 171, 398, 40), pc, C_POP_BG);
             for k in 0..v.meas_n.min(4) as usize {
                 let r = rect(16 + 57 * k as i16, 176, 55, 30);
-                rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[v.meas[k] as usize % 20], C_YELLOW);
+                let sel = v.meas[k];
+                let c = if crate::scope_meas::is_ch2(sel) { C_CH2 } else { C_YELLOW };
+                rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[crate::scope_meas::item(sel) as usize % 20], c);
             }
             rbox_text(rect(281, 176, 60, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
             rbox_text(rect(348, 176, 60, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, "Default", C_WHITE);
@@ -3401,6 +3422,8 @@ pub enum MfHit {
     Tab(u8),
     Cell(u8),
     SelCell(u8),
+    /// The Source cell (opendm40): CH1 / CH2 for the next picked item.
+    MeasSrc,
     Clear,
     Default,
     Roll(bool),
@@ -3447,7 +3470,13 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
             if y < 171 {
                 let (c, r) = (((x - 15) / 57).clamp(0, 6), ((y - 64) / 35).clamp(0, 2));
                 let i = r * 7 + c;
-                return if i < 20 { MfHit::Cell(i as u8) } else { MfHit::Inside };
+                return if i < 20 {
+                    MfHit::Cell(i as u8)
+                } else if i == MEAS_SRC_CELL {
+                    MfHit::MeasSrc
+                } else {
+                    MfHit::Inside
+                };
             }
             let k = ((x - 15) / 57).max(0);
             if x < 278 {

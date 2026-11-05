@@ -1440,6 +1440,11 @@ Press **MF**: the **Measure** tab lists 20 measurements. Tap up to four;
 tap a selected one to remove it. **Clear** removes all, **Default**
 restores Freq, Vp-p, Cycl, Vrms.
 
+The grid's last cell, **CH1** / **CH2**, chooses the channel the next tapped
+item measures. A CH2 item ([CH2 (DMM)](#display-settings)) is magenta in the
+measurement row and shows **--** while CH2 is off; at most 38.4 k samples/s,
+so Freq and widths of fast signals are coarse.
+
 
 ![The Measure tab](img/scope-measure.png)
 
@@ -1471,7 +1476,7 @@ record zoomed out beyond its length, they show **--**.
 
 Tap **CUR** at the bottom of the graph: **CUR X** (two time cursors), **CUR
 Y** (two voltage cursors), off. The measurement row shows X2-1 and Xf, or
-Y2-1. Drag the **1** / **2** markers.
+Y2-1 (with CH2 on, also a magenta one at the CH2 V/div). Drag the **1** / **2** markers.
 
 
 | ![X cursors: 800 µs apart](img/scope-cur-x.png) | ![Y cursors: 3.01 V apart](img/scope-cur-y.png) |
