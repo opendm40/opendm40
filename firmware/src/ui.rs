@@ -1221,7 +1221,8 @@ const CAP_DIS_RECT: sf::Rect = rect(8, 36, 223, 30);
 /// there), else only the value part.
 #[inline(never)] // .cold (link-native.x): during a discharge only
 pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
-    const PRE: &str = crate::tr!("Discharging...");
+    // F14: English in Chinese (too small), Russian and French (glyphs not in F14).
+    const PRE: &str = if cfg!(any(feature = "zh", feature = "ru", feature = "fr")) { "Discharging..." } else { crate::tr!("Discharging...") };
     let b = CAP_DIS_RECT;
     // (The value from a word space after the prefix.)
     let w = sf::text_width(sf::F14, PRE, 1) + 10;
@@ -2427,8 +2428,9 @@ pub fn wave_chip() {
     }
     #[cfg(test)]
     crate::probe::end();
-    // English in every image (F14: too small for Chinese, too narrow for Russian).
-    sf::glyphs(sf::F14, rect(r.x + 26, r.y + 1, r.w - 28, r.h), "Wave", STATUS_FG, BTN, 1, 1);
+    // English in Chinese and Russian (F14: too small for Chinese, too narrow for Russian).
+    let t = if cfg!(any(feature = "zh", feature = "ru")) { "Wave" } else { crate::tr!("Wave") };
+    sf::glyphs(sf::F14, rect(r.x + 26, r.y + 1, r.w - 28, r.h), t, STATUS_FG, BTN, 1, 1);
 }
 
 /// A tap on the Wave chip: the chart's corner x 80..159, y 226..272, larger
