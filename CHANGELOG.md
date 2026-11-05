@@ -9,6 +9,12 @@ section named after the tag as the release notes; how to cut a release:
 
 - **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; a channel that is off cannot be picked.
 - **Scope:** drag the DMM channel's 2 marker to move its trace.
+### New
+
+- **Chinese README and user manual** (machine translation, not yet reviewed
+  by a native speaker): [README.zh.md](README.zh.md),
+  [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
 ## v0.4.0 (2026-11-02)
 
 ### New
