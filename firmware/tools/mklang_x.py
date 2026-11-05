@@ -32,7 +32,6 @@ LIB = '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
 FONTS = {
     0x0806B13C: (0x0806B13C, 'TEXT22'),
     0x0804F260: (0x080534C4, 'SC_F16'),
-    0x08054148: (0x08054148, 'SC_F20'),
     0x0805B138: (0x0805B138, 'F14'),
     0x0804F24C: (0x0805471C, 'SC_F12'),
     0x080592F0: (0x080592F0, 'ASCII26'),
