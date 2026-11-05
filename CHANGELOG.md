@@ -13,6 +13,11 @@ section named after the tag as the release notes; how to cut a release:
   by a native speaker): [README.zh.md](README.zh.md),
   [docs/manual/README.zh.md](docs/manual/README.zh.md).
 
+### Changed
+
+- **Scope: long DMM units** ("mWh") on the strip in the panel's
+  16 px font; the 20 px font is gone (2.3 KB of flash).
+
 ## v0.4.0 (2026-11-02)
 
 ### New

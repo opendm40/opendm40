@@ -3893,9 +3893,9 @@ const ST_BADGE: Rect = rect(ST_COL_X, 46, ST_COL_W, 17);
 /// after the badge column.
 const ST_VALUE: Rect = rect(ST_COL_X + ST_COL_W + 3, 24, 108, 30);
 /// Unit: from x 196, as wide as its text (`st_unit`): SC_DIGITS up to
-/// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F20, the panel
-/// buttons' 20 px face (device check 92fb8fa: a 40 px box cut "mW" to "mV";
-/// "mWh" is 76 px in SC_DIGITS, 32 in SC_F20).
+/// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F16, the panel's
+/// 16 px face (device check 92fb8fa: a 40 px box cut "mW" to "mV"; "mWh"
+/// is 76 px in SC_DIGITS, 26 in SC_F16).
 const ST_UNIT_X: i16 = ST_VALUE.x + ST_VALUE.w + 4;
 const ST_UNIT_W: i16 = 59;
 const ST_UNIT_Y: i16 = 24;
@@ -3929,12 +3929,12 @@ pub fn st_sub(i: usize, gen: bool, x0: i16) -> Rect {
 }
 
 /// The unit's font, spacing and box: SC_DIGITS (LETTERS for a unit it
-/// lacks, deg C / F, uA) when it fits ST_UNIT_W, else SC_F20, else SC_F16,
+/// lacks, deg C / F, uA) when it fits ST_UNIT_W, else SC_F16,
 /// on the digits' baseline; the box is the text's width (>= 1).
 pub fn st_unit(unit: &str, letters: bool) -> (Font, Rect, u8) {
     let big = if letters { sf::LETTERS } else { sf::SC_DIGITS };
     let mut f = big;
-    for c in [big, sf::SC_F20, sf::SC_F16] {
+    for c in [big, sf::SC_F16] {
         f = c;
         if sf::has_all(c, unit) && sf::text_width(c, unit, 1) <= ST_UNIT_W {
             break;
