@@ -673,7 +673,7 @@ The code of B and C is removed: `src/acdcm.rs`, the cargo feature
 `acdc-meth`, `DBG:ACDC:METH` / `STAT?` / `ZERO` / `R0` (now an undefined
 header in every build), `tools/acdcmeth.py`, `emu/hy3131/acdcmethtest.py`
 and `couptest.py --meth`. Method A, `DBG:ACDC:RANG` and `DBG:ACDC:TRACE`
-stay. The last commit with the code:
+stay. Removed in [5fe14e17](https://github.com/opendm40/opendm40/commit/5fe14e17f3f8d26765fbe134b4b8385aa2db868c); the last commit with the code:
 [3bee3e1d](https://github.com/opendm40/opendm40/tree/3bee3e1db5825955507d0d38652e9e5f257b450d) ([`src/acdcm.rs`](https://github.com/opendm40/opendm40/blob/3bee3e1db5825955507d0d38652e9e5f257b450d/firmware/src/acdcm.rs),
 [`tools/acdcmeth.py`](https://github.com/opendm40/opendm40/blob/3bee3e1db5825955507d0d38652e9e5f257b450d/firmware/tools/acdcmeth.py),
 [`emu/hy3131/acdcmethtest.py`](https://github.com/opendm40/opendm40/blob/3bee3e1db5825955507d0d38652e9e5f257b450d/emu/hy3131/acdcmethtest.py)). The rest of
