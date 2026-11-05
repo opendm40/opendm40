@@ -341,8 +341,10 @@ pub struct Model {
     pub dec: u8,
     pub dec_gen: u16,
     /// Trigger source (scope::TSRC_*): the trigger badge in the GEN
-    /// colour for the generator.
+    /// colour for the generator, CH2's for the DMM.
     pub tsrc: u8,
+    /// Source DMM on an A row: the trigger badge's level in A.
+    pub trig_a: bool,
     /// The DMM CH2's label in the graph ("CH2 1.5V", magenta); empty =
     /// none (`CH2_LABEL`, a graph hole).
     /// The DMM CH2 trace shown, and its V/div ("1.5V", "--" before its
@@ -437,6 +439,7 @@ impl Model {
         dec: 0,
         dec_gen: 0,
         tsrc: 0,
+        trig_a: false,
         ch2_on: false,
         ch2_txt: Txt::EMPTY,
         ch2_pos: 0,
@@ -890,17 +893,28 @@ pub fn fmt_srate(out: &mut Buf, fs: u32) {
 /// 2.5 trigger badge: edge glyph and level.
 pub fn trig_badge(m: &Model) {
     let mut b = Buf::new();
-    fmt_v(&mut b, m.trig_v, m.unit());
+    // Source DMM: the level on CH2's scale, in its unit.
+    let unit = if m.tsrc == crate::scope::TSRC_CH2 && m.trig_a { "A" } else { m.unit() };
+    fmt_v(&mut b, m.trig_v, unit);
     // The wave view's "-1.23mA" is wider than the stock box: a decimal
     // fewer ("-1.2mA").
     if sf::text_width(sf::SC_F12, b.as_str(), 0) > 49 {
         b = Buf::new();
-        fmt_v_cut(&mut b, m.trig_v, m.unit(), 1);
+        fmt_v_cut(&mut b, m.trig_v, unit, 1);
     }
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
     let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
-    let c = if m.tsrc == crate::scope::TSRC_GEN { C_GEN_TR } else { m.pal_text() };
+    let c = trig_colour(m);
     badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, c), (&t, c)]);
+}
+
+/// The trigger source's colour: the badge, the T marker and its level line.
+fn trig_colour(m: &Model) -> Color {
+    match m.tsrc {
+        crate::scope::TSRC_GEN => C_GEN_TR,
+        crate::scope::TSRC_CH2 => C_CH2,
+        _ => m.pal_text(),
+    }
 }
 
 /// The battery's shift to the right (px) while both the Bluetooth rune and
@@ -1353,7 +1367,7 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let mut n = 0;
     out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
     n += 1;
-    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
+    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, trig_colour(m)));
     n += 1;
     if m.math_on {
         out[n] = (2, level(off_row(m.math_off), FAM_M, m.sel_v == 2, m.math_pal()));
@@ -1459,7 +1473,10 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
 fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
     *out = [Mark::NONE; NGRAPH];
-    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
+    // The trigger position's T in the trigger source's colour (CH1: the
+    // trace palette, as stock; CH2 / GEN: theirs), like the level marker.
+    let tc = if m.tsrc == crate::scope::TSRC_CH1 { m.pal() } else { trig_colour(m) };
+    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, tc);
     if let Some(xc) = m.xcur {
         out[1] = top_mark(top, xc[0], FAM_1, m.sel_h == 2, C_WHITE);
         out[2] = top_mark(top, xc[1], FAM_2, m.sel_h == 3, C_WHITE);
@@ -1759,10 +1776,13 @@ impl Deco {
         };
         graph_marks(m, &mut d.marks);
         let ctr = d.trace;
+        // The trigger's guide lines (position and level): the trigger
+        // source's colour (CH1: the trace colour).
+        let tcol = if m.tsrc == crate::scope::TSRC_CH1 { ctr } else { trig_colour(m) };
         // 4.4: guide lines of the selected items, then the cursor lines.
         if m.guide {
             match m.sel_h {
-                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
+                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: tcol }),
                 // FFT centre (stock: a line at x 0 that is never positioned;
                 // opendm40: the centre column the 'M' marker stands on).
                 1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: GCX, col: d.math }),
@@ -1770,7 +1790,7 @@ impl Deco {
             }
             match m.sel_v {
                 0 => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
-                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: ctr }),
+                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: tcol }),
                 2 if m.math_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.math_off as i32), solid: true, col: d.math }),
                 5 => {
                     if let Some(r) = m.runt_row {
@@ -2664,7 +2684,8 @@ pub fn update(m: &Model) {
     // The trigger badge after the graph: a level drag step repaints both
     // (the badge ~3.3 ms on the device model, emu --mips 110), the marker
     // under the finger first.
-    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
+    // (The source too: its colour and unit.)
+    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps || ol.tsrc != m.tsrc || ol.trig_a != m.trig_a) {
         trig_badge(m);
     }
     // A repainted graph (a popup closed: `uncover`) leaves its holes as
@@ -3342,9 +3363,11 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             // opendm40: the trigger source (the generator computed, edge only).
             fill_c(rect(14, 186, 399, 50), pc, C_POP_BG);
             fill_text(TS_LABEL, pc, C_POP_BG, sf::SC_F16, TS_LABEL, "Source:", C_FILL, 1, 0);
-            option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(1) as usize);
-            if v.tsrc == crate::scope::TSRC_GEN {
-                fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0);
+            option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(2) as usize);
+            match v.tsrc {
+                crate::scope::TSRC_GEN => fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0),
+                crate::scope::TSRC_CH2 => fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, CH2 scale", C_FILL, 1, 0),
+                _ => {}
             }
         }
         3 => {
@@ -3369,7 +3392,7 @@ pub const TP_PLUS: Rect = rect(362, 164, 36, 18);
 pub const TR_HINT: Rect = rect(214, 164, 189, 18);
 // Trigger source row, Display tab GEN trace row (opendm40).
 pub const TS_LABEL: Rect = rect(24, 188, 180, 20);
-pub const TS_LIST: Rect = rect(24, 208, 120, 24);
+pub const TS_LIST: Rect = rect(24, 208, 180, 24);
 pub const TS_NOTE: Rect = rect(214, 208, 189, 24);
 pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
@@ -3496,7 +3519,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Mode(i)
             } else if let Some(i) = option_hit(TT_LIST, 3, 60, x, y) {
                 MfHit::TType(i)
-            } else if let Some(i) = option_hit(TS_LIST, 2, 60, x, y) {
+            } else if let Some(i) = option_hit(TS_LIST, 3, 60, x, y) {
                 MfHit::TSrc(i)
             } else if v.ttype == crate::trigsoft::PULSE {
                 if let Some(i) = option_hit(TP_COND, 3, 30, x, y) {

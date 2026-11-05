@@ -719,6 +719,41 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                 save(out, name);
             }
         }
+        if !combined {
+            // Trigger on CH2 (DMM) and on GEN: the badge, the T markers and
+            // both guide lines in the source's colour.
+            let w = host::W;
+            let count = |x0: usize, x1: usize, y0: usize, y1: usize, c: u16| (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
+            let top = m.top() as usize;
+            let (rx, fy) = ((scope_ui::GR - 12) as usize, top + scope_ui::line_fy(h, 90) as usize);
+            // The trigger position's T (graph column 200) and its guide line.
+            let (tx, vx) = ((scope_ui::GX + 1 + 200 - 6) as usize, (scope_ui::GX + 200) as usize);
+            for (src, c, name) in [(scope::TSRC_CH2, scope_ui::C_CH2, "ch2"), (scope::TSRC_GEN, scope_ui::C_GEN_TR, "gen")] {
+                let mut mt = m;
+                mt.tsrc = src;
+                mt.trig_row = 90;
+                mt.trig_px = 200;
+                mt.sel_v = 1;
+                mt.guide = true;
+                let mut pvt = pv;
+                pvt.tsrc = src;
+                draw(&mt, scope_ui::Popup::None, &pvt, true);
+                ck.check_replica(&format!("gen/{name}-trigger"));
+                if src == scope::TSRC_CH2 {
+                    save(out, "s08-ch2-trigger");
+                }
+                let (badge, mark, line, tpos, vline) = (count(352, 414, 1, 18, c), count(rx, rx + 12, top, top + h as usize, c), count(20, 300, fy, fy + 1, c), count(tx, tx + 12, top, top + 14, c), count(vx, vx + 1, top + 14, top + h as usize, c));
+                println!("{name} trigger in its colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px, its line {vline} px");
+                if !(badge > 20 && mark > 20 && line > 40 && tpos > 20 && vline > 40) {
+                    ck.fail(&format!("gen/{name}-trigger"), format!("not in the source's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px, its line {vline} px"));
+                }
+                if src == scope::TSRC_CH2 {
+                    // The Trigger tab with Source DMM (its note: the CH2 scale).
+                    draw(&mt, scope_ui::Popup::Mf(2), &pvt, true);
+                    save(out, "s08-ch2-trigger-tab");
+                }
+            }
+        }
     }
 }
 

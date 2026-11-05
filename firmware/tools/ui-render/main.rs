@@ -75,6 +75,10 @@ mod hy3131_tables;
 mod lcd;
 #[path = "../../src/meter.rs"]
 mod meter;
+// The DMM CH2 store (scope.rs: the CH2 trigger source).
+#[allow(dead_code, static_mut_refs)]
+#[path = "../../src/scope_ch2.rs"]
+mod scope_ch2;
 #[path = "../../src/scope.rs"]
 mod scope;
 #[path = "../../src/scope_meas.rs"]
