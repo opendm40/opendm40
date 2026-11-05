@@ -6,7 +6,8 @@ import os, re, subprocess, sys, urllib.parse
 root = sys.argv[1] if len(sys.argv) > 1 else '.'
 os.chdir(root)
 files = [f for f in subprocess.check_output(['git', 'ls-files', '*.md'], text=True).split('\n') if f and not f.startswith('firmware/vendor/')]
-LINK = re.compile(r'(?<![\w\]!])\[(?:[^\]\[]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[[^\]]*\]\(([^)\s]+)\)')
+# ASCII word characters only: \w would hide a link right after a CJK character.
+LINK = re.compile(r'(?<![0-9A-Za-z_\]!])\[(?:[^\]\[]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[[^\]]*\]\(([^)\s]+)\)')
 def slug(h):
     h = re.sub(r'`', '', h.strip().lower())
     h = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', h)
@@ -41,6 +42,7 @@ for f in files:
         if re.match(r'^[a-z]+:', t) or t.startswith('//'): continue
         path, _, frag = t.partition('#')
         path = urllib.parse.unquote(path)
+        frag = urllib.parse.unquote(frag)
         tgt = os.path.normpath(os.path.join(os.path.dirname(f), path)) if path else f
         # Untracked targets (stock/re/ is a private clone, gitignored) are
         # missing for every other reader, CI included.
