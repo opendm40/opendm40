@@ -9,7 +9,12 @@ face (fit_size). Per font only the characters its strings use: i18n/font-use.tsv
 (from ui-render with LANG_LOG); a translation whose glyph is missing in its
 font stays English at run time. 1 bpp glyphs are BIT1, 4 bpp HUF with the stock
 fonts' shared tables (tools/mkstockfont.py).
+
+One byte per letter, in valid UTF-8: the most frequent non-ASCII letters take
+the control codes (CTRL), which no text font has, so a translation stays a &str
+and the draw layer needs no decoder. The others stay two bytes.
 """
+import collections
 import os
 import re
 import struct
@@ -49,6 +54,10 @@ COMPOSE = {
     'ò': ('o', 'grave'), 'ô': ('o', 'circ'), 'ù': ('u', 'grave'), 'û': ('u', 'circ'), 'ü': ('u', 'diaer'),
     'À': ('A', 'grave'), 'É': ('E', 'acute'), 'È': ('E', 'grave'), 'Ê': ('E', 'circ'), 'Ç': ('C', 'ced'),
 }
+
+
+# Tab, line feed and carriage return are left out. 0x7F is a glyph in the fonts.
+CTRL = [c for c in range(1, 0x20) if c not in (9, 10, 13)]
 
 
 def stock_image():
@@ -241,11 +250,14 @@ def font_use():
 def build(lang, rows, check, meta, text_tables, fnv, rs_str, rs_bytes):
     name, row, tr, minl = meta
     enc = lambda s: ''.join(LOOKALIKE.get(c, c) for c in s) if lang == 'ru' else s
-    lang_row = 'Language ' + enc(row)
     enc_rows = {k: enc(z) for k, z in rows.items()}
-    ent = sorted([(fnv(k.encode()), z) for k, z in enc_rows.items()] + [(fnv(lang_row.encode()), enc(tr))])
+    freq = collections.Counter(c for z in enc_rows.values() for c in z if ord(c) >= 0x80 and c != 'Ω')
+    code = {c: CTRL[i] for i, (c, _) in enumerate(sorted(freq.items(), key=lambda e: (-e[1], e[0]))[:len(CTRL)])}
+    one = lambda s: ''.join(chr(code[c]) if c in code else c for c in enc(s))
+    lang_row = 'Language ' + one(row)
+    ent = sorted([(fnv(k.encode()), one(z)) for k, z in rows.items()] + [(fnv(lang_row.encode()), one(tr))])
     tb, ntxt = text_tables(ent)
-    head = 'pub const NAME: &str = "%s";\npub const LANG_ROW: &str = "%s";\npub const MIN_LINE: u16 = %d;\n' % (rs_str(enc(name)), rs_str(lang_row), minl)
+    head = 'pub const NAME: &str = "%s";\npub const LANG_ROW: &str = "%s";\npub const MIN_LINE: u16 = %d;\n' % (rs_str(one(name)), rs_str(lang_row), minl)
     if check:
         return head + tb, None
     img = stock_image()
@@ -266,14 +278,14 @@ def build(lang, rows, check, meta, text_tables, fnv, rs_str, rs_bytes):
         f, lh, de, four = load(img, src)
         size = fit_size(f, lh, de, four) if lang == 'ru' else 0
         es, blob = [], bytearray()
-        for ch in sorted(need[a]):
+        for ch in sorted(need[a], key=lambda c: code.get(c, ord(c))):
             if ch in COMPOSE:
                 m, w, adv = compose(ch, f, lh, de)
             else:
                 assert lang == 'ru', ch
                 m, w, adv = render(ch, size, f, lh, de, four, 0)
             gw, gh, gadv, yoff, data = emit_glyph(m, w, adv, lh, de, four)
-            es.append('E(%d,%d,%d,%d,%d,%d,0,%d)' % (ord(ch), len(blob), gw, gh, gadv, yoff, gh))
+            es.append('E(%d,%d,%d,%d,%d,%d,0,%d)' % (code.get(ch, ord(ch)), len(blob), gw, gh, gadv, yoff, gh))
             blob += data
         total += len(blob) + 10 * len(es)
         sizes.append('%s %d glyphs %d B%s' % (nm, len(es), len(blob), ' (%d px)' % size if size else ''))
