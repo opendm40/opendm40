@@ -1705,7 +1705,6 @@ impl App {
         }
         self.alert_beep(now);
         // The continuity / diode beeper (HY3131 CMP pin) has no loudness:
-        crate::hy3131::set_beeper(self.volume > 0);
         // its own level, or off at volume 0 % unless "Continuity beep" is
         // Always (Dmm::poll applies a change).
         crate::hy3131::set_beeper(self.volume > 0 || self.cont_always);
@@ -2367,7 +2366,6 @@ impl App {
         crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
-        crate::hy3131::set_beeper(self.volume > 0); // before the first DMM row
         self.cont_always = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_CONT_ALWAYS != 0;
         crate::hy3131::set_beeper(self.volume > 0 || self.cont_always); // before the first DMM row
         self.roll = p[1] >> 16 & 1 != 0;
