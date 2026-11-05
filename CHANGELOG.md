@@ -13,9 +13,8 @@ section named after the tag as the release notes; how to cut a release:
   longer sends a large capacitor (about 50–600 µF) back and forth between
   ranges with "Discharging..." and a wrong value. Moderate ripple now
   measures. When the ripple is too strong to measure, the meter shows
-  dashes and "Unstable: unplug USB?". Not checked on the device.
-
-## Unreleased
+  dashes and "Unstable: unplug USB?". The ripple case is checked in the
+  emulator only.
 
 ## v0.4.0 (2026-11-02)
 
