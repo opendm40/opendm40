@@ -717,6 +717,42 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                 save(out, name);
             }
         }
+        if !combined {
+            // The panel after each popup (the MF box reaches into it): as
+            // the page without the popup, the gaps between its parts too.
+            let w = host::W;
+            let panel_diff = |fresh: &[u16], xr: core::ops::Range<usize>| (20..301usize).flat_map(|y| xr.clone().map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] != fresh[y * w + x]).count();
+            draw(&m, scope_ui::Popup::None, &pv, true);
+            let fresh = emu().fb.clone();
+            let px = scope_ui::PANEL_X as usize;
+            for p in [0u8, 1, 2, 3, 4].map(scope_ui::Popup::Mf).into_iter().chain([scope_ui::Popup::Ch1(0), scope_ui::Popup::Math(0)]) {
+                draw(&m, p, &pv, true);
+                scope_ui::panel(&m);
+                ck.cases += 1;
+                let bad = panel_diff(&fresh, px..w);
+                if bad > 0 {
+                    ck.fail("gen/panel-after-popup", format!("{bad} panel px differ from the page without the popup"));
+                }
+            }
+            // An MF tab change to a shorter tab (scope_page sp_mf_tap): the
+            // uncovered rows and the panel, then the new box: as the shorter
+            // tab drawn at once, the box over the panel.
+            for (a, b) in [(0u8, 1u8), (1, 0), (0, 2), (2, 0), (1, 2), (2, 1), (3, 0), (0, 3), (3, 4), (4, 3)] {
+                let (pa, pb) = (scope_ui::Popup::Mf(a), scope_ui::Popup::Mf(b));
+                let (oa, ob) = (scope_ui::popup_box(pa).unwrap(), scope_ui::popup_box(pb).unwrap());
+                draw(&m, pb, &pv, true);
+                let want = emu().fb.clone();
+                draw(&m, pa, &pv, true);
+                scope_ui::regraph_rows(&m, ob, ob.y + ob.h, oa.y + oa.h);
+                scope_ui::draw_popup(pb, &pv);
+                scope_ui::graph().set_hole_at(scope_ui::H_POPUP, None);
+                ck.cases += 1;
+                let bad = panel_diff(&want, px..w);
+                if bad > 0 {
+                    ck.fail("gen/mf-tab-over-panel", format!("{bad} panel px differ, MF tab {a} -> {b}"));
+                }
+            }
+        }
     }
 }
 
