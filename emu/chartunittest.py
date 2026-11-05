@@ -3,7 +3,7 @@
 the chart, its axis labels and the REL box header follow the readout's
 unit, also when the new range reads OL.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/chartunittest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
 
 3.3 V DC on V-COM:

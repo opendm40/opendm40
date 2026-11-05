@@ -5,7 +5,7 @@ frame at the gesture, pixel for pixel, read back through the ILI9488 model's
 RAMRD (emu/peripherals/ILI9488.cs: dummy word, RGB666 packed 2 pixels per 3
 words, as the real panel; the device itself must still be checked).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/shottest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--out DIR]
 
 Per screen (DMM DC V with HOLD on; the Settings menu; the combined DMM +

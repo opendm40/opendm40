@@ -3,7 +3,7 @@
 PREamble? / DATA?, DIGitize, TRIGger:STATus?, CHANnel1:OFFSet, ACQ:SRATe?)
 in the emulator, against the scope input model's sine.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/wavtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Checks (USBTMC over USB/IP, Bluetooth over --bt-port):

@@ -59,7 +59,7 @@ meter's serial.
 
 ```sh
 emu/get-renode.sh                                     # once
-(cd firmware && ./build.sh)                           # build opendm40
+(cd firmware && ./build.sh --dev)                     # build opendm40 (developer image)
 APP=firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 emu/run.py fwrs --app $APP --dmm dcv:1.234 --run-for 4 --shot emu/out/fwrs.png
 emu/run.py fwrs --app $APP --fast --usbip 0.01 --run-for 600 &    # USB/IP on TCP 3240

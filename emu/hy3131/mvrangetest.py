@@ -2,7 +2,7 @@
 """opendm40 60 mV range (the DC / AC mV r0 row, OP1 x10): the mV-first AUTO
 steps into it and out of it, the range page and SCPI select it.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/hy3131/mvrangetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P]
 
 Autorange thresholds (dmm.rs poll_dcv / poll_ac, the stock rule of the

@@ -2,7 +2,7 @@
 """opendm40 DC-coupled V row on AD2 (feasibility 1.3 last row / E7, src/ad2exp.rs
 `dcv_row` / `dc_enter`) in the emulator: LOG:SOURce AD2 in DC V.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/hy3131/dcvtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Input: 2 V DC + 0.3 V rms 50 Hz on V/COM, the model's OP1 offset (op1vos,
