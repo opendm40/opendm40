@@ -8,6 +8,12 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 - **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
+### New
+
+- **Chinese README and user manual** (machine translation, not yet reviewed
+  by a native speaker): [README.zh.md](README.zh.md),
+  [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
 ## v0.4.0 (2026-11-02)
 
 ### New
