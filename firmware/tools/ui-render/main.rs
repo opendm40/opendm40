@@ -1129,6 +1129,10 @@ pub fn touchcal_scene(k: u8, long: bool) {
 /// Settings values by id (ui::S_*): those of a new meter, `over` replaced.
 pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
     let mut v = vec![""; ui::SET_N];
+    #[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
+    {
+        v[ui::S_LANG as usize] = "English";
+    }
     for (id, t) in [
         (ui::S_DIM, "5 min"), (ui::S_SHUTDOWN, "30 min"), (ui::S_BACKLIGHT, "55%"), (ui::S_VOLUME, "50%"), (ui::S_BT, "ON"),
         (ui::S_START, "Multimeter"), (ui::S_RAILS, "Auto (per view)"), (ui::S_RATE, "MED  5.0/s"),

@@ -123,9 +123,10 @@ def compose(ch, f, lh, de):
     x0 = max(0, cx - aw // 2)
     w = max(w, x0 + aw)
     m = [r + [0] * (w - len(r)) for r in m]
+    deep = max(ink_rows(line_rows(f[ord(c)], lh, de))[1] for c in 'gpy' if ord(c) in f)
     for y, row in enumerate(shape):
         for x, c in enumerate(row):
-            if c == '#' and ay + y < len(m):
+            if c == '#' and ay + y <= deep:
                 m[ay + y][x0 + x] = 15
     return m, w, f[ord(bc)][2]
 
@@ -171,6 +172,14 @@ def render(ch, size, f, lh, de, four, _):
     m = [[(px[x, y] * 15 + 127) // 255 if four else (15 if px[x, y] else 0) for x in range(w)] for y in range(lh + 4)]
     while w > 1 and not any(row[w - 1] for row in m):
         w -= 1
+    # No deeper than the stock descender (the page rows keep their margins).
+    deep = max(ink_rows(line_rows(f[ord(c)], lh, de))[1] for c in 'gpy' if ord(c) in f)
+    for y in range(deep + 1, lh + 4):
+        m[y] = [0] * len(m[y])
+    # A blank first column: the stock glyphs have one (titles draw with spacing -1).
+    if any(row[0] for row in m):
+        m = [[0] + row for row in m]
+        w += 1
     return [r[:w] for r in m], w, w + 1
 
 

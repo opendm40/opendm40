@@ -12,7 +12,7 @@ Language** switches. The default image is English only.
   The fonts are not in the repo (Debian: fonts-noto-cjk, fonts-liberation).
 - [font-use.tsv](font-use.tsv): which font draws which string, from
   [`tools/lang-render`](../tools/lang-render/run.sh) (`lang.log`, kind `drawn`).
-- Text in fonts under 14 px (Chinese: under 15 px), and any translation wider
+- Text in fonts under 12 px (Chinese: under 15 px), and any translation wider
   than its box or with a glyph missing from its font, stays English.
 
 ## Sources and licences

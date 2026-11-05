@@ -7,7 +7,7 @@ import os
 import re
 import sys
 
-UI = 'accuracy app app_ch2 app_decode app_inrush app_log app_power app_touchtest app_wave dialog gallery meter powermeter scope_meas scope_page scope_ui splash trigsoft gen genplan app_inrush_live scope_ch2 logger ui ui_decode ui_inrush ui_log ui_power ui_touchtest danger'.split()
+UI = 'accuracy dmm app app_ch2 app_decode app_inrush app_log app_power app_touchtest app_wave dialog gallery meter powermeter scope_meas scope_page scope_ui splash trigsoft gen genplan app_inrush_live scope_ch2 logger ui ui_decode ui_inrush ui_log ui_power ui_touchtest danger'.split()
 LANGS = 'zh ru it fr'.split()
 LIT = re.compile(r'''(?<![br'])"((?:[^"\\\n]|\\.)*)"''')
 

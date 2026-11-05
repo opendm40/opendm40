@@ -35,6 +35,7 @@
  zoom
  } else if r.main.v.is_nan() { b
  } else { b
+) && num(buf, &mut at, e.late_ms as f32, 0) && put(buf, &mut at, b
 ) } else { (crate::dmm::format(&mut t, ms as f32 / 1000.0, 2), b
 +Duty
 +Pul
@@ -161,7 +162,6 @@ AC/DC
 AC: AC parts only (DC removed); P, PF, S, Q, f
 AUTO
 AUTO+
-AUTO+ recommended: never steps to mV
 AUTO: DC (no AC signal)
 AUTO: no signal found
 AVG
@@ -252,6 +252,7 @@ English
 Exit: power key, hold 2 s
 FAIL,
 FAIL,NONE
+FAST
 FE:
 FFT
 FILE
@@ -315,13 +316,13 @@ Lead from V/ohm jack to A
 Leads open, nothing in A
 Leave and open the gallery again to retry
 Lost:
-Lower = reading
 Lowest V/div
 MANU
 MANUAL
 MATH
 MAX
 MCX
+MED
 MENU
 METHOD
 MF
@@ -339,9 +340,13 @@ Moved: tap again
 NONE
 NOTREACTIVE
 NTC user
+NTC100K3950
 NTC100k B3950
+NTC10K3435
+NTC10K3950
 NTC10k B3435
 NTC10k B3950
+NTCUSER
 Needs the P + PF method
 No AC: DC is more precise
 No frames yet
@@ -399,7 +404,6 @@ Reading the log
 Record on / off
 Rectangular
 Replace: 10 A ceramic fuse
-Reset Wh
 Reset energy?
 Runt
 Runt, 2nd level 
@@ -408,6 +412,7 @@ SCOPE
 SETUP
 SHORT
 SIGNAL
+SLOW
 SMALL
 SOURCE
 STOP
@@ -432,6 +437,7 @@ Swipe down (DMM)
 Swipe down with 3 fingers to save a screenshot
 Swipe left / right
 TC K
+TCK
 TEMP
 Takes about 12 s
 Tap 
@@ -459,7 +465,6 @@ Unit: \u{2103}
 Unit: \u{2109}
 Unsupported
 Unsupported format
-Upper = reading
 V cal
 V cal 
 V cal of this V range
@@ -477,7 +482,9 @@ Vamp
 Vavg
 Vb
 Vbas
+Vchg
 Vcrm
+Vdis
 Vmax
 Vmin
 Vp-p

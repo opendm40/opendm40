@@ -50,8 +50,8 @@ Yes	是	R
 No	否	R
 Back	返回	R
 < Back	< 返回	R
-< Prev	< 上一页	M
-Next >	下一页 >	M
+< Prev	< 上一页	R
+Next >	下一页 >	R
 Save	保存	S
 Delete	删除	R
 Clear	清除	S
@@ -90,11 +90,11 @@ FFT Unit	FFT单位	S
 Source:	信号源:	M
 Threshold:	阈值:	M
 Width:	宽度:	M
-Offset	偏置	M
+Offset	偏移	R
 Color	颜色	S
 Save CSV	保存CSV	S
-Save CSV OK	保存CSV成功	M
-CSV save failed	保存CSV失败	M
+Save CSV OK	保存CSV成功	S
+CSV save failed	保存CSV失败	S
 Screenshot	截图	S
 Screenshot failed	Screenshot failed	E
 Stop the scope first	Stop the scope first	E
@@ -111,7 +111,7 @@ Resistor Settings	电阻测量设置	S
 Capacitance Settings	电容测量设置	S
 Temperature Settings	温度设置	R
 Power Settings	功率设置	R
-Power off	关机	M
+Power off	关机	R
 Power off?	关机?	R
 Range	量程	R
 Manual	手动	R
@@ -136,7 +136,7 @@ Fast	快	R
 Until stopped	手动停	R
 Start recording	开始记录	R
 Stop recording	停止记录	R
-Stop the recording	停止记录	M
+Stop the recording	停止记录	R
 Stop the recording first	请先停止记录	R
 Recording	正在记录	R
 Recording CSV	正在记录	R
@@ -200,3 +200,8 @@ Measuring ...	测量中 ...	R
 Temp	Temp	E
 Cap	Cap	E
 Diode	Diode	E
+Upper = reading	上限=读数	R
+Lower = reading	下限=读数	R
+AUTO starts on mV: AUTO+ is safer	自动从 mV 起: 自动+ 更安全	R
+AUTO+ recommended: never steps to mV	自动+ 更安全: 不降到 mV	R
+Reset Wh	复位电能	R

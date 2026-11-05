@@ -5,9 +5,9 @@ Signal	Générateur	M
 Settings	Réglages	M
 Scope	Oscillo	M
 Main menu	Menu principal	M
-Display	Écran	M
+Display	Ecran	M
 Alerts	Alertes	M
-Power	Alimentation	M
+Power	Alim.	M
 Other	Autre	M
 Dim screen	Veille écran	M
 Shutdown	Extinction	M
@@ -61,9 +61,9 @@ Auto	Auto	M
 Normal	Normal	M
 Single	Unique	M
 Rising	Montant	M
-Falling	Descendant	M
+Falling	Desc.	M
 Edge	Front	M
-Pulse	Impulsion	M
+Pulse	Impuls.	M
 Trigger	Déclench.	M
 Measure	Mesure	M
 Decode	Décodage	M
@@ -110,8 +110,8 @@ Resistor Settings	Réglages résist.	M
 Capacitance Settings	Réglages capacité	M
 Temperature Settings	Réglages temp.	M
 Power Settings	Réglages puissance	M
-Power off	Éteindre	M
-Power off?	Éteindre ?	M
+Power off	Eteindre	M
+Power off?	Eteindre ?	M
 Range	Calibre	M
 Manual	Manuel	M
 Autorange	Calibre auto	M
@@ -124,7 +124,7 @@ Lower limit	Limite basse	M
 Upper limit	Limite haute	M
 Clear limits	Effacer limites	M
 Fail beep	Bip hors limite	M
-Record	Enregistrer	M
+Record	Enreg.	M
 Interval	Intervalle	M
 Change	Variation	M
 Duration	Durée	M
@@ -149,14 +149,14 @@ Zero	Zéro	M
 Inrush	Appel	M
 Inrush Current	Courant d'appel	M
 Arm	Armer	M
-Wiring	Câblage	M
+Wiring	Câbles	M
 Generator is off	Générateur éteint	M
 Gallery	Galerie	M
 Gallery: screenshots and logs	Galerie : captures et logs	M
 No screenshots or logs	Aucune capture ni log	M
 Delete screenshot?	Supprimer la capture ?	M
 Delete this log?	Supprimer ce log ?	M
-Delete failed	Échec suppression	M
+Delete failed	Echec suppr.	M
 Cannot delete	Suppression impossible	M
 Log	Log	M
 Log failed	Erreur log	M
@@ -190,12 +190,17 @@ Corners	Coins	M
 Auto (per view)	Auto (par vue)	M
 Both always	Toujours les deux	M
 Files live	Lecture seule	M
-PC can edit	PC peut modifier	M
-Files live (replug)	Lecture (rebrancher)	M
-PC can edit (replug)	Écriture (rebrancher)	M
+PC can edit	PC modifie	M
+Files live (replug)	Lecture (rebr.)	M
+PC can edit (replug)	Ecriture (rebr.)	M
 Loud	Fort	M
 Volume	Volume	M
 Measuring ...	Mesure...	M
 Temp	Temp	M
 Cap	Cap	M
 Diode	Diode	M
+Upper = reading	Haut = mesure	M
+Lower = reading	Bas = mesure	M
+AUTO starts on mV: AUTO+ is safer	AUTO part de mV : AUTO+ plus sûr	M
+AUTO+ recommended: never steps to mV	AUTO+ conseillé : jamais en mV	M
+Reset Wh	RàZ Wh	M

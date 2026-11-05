@@ -15,13 +15,13 @@ Backlight	Подсветка	M
 Key/alert volume	Громкость	M
 Bluetooth	Bluetooth	M
 Start page	Старт. экран	M
-Analog power	Аналог. питание	M
+Analog power	Аналог. пит.	M
 DMM rate	Скорость DMM	M
 Smoothing	Сглаживание	M
 DMM row	Строка DMM	M
 Temp unit	Ед. темп.	M
 Swipe	Свайп	M
-Press effect	Эффект нажатия	M
+Press effect	Эфф. нажатия	M
 Tap step	Шаг касания	M
 Help	Справка	M
 Jack alerts	Сигн. гнёзд	M
@@ -117,17 +117,17 @@ Manual	Ручной	M
 Autorange	Автодиапазон	M
 Auto Hold	Автоудержание	M
 Hold & Limits	Удержание, пределы	M
-Limits	Пределы	M
+Limits	Лимиты	M
 Lower	Нижний	M
 Upper	Верхний	M
 Lower limit	Нижний предел	M
 Upper limit	Верхний предел	M
 Clear limits	Снять пределы	M
-Fail beep	Сигнал при выходе	M
+Fail beep	Сигнал выхода	M
 Record	Запись	M
 Interval	Интервал	M
 Change	Изменение	M
-Duration	Длительность	M
+Duration	Время	M
 Free	Свободно	M
 Every reading	Каждый отсчёт	M
 On change	При изменении	M
@@ -142,7 +142,7 @@ Recording CSV	Запись CSV	M
 Saving ...	Сохранение...	M
 Saving CSV...	Сохранение CSV...	M
 Saved	Сохранено	M
-Wave	Форма	M
+Wave	Волна	M
 History	История	M
 Bargraph	Шкала	M
 Zero	Ноль	M
@@ -187,7 +187,7 @@ Off (stock)	Выкл (завод.)	M
 OFF (stock)	ВЫКЛ (завод.)	M
 Halves (stock)	Половины (завод.)	M
 Corners	Углы	M
-Auto (per view)	Авто (по экрану)	M
+Auto (per view)	Авто (экран)	M
 Both always	Оба всегда	M
 Files live	Только чтение	M
 PC can edit	ПК может менять	M
@@ -199,3 +199,8 @@ Measuring ...	Измерение...	M
 Temp	Темп.	M
 Cap	Ёмк.	M
 Diode	Диод	M
+Upper = reading	Верх = показ.	M
+Lower = reading	Низ = показ.	M
+AUTO starts on mV: AUTO+ is safer	AUTO с mV: надёжнее AUTO+	M
+AUTO+ recommended: never steps to mV	Лучше AUTO+: без перехода на mV	M
+Reset Wh	Сброс Wh	M

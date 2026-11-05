@@ -7,6 +7,7 @@
 0804f260	Coupling
 0804f260	Decode
 0804f260	Default
+0804f260	Display
 0804f260	Edge
 0804f260	Edge:
 0804f260	FFT Unit
@@ -15,6 +16,7 @@
 0804f260	Grid intensity:
 0804f260	Log
 0804f260	Manual
+0804f260	Measure
 0804f260	Mode
 0804f260	Mode:
 0804f260	Normal
@@ -28,9 +30,11 @@
 0804f260	Rising
 0804f260	Roll:
 0804f260	Save CSV
+0804f260	Settings
 0804f260	Single
 0804f260	Source:
 0804f260	Threshold:
+0804f260	Trigger
 0804f260	Type:
 0804f260	Width:
 0804f260	Window
@@ -59,6 +63,8 @@
 0806b13c	30 min
 0806b13c	5 min
 0806b13c	< Back
+0806b13c	AUTO starts on mV: AUTO+ is safer
+0806b13c	AUTO+ recommended: never steps to mV
 0806b13c	Accuracy
 0806b13c	Alerts
 0806b13c	Analog power
@@ -107,6 +113,7 @@
 0806b13c	Key/alert volume
 0806b13c	Limits
 0806b13c	Loud
+0806b13c	Lower = reading
 0806b13c	Lower limit
 0806b13c	Measure
 0806b13c	Mode Remember
@@ -131,6 +138,7 @@
 0806b13c	Ramp
 0806b13c	Record
 0806b13c	Reset
+0806b13c	Reset Wh
 0806b13c	Resistor Settings
 0806b13c	Save
 0806b13c	Saving ...
@@ -156,6 +164,7 @@
 0806b13c	Try again
 0806b13c	USB disk
 0806b13c	Until stopped
+0806b13c	Upper = reading
 0806b13c	Upper limit
 0806b13c	Voltage Settings
 0806b13c	Volume
