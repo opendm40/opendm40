@@ -98,6 +98,9 @@ const BUZZER_ARR_LO: u32 = 14000;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
+/// DMM page trend chart: two taps on the plot within this time are a double
+/// tap (bargraph <-> history row).
+const CHART_DOUBLE_MS: u64 = 400;
 /// The beeper indicator stays this long after the beeper's condition last
 /// held (`App::beep_ind`): its shortest on-time, and a contact that
 /// chatters faster reads as one indication.
@@ -390,6 +393,9 @@ pub struct App {
     chart: [f32; ui::CHART_W as usize],
     chart_n: usize,
     chart_rate: u8,
+    /// The time of the last tap on the trend chart's plot, for a double tap
+    /// (`CHART_DOUBLE_MS`); 0 = none.
+    chart_tap: u64,
     chart_next: u64,
     chart_unit: &'static str,
     chart_dec: u8,
@@ -748,6 +754,7 @@ impl App {
             chart: [0.0; ui::CHART_W as usize],
             chart_n: 0,
             chart_rate: ui::TREND_DEFAULT,
+            chart_tap: 0,
             chart_next: 0,
             chart_unit: "",
             chart_dec: 0,
@@ -3948,6 +3955,20 @@ impl App {
                     self.chart_rate = ui::trend_next(self.chart_rate);
                     self.chart_n = 0;
                     self.chart_dirty = true;
+                } else if x < ui::CHART_X + ui::CHART_W && ui::chart_rows().contains(&y) {
+                    // The plot (a single tap does nothing there): a double
+                    // tap switches the bargraph <-> the history row, as
+                    // Settings > Display > DMM row (not with the power
+                    // meter, which has its own row).
+                    if self.chart_tap != 0 && now.saturating_sub(self.chart_tap) <= CHART_DOUBLE_MS {
+                        self.chart_tap = 0;
+                        if !self.dmm.pw.on {
+                            self.dmm_view.bar_on = !self.dmm_view.bar_on;
+                            self.redraw = true;
+                        }
+                    } else {
+                        self.chart_tap = now.max(1);
+                    }
                 } else if let Some(i) = ui::button_hit(x, y) {
                     self.press_func(clk, i);
                 }
