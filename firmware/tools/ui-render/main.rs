@@ -3454,14 +3454,14 @@ fn main() {
                     save(&out, &format!("x{:02}-{tag}-{}", i + 1, if ext { "ext" } else { "noext" }));
                     bufs.push(emu().fb.clone());
                 }
-                // Nothing but the extra digit's cell (341..398 + the box's
-                // end to 400, rows 68..147) differs.
+                // Nothing but the extra digit's cell (345..402, rows
+                // 68..147) differs.
                 ck.cases += 1;
                 let mut bx = EMPTY;
                 let mut n = 0;
                 for i in 0..W * 320 {
                     let (x, y) = (i % W, i / W);
-                    if bufs[0][i] != bufs[1][i] && !((341..400).contains(&x) && (68..148).contains(&y)) {
+                    if bufs[0][i] != bufs[1][i] && !((345..402).contains(&x) && (68..148).contains(&y)) {
                         bx.add(x as i32, y as i32);
                         n += 1;
                     }

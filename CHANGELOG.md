@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Multimeter:** the reading with the extra digit sits 4 px further right.
 ## v0.4.0 (2026-11-02)
 
 ### New
