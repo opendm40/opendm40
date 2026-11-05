@@ -6,7 +6,7 @@ Settings	Настройки	M
 Scope	Осцилл.	M
 Main menu	Главное меню	M
 Display	Экран	M
-Alerts	Сигналы	M
+Alerts	Предупр.	M
 Power	Питание	M
 Other	Прочее	M
 Dim screen	Затемнение	M
@@ -16,20 +16,20 @@ Key/alert volume	Громкость	M
 Bluetooth	Bluetooth	M
 Start page	Старт. экран	M
 Analog power	Аналог. пит.	M
-DMM rate	Скорость DMM	M
+DMM rate	Скорость	M
 Smoothing	Сглаживание	M
-DMM row	Строка DMM	M
+DMM row	Шкала/история	M
 Temp unit	Ед. темп.	M
-Swipe	Свайп	M
+Swipe	Смахивание	M
 Press effect	Эфф. нажатия	M
 Tap step	Шаг касания	M
 Help	Справка	M
-Jack alerts	Сигн. гнёзд	M
+Jack alerts	Предупр. гнёзд	M
 Danger alarm	Сигн. опасности	M
 USB disk	USB-диск	M
 Burden voltage	Падение напр.	M
-Device info	Об устройстве	M
-Touch test	Тест касания	M
+Device info	О приборе	M
+Touch test	Тест сенсора	M
 Accuracy	Точность	M
 Negative ohm	Отриц. Ом	M
 Mode Remember	Запомнить режим	M
@@ -53,28 +53,28 @@ Back	Назад	M
 Next >	След >	M
 Save	Сохр.	M
 Delete	Удалить	M
-Clear	Сброс	M
+Clear	Очист.	M
 Default	Умолч.	M
 Reset	Сброс	M
 Start	Старт	M
 Auto	Авто	M
-Normal	Обычный	M
+Normal	Норм.	M
 Single	Однокр.	M
-Rising	Фронт	M
+Rising	Рост	M
 Falling	Спад	M
 Edge	Фронт	M
-Pulse	Импульс	M
-Trigger	Запуск	M
+Pulse	Имп.	M
+Trigger	Синхр.	M
 Measure	Измерения	M
 Decode	Декодер	M
 Window	Окно	M
 Sine	Синус	M
-Square	Меандр	M
+Square	Прямоуг.	M
 Triangle	Треуг.	M
 Ramp	Пила	M
 Frequency	Частота	M
 Freq	Част.	M
-Duty	Скважн.	M
+Duty	Коэф. зап.	M
 Coupling	Связь	M
 Probe	Щуп	M
 Type:	Тип:	M
@@ -85,7 +85,7 @@ Persist:	Послесвеч.:	M
 Roll:	Прокрутка:	M
 Brightness:	Яркость:	M
 Grid intensity:	Яркость сетки:	M
-FFT Unit	Ед. БПФ	M
+FFT Unit	Ед. FFT	M
 Source:	Источник:	M
 Threshold:	Порог:	M
 Width:	Ширина:	M
@@ -123,13 +123,13 @@ Upper	Верхний	M
 Lower limit	Нижний предел	M
 Upper limit	Верхний предел	M
 Clear limits	Снять пределы	M
-Fail beep	Сигнал выхода	M
+Fail beep	Сигн. предела	M
 Record	Запись	M
 Interval	Интервал	M
 Change	Изменение	M
 Duration	Время	M
 Free	Свободно	M
-Every reading	Каждый отсчёт	M
+Every reading	Каждое показ.	M
 On change	При изменении	M
 Fast	Быстро	M
 Until stopped	До остановки	M
@@ -142,7 +142,7 @@ Recording CSV	Запись CSV	M
 Saving ...	Сохранение...	M
 Saving CSV...	Сохранение CSV...	M
 Saved	Сохранено	M
-Wave	Волна	M
+Wave	Форма	M
 History	История	M
 Bargraph	Шкала	M
 Zero	Ноль	M
@@ -152,14 +152,14 @@ Arm	Взвести	M
 Wiring	Схема	M
 Generator is off	Генератор выкл.	M
 Gallery	Галерея	M
-Gallery: screenshots and logs	Галерея: снимки и логи	M
-No screenshots or logs	Нет снимков и логов	M
+Gallery: screenshots and logs	Галерея: снимки и записи	M
+No screenshots or logs	Нет снимков и записей	M
 Delete screenshot?	Удалить снимок?	M
-Delete this log?	Удалить лог?	M
+Delete this log?	Удалить запись?	M
 Delete failed	Ошибка удаления	M
 Cannot delete	Нельзя удалить	M
-Log	Лог	M
-Log failed	Ошибка лога	M
+Log	Журнал	M
+Log failed	Ошибка записи	M
 No data	Нет данных	M
 No disk	Нет диска	M
 Disk full	Диск полон	M
@@ -175,32 +175,50 @@ Again	Ещё раз	M
 Stopped	Остановлено	M
 Discharging...	Разряд...	M
 Check leads	Проверьте щупы	M
-Fuse check	Проверка предохр.	M
+Fuse check	Тест предохр.	M
 Fuse OK	Предохр. цел	M
-Fuse open	Предохр. обрыв	M
+Fuse open	Предохр. сгорел	M
 Install it now?	Установить?	M
 Installing firmware...	Установка прошивки...	M
-Touch calibration	Калибровка касания	M
+Touch calibration	Калибровка сенсора	M
 Calibrate	Калибр.	M
 Top bar	Верх экрана	M
-Off (stock)	Выкл (завод.)	M
-OFF (stock)	ВЫКЛ (завод.)	M
-Halves (stock)	Половины (завод.)	M
+Off (stock)	Выкл (штатн.)	M
+OFF (stock)	ВЫКЛ (штатн.)	M
+Halves (stock)	Половины (штатн.)	M
 Corners	Углы	M
 Auto (per view)	Авто (экран)	M
 Both always	Оба всегда	M
 Files live	Только чтение	M
 PC can edit	ПК может менять	M
-Files live (replug)	Чтение (перевткн.)	M
-PC can edit (replug)	Запись (перевткн.)	M
+Files live (replug)	Чтение (переподкл.)	M
+PC can edit (replug)	Запись (переподкл.)	M
 Loud	Громко	M
 Volume	Громкость	M
 Measuring ...	Измерение...	M
-Temp	Темп.	M
-Cap	Ёмк.	M
-Diode	Диод	M
+Temp	Temp	E
+Cap	Cap	E
+Diode	Diode	E
 Upper = reading	Верх = показ.	M
 Lower = reading	Низ = показ.	M
-AUTO starts on mV: AUTO+ is safer	AUTO с mV: надёжнее AUTO+	M
+AUTO starts on mV: AUTO+ is safer	AUTO с mV: AUTO+ безопаснее	M
 AUTO+ recommended: never steps to mV	Лучше AUTO+: без перехода на mV	M
 Reset Wh	Сброс Wh	M
+Current in A jack: check leads	Ток в A: проверьте щупы	M
+A jack current: 10 A shunt on	Ток в A: шунт 10 A вкл.	M
+Overload: 10 A shunt selected	Перегрузка: шунт 10 A	M
+Voltage on V jack, no current	Напряжение на V, тока нет	M
+Voltage on circuit - power off	Снимите напряжение с цепи	M
+DC voltage here: use DC V?	Постоянное U: DC V?	M
+AC voltage here: use AC V?	Переменное U: AC V?	M
+0 A for 60 s: check the fuse?	0 A 60 с: предохранитель?	M
+Current too high: reduce it	Ток велик: уменьшите	M
+Lead from V/ohm jack to A	Щуп из гнезда V/Ω в A	M
+nothing else connected	больше ничего не подкл.	M
+OL: no path from V to A	OL: нет цепи от V к A	M
+Replace: 10 A ceramic fuse	Замена: керам. 10 A	M
+One lead V/ohm to A only	Только один щуп: V/Ω в A	M
+A input path intact	Цепь входа A цела	M
+No ohm reading	Нет показания Ω	M
+expect ~48 \u{3a9}	ожидается ~48 \u{3a9}	M
+Runt	Runt	E

@@ -141,10 +141,11 @@
 : hold V steady (8 s)
 ; Irms(100 ms) 
 @load
-A input path intact
 A mA uA
 A-HOLD
+A-JACK
 A-JACK only
+A-PROT
 ABORT
 ABS
 AC
@@ -160,6 +161,12 @@ AC+DC
 AC+DC: total; P = Pac + Vdc x Idc, rms of both
 AC/DC
 AC: AC parts only (DC removed); P, PF, S, Q, f
+AC?
+AD1PK_PB1
+AD1PK_SENSE
+AD2PK_PB1
+AJACK
+APROT
 AUTO
 AUTO+
 AUTO: DC (no AC signal)
@@ -201,6 +208,8 @@ CH2: not in the Wave view
 CH2: not in this build
 CH2: recording runs
 CLEAR
+CMP_PB1
+CMP_SENSE
 COM
 COM carries the load current; P > 0: I into A
 CONT
@@ -216,7 +225,6 @@ Captured
 Captured, not saved: 
 Captured: saving ...
 Change view
-Current too high: reduce it
 Cycl
 DALI
 DATA LOGGING
@@ -228,6 +236,7 @@ DC coupling (DC V row)
 DC mV
 DC-coupled AC row
 DC: P = Vdc x Idc; no f, PF, S, Q
+DC?
 DIODE
 DM40
 DM40?
@@ -258,6 +267,8 @@ FFT
 FILE
 FLAT
 FREQ
+FUSE
+FUSE?
 Fast log cancelled
 Fast log failed
 Fast: DC/AC V or A only
@@ -307,12 +318,12 @@ Keep holding to exit
 Keypad
 Keys
 LIVE
+LIVE?
 LO
 LOAD
 LOGS/
 LOUD
 LOW
-Lead from V/ohm jack to A
 Leads open, nothing in A
 Leave and open the gallery again to retry
 Lost:
@@ -350,7 +361,6 @@ NTCUSER
 Needs the P + PF method
 No AC: DC is more precise
 No frames yet
-No ohm reading
 No reading to log
 No record to save
 Not a DM40 update file
@@ -359,13 +369,13 @@ OFF: V, P at the jacks
 OHM
 OK,
 OL
-OL: no path from V to A
 ON (A, mA, uA)
 ON: the load sees V - I*R
 OPEN
+OVERLOAD
+OVLD
 Off 
 OhmEXP
-One lead V/ohm to A only
 Overflow
 PASS
 PAUSE
@@ -403,9 +413,7 @@ Reading the disk
 Reading the log
 Record on / off
 Rectangular
-Replace: 10 A ceramic fuse
 Reset energy?
-Runt
 Runt, 2nd level 
 S/s, samples 
 SCOPE
@@ -474,9 +482,12 @@ V cal: off > 10 %
 V cal: too high for 
 V calibration...
 V gain 
+V-JACK
+V-JACK?
 V/div
 VA
 VAh
+VJACK
 VOLUME
 Vamp
 Vavg
@@ -521,7 +532,6 @@ disk full
 down
 drag orange T
 edge, computed
-expect ~48 \u{3a9}
 falling
 format
 fr
@@ -552,7 +562,6 @@ nF
 no disk
 no limit
 none
-nothing else connected
 ns
 opendm40
 orange

@@ -21,3 +21,18 @@ Language** switches. The default image is English only.
   (Cyrillic). Accented Latin letters are the stock letters plus an accent.
 - Wording marked `R`: OpenDM40-Chinese, MIT, Copyright (c) 2026
   xingyan4117-sketch. Only its texts are used, none of its glyphs or code.
+
+## Chinese terms
+
+Where sources disagree, the established instrument-brand term wins; the stock wording stays first where it is itself the standard term.
+
+| English | Chinese | Source |
+|---|---|---|
+| Burden voltage | 负荷电压 | Fluke China (287/289, 15B MAX / 17B MAX); community firmware 负载压降 reads as a drop across the load |
+| Runt | 欠幅 | Rigol MSO5000 欠幅脉冲 |
+| Trigger source | 触发源 | Rigol MSO5000; 信号源 means a signal generator |
+| Pulse trigger | 脉宽 | Rigol MSO5000 脉宽触发 |
+| USB disk | U盘模式 | *inferred*: this row picks read-only or editable; stock USB连接 is another function |
+| Offset | 偏移 | Rigol DG4000, MSO5000 |
+
+The zh manual follows these terms: 负担电压 -> 负荷电压, 偏置 -> 偏移, 矮脉冲 -> 欠幅脉冲.

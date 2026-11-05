@@ -5,7 +5,7 @@ Signal	Générateur	M
 Settings	Réglages	M
 Scope	Oscillo	M
 Main menu	Menu principal	M
-Display	Ecran	M
+Display	Écran	M
 Alerts	Alertes	M
 Power	Alim.	M
 Other	Autre	M
@@ -20,7 +20,7 @@ DMM rate	Vitesse DMM	M
 Smoothing	Lissage	M
 DMM row	Ligne DMM	M
 Temp unit	Unité temp.	M
-Swipe	Balayage	M
+Swipe	Geste	M
 Press effect	Effet appui	M
 Tap step	Pas tactile	M
 Help	Aide	M
@@ -51,15 +51,15 @@ Back	Retour	M
 < Back	< Retour	M
 < Prev	< Préc	M
 Next >	Suiv >	M
-Save	Enreg.	M
+Save	Sauver	M
 Delete	Supprimer	M
 Clear	Effacer	M
 Default	Défaut	M
-Reset	RàZ	M
+Reset	RAZ	M
 Start	Démarrer	M
 Auto	Auto	M
 Normal	Normal	M
-Single	Unique	M
+Single	Monoc.	M
 Rising	Montant	M
 Falling	Desc.	M
 Edge	Front	M
@@ -74,7 +74,7 @@ Triangle	Triangle	M
 Ramp	Rampe	M
 Frequency	Fréquence	M
 Freq	Fréq	M
-Duty	Rapport	M
+Duty	Rapp. cycl.	M
 Coupling	Couplage	M
 Probe	Sonde	M
 Type:	Type :	M
@@ -91,8 +91,8 @@ Threshold:	Seuil :	M
 Width:	Largeur :	M
 Offset	Décalage	M
 Color	Couleur	M
-Save CSV	Enreg. CSV	M
-Save CSV OK	CSV enregistré	M
+Save CSV	Sauver CSV	M
+Save CSV OK	CSV sauvé	M
 CSV save failed	Erreur CSV	M
 Screenshot	Capture	M
 Screenshot failed	Erreur capture	M
@@ -110,8 +110,8 @@ Resistor Settings	Réglages résist.	M
 Capacitance Settings	Réglages capacité	M
 Temperature Settings	Réglages temp.	M
 Power Settings	Réglages puissance	M
-Power off	Eteindre	M
-Power off?	Eteindre ?	M
+Power off	Arrêt	M
+Power off?	Éteindre ?	M
 Range	Calibre	M
 Manual	Manuel	M
 Autorange	Calibre auto	M
@@ -139,25 +139,25 @@ Stop the recording	Arrêter enreg.	M
 Stop the recording first	Arrêter l'enreg. d'abord	M
 Recording	Enregistrement	M
 Recording CSV	Enreg. CSV	M
-Saving ...	Enregistrement...	M
-Saving CSV...	Enreg. CSV...	M
-Saved	Enregistré	M
+Saving ...	Sauvegarde...	M
+Saving CSV...	Sauv. CSV...	M
+Saved	Sauvegardé	M
 Wave	Onde	M
 History	Historique	M
 Bargraph	Barre	M
 Zero	Zéro	M
-Inrush	Appel	M
+Inrush	I appel	M
 Inrush Current	Courant d'appel	M
 Arm	Armer	M
-Wiring	Câbles	M
+Wiring	Schéma	M
 Generator is off	Générateur éteint	M
 Gallery	Galerie	M
 Gallery: screenshots and logs	Galerie : captures et logs	M
 No screenshots or logs	Aucune capture ni log	M
 Delete screenshot?	Supprimer la capture ?	M
 Delete this log?	Supprimer ce log ?	M
-Delete failed	Echec suppr.	M
-Cannot delete	Suppression impossible	M
+Delete failed	Échec suppr.	M
+Cannot delete	Suppr. impossible	M
 Log	Log	M
 Log failed	Erreur log	M
 No data	Aucune donnée	M
@@ -171,19 +171,19 @@ Empty file	Fichier vide	M
 File not found	Fichier introuvable	M
 Loading...	Chargement...	M
 Try again	Réessayer	M
-Again	Encore	M
+Again	Répéter	M
 Stopped	Arrêté	M
 Discharging...	Décharge...	M
 Check leads	Vérifier cordons	M
 Fuse check	Test fusible	M
 Fuse OK	Fusible OK	M
-Fuse open	Fusible coupé	M
-Install it now?	Installer maintenant ?	M
+Fuse open	Fusible grillé	M
+Install it now?	Installer ?	M
 Installing firmware...	Installation...	M
 Touch calibration	Calibrage tactile	M
 Calibrate	Calibrer	M
 Top bar	Barre haut	M
-Off (stock)	Non (origine)	M
+Off (stock)	Off (origine)	M
 OFF (stock)	OFF (origine)	M
 Halves (stock)	Moitiés (origine)	M
 Corners	Coins	M
@@ -192,15 +192,33 @@ Both always	Toujours les deux	M
 Files live	Lecture seule	M
 PC can edit	PC modifie	M
 Files live (replug)	Lecture (rebr.)	M
-PC can edit (replug)	Ecriture (rebr.)	M
+PC can edit (replug)	Écriture (rebr.)	M
 Loud	Fort	M
 Volume	Volume	M
 Measuring ...	Mesure...	M
-Temp	Temp	M
-Cap	Cap	M
-Diode	Diode	M
+Temp	Temp	E
+Cap	Cap	E
+Diode	Diode	E
 Upper = reading	Haut = mesure	M
 Lower = reading	Bas = mesure	M
 AUTO starts on mV: AUTO+ is safer	AUTO part de mV : AUTO+ plus sûr	M
 AUTO+ recommended: never steps to mV	AUTO+ conseillé : jamais en mV	M
-Reset Wh	RàZ Wh	M
+Reset Wh	RAZ Wh	M
+Current in A jack: check leads	Courant en A : voir cordons	M
+A jack current: 10 A shunt on	Courant en A : shunt 10 A	M
+Overload: 10 A shunt selected	Surcharge : shunt 10 A	M
+Voltage on V jack, no current	Tension sur V, sans courant	M
+Voltage on circuit - power off	Couper la tension du circuit	M
+DC voltage here: use DC V?	Tension continue : DC V ?	M
+AC voltage here: use AC V?	Tension alternative : AC V ?	M
+0 A for 60 s: check the fuse?	0 A pendant 60 s : fusible ?	M
+Current too high: reduce it	Courant trop élevé : réduire	M
+Lead from V/ohm jack to A	Cordon de V/Ω vers A	M
+nothing else connected	rien d'autre de branché	M
+OL: no path from V to A	OL : pas de liaison V-A	M
+Replace: 10 A ceramic fuse	Remplacer : céram. 10 A	M
+One lead V/ohm to A only	Un seul cordon : V/Ω vers A	M
+A input path intact	Entrée A : circuit intact	M
+No ohm reading	Pas de mesure en Ω	M
+expect ~48 \u{3a9}	attendu ~48 \u{3a9}	M
+Runt	Runt	E

@@ -20,7 +20,7 @@ DMM rate	Velocità DMM	M
 Smoothing	Livellamento	M
 DMM row	Riga DMM	M
 Temp unit	Unità temp.	M
-Swipe	Scorrimento	M
+Swipe	Swipe	M
 Press effect	Effetto tocco	M
 Tap step	Passo tocco	M
 Help	Aiuto	M
@@ -68,7 +68,7 @@ Trigger	Trigger	M
 Measure	Misure	M
 Decode	Decod.	M
 Window	Finestra	M
-Sine	Seno	M
+Sine	Sinusoide	M
 Square	Quadra	M
 Triangle	Triangolo	M
 Ramp	Rampa	M
@@ -82,7 +82,7 @@ Mode:	Modo:	M
 Mode	Modo	M
 Edge:	Fronte:	M
 Persist:	Persist.:	M
-Roll:	Scorri:	M
+Roll:	Scorrim.:	M
 Brightness:	Luminosità:	M
 Grid intensity:	Lumin. griglia:	M
 FFT Unit	Unità FFT	M
@@ -124,7 +124,7 @@ Lower limit	Limite inf.	M
 Upper limit	Limite sup.	M
 Clear limits	Azzera limiti	M
 Fail beep	Bip limiti	M
-Record	Registra	M
+Record	Reg.	M
 Interval	Intervallo	M
 Change	Variazione	M
 Duration	Durata	M
@@ -138,9 +138,9 @@ Stop recording	Ferma registraz.	M
 Stop the recording	Ferma registraz.	M
 Stop the recording first	Prima ferma regist.	M
 Recording	Registrazione	M
-Recording CSV	Registra CSV	M
+Recording CSV	Registraz. CSV	M
 Saving ...	Salvataggio...	M
-Saving CSV...	Salvo CSV...	M
+Saving CSV...	Salvataggio CSV	M
 Saved	Salvato	M
 Wave	Onda	M
 History	Storico	M
@@ -149,15 +149,15 @@ Zero	Zero	M
 Inrush	Spunto	M
 Inrush Current	Corrente di spunto	M
 Arm	Arma	M
-Wiring	Cavi	M
+Wiring	Schema	M
 Generator is off	Generatore spento	M
 Gallery	Galleria	M
 Gallery: screenshots and logs	Galleria: schermate e log	M
 No screenshots or logs	Nessuna schermata o log	M
 Delete screenshot?	Eliminare schermata?	M
 Delete this log?	Eliminare log?	M
-Delete failed	Eliminazione fallita	M
-Cannot delete	Impossibile eliminare	M
+Delete failed	Errore elimin.	M
+Cannot delete	Non eliminabile	M
 Log	Log	M
 Log failed	Errore log	M
 No data	Nessun dato	M
@@ -171,19 +171,19 @@ Empty file	File vuoto	M
 File not found	File non trovato	M
 Loading...	Caricamento...	M
 Try again	Riprova	M
-Again	Ancora	M
+Again	Ripeti	M
 Stopped	Fermato	M
 Discharging...	Scarica...	M
 Check leads	Controlla puntali	M
 Fuse check	Test fusibile	M
 Fuse OK	Fusibile OK	M
-Fuse open	Fusibile aperto	M
+Fuse open	Fusibile bruciato	M
 Install it now?	Installare ora?	M
-Installing firmware...	Installo firmware...	M
+Installing firmware...	Installazione...	M
 Touch calibration	Calibrazione tocco	M
 Calibrate	Calibra	M
 Top bar	Barra sup.	M
-Off (stock)	No (orig.)	M
+Off (stock)	Off (orig.)	M
 OFF (stock)	OFF (orig.)	M
 Halves (stock)	Metà (orig.)	M
 Corners	Angoli	M
@@ -196,11 +196,29 @@ PC can edit (replug)	Scrittura (reins.)	M
 Loud	Forte	M
 Volume	Volume	M
 Measuring ...	Misura...	M
-Temp	Temp	M
-Cap	Cap	M
-Diode	Diodo	M
+Temp	Temp	E
+Cap	Cap	E
+Diode	Diode	E
 Upper = reading	Sup. = lettura	M
 Lower = reading	Inf. = lettura	M
-AUTO starts on mV: AUTO+ is safer	AUTO parte da mV: meglio AUTO+	M
+AUTO starts on mV: AUTO+ is safer	AUTO parte da mV: AUTO+ più sicuro	M
 AUTO+ recommended: never steps to mV	Meglio AUTO+: mai su mV	M
-Reset Wh	Az. Wh	M
+Reset Wh	Reset Wh	M
+Current in A jack: check leads	Corrente in A: vedi puntali	M
+A jack current: 10 A shunt on	Corrente in A: shunt 10 A	M
+Overload: 10 A shunt selected	Sovraccarico: shunt 10 A	M
+Voltage on V jack, no current	Tensione su V, no corrente	M
+Voltage on circuit - power off	Togliere tensione al circuito	M
+DC voltage here: use DC V?	Tensione continua: DC V?	M
+AC voltage here: use AC V?	Tensione alternata: AC V?	M
+0 A for 60 s: check the fuse?	0 A per 60 s: fusibile?	M
+Current too high: reduce it	Corrente alta: riducila	M
+Lead from V/ohm jack to A	Puntale da V/Ω ad A	M
+nothing else connected	nient'altro collegato	M
+OL: no path from V to A	OL: circuito aperto V-A	M
+Replace: 10 A ceramic fuse	Sostituire: ceramico 10 A	M
+One lead V/ohm to A only	Un solo puntale: V/Ω ad A	M
+A input path intact	Ingresso A integro	M
+No ohm reading	Nessuna lettura Ω	M
+expect ~48 \u{3a9}	attesi ~48 \u{3a9}	M
+Runt	Runt	E

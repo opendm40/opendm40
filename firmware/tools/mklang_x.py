@@ -255,7 +255,8 @@ def build(lang, rows, check, meta, text_tables, fnv, rs_str, rs_bytes):
     for k, z in enc_rows.items():
         for a in use.get(k, {0x0806B13C}):
             if a in need:
-                need[a] |= {c for c in z if ord(c) >= 0x80}
+                # Omega: the stock fonts' own (stockfont_w.rs).
+                need[a] |= {c for c in z if ord(c) >= 0x80 and c != 'Ω'}
     s, total, sizes = '', 0, []
     extra = []
     for a in sorted(need):

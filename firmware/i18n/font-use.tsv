@@ -1,4 +1,3 @@
-# Which stock font draws which string (ui-render, LANG_LOG): tools/mklang_x.py.
 0804f24c	OK
 0804f260	Auto
 0804f260	Brightness:
@@ -10,8 +9,8 @@
 0804f260	Display
 0804f260	Edge
 0804f260	Edge:
-0804f260	FFT Unit
 0804f260	Falling
+0804f260	FFT Unit
 0804f260	Freq
 0804f260	Grid intensity:
 0804f260	Log
@@ -20,8 +19,8 @@
 0804f260	Mode
 0804f260	Mode:
 0804f260	Normal
-0804f260	OFF
 0804f260	Off
+0804f260	OFF
 0804f260	On
 0804f260	Other
 0804f260	Persist:
@@ -38,40 +37,57 @@
 0804f260	Type:
 0804f260	Width:
 0804f260	Window
+080592f0	0 A for 60 s: check the fuse?
+080592f0	AC voltage here: use AC V?
 080592f0	Again
+080592f0	A input path intact
+080592f0	A jack current: 10 A shunt on
 080592f0	Cancel
 080592f0	Check leads
-080592f0	Fuse OK
+080592f0	Current in A jack: check leads
+080592f0	Current too high: reduce it
+080592f0	DC voltage here: use DC V?
+080592f0	expect ~48 \u{3a9}
 080592f0	Fuse check
+080592f0	Fuse OK
 080592f0	Fuse open
-080592f0	Install it now?
 080592f0	Installing firmware...
+080592f0	Install it now?
+080592f0	Lead from V/ohm jack to A
 080592f0	Loading...
 080592f0	Measuring ...
 080592f0	No
+080592f0	No ohm reading
+080592f0	nothing else connected
 080592f0	OK
+080592f0	OL: no path from V to A
+080592f0	One lead V/ohm to A only
+080592f0	Overload: 10 A shunt selected
 080592f0	Power off?
 080592f0	Recording CSV
+080592f0	Replace: 10 A ceramic fuse
 080592f0	Screenshot failed
 080592f0	Start
+080592f0	Voltage on circuit - power off
+080592f0	Voltage on V jack, no current
 080592f0	Yes
 0805b138	OK
 0805b138	Wave
+0806b13c	< Back
+0806b13c	10 min
 0806b13c	1 hour
 0806b13c	1 min
-0806b13c	10 min
 0806b13c	30 min
 0806b13c	5 min
-0806b13c	< Back
-0806b13c	AUTO starts on mV: AUTO+ is safer
-0806b13c	AUTO+ recommended: never steps to mV
 0806b13c	Accuracy
 0806b13c	Alerts
 0806b13c	Analog power
 0806b13c	Arm
-0806b13c	Auto (per view)
+0806b13c	AUTO+ recommended: never steps to mV
 0806b13c	Auto Hold
+0806b13c	Auto (per view)
 0806b13c	Autorange
+0806b13c	AUTO starts on mV: AUTO+ is safer
 0806b13c	Back
 0806b13c	Backlight
 0806b13c	Bargraph
@@ -85,13 +101,13 @@
 0806b13c	Clear limits
 0806b13c	Corners
 0806b13c	Current Settings
-0806b13c	DMM rate
-0806b13c	DMM row
 0806b13c	Danger alarm
 0806b13c	Decode
 0806b13c	Device info
 0806b13c	Dim screen
 0806b13c	Display
+0806b13c	DMM rate
+0806b13c	DMM row
 0806b13c	Duration
 0806b13c	Duty
 0806b13c	Every reading
@@ -119,21 +135,21 @@
 0806b13c	Mode Remember
 0806b13c	Multimeter
 0806b13c	Negative ohm
+0806b13c	Off
 0806b13c	OFF
+0806b13c	Offset
+0806b13c	Off (stock)
 0806b13c	OFF (stock)
 0806b13c	OK
 0806b13c	ON
-0806b13c	Off
-0806b13c	Off (stock)
-0806b13c	Offset
 0806b13c	On change
 0806b13c	Oscilloscope
 0806b13c	Other
 0806b13c	PC can edit
 0806b13c	PC can edit (replug)
 0806b13c	Power
-0806b13c	Power Settings
 0806b13c	Power off
+0806b13c	Power Settings
 0806b13c	Press effect
 0806b13c	Ramp
 0806b13c	Record
@@ -155,19 +171,20 @@
 0806b13c	Stop recording
 0806b13c	Swipe
 0806b13c	Tap step
-0806b13c	Temp unit
 0806b13c	Temperature Settings
+0806b13c	Temp unit
 0806b13c	Touch calibration
 0806b13c	Touch test
 0806b13c	Triangle
 0806b13c	Trigger
 0806b13c	Try again
-0806b13c	USB disk
 0806b13c	Until stopped
 0806b13c	Upper = reading
 0806b13c	Upper limit
+0806b13c	USB disk
 0806b13c	Voltage Settings
 0806b13c	Volume
 0806b13c	Wave
 0806b13c	Wiring
 0806b13c	Zero
+# Which stock font draws which string (ui-render, LANG_LOG): tools/mklang_x.py.
