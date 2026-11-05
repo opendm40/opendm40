@@ -764,6 +764,31 @@ fn ui(out: &str, data: &str, imgs: &str) -> bool {
     ck.violations == 0
 }
 
+// ------------------------------------------------------------------ manual
+
+/// The manual's gallery pictures (manual.sh): the grid of `img` and the
+/// same page in select mode with three ticks; zero violations.
+fn manual(out: &str, img: &str) -> bool {
+    let mut ck = Checker { cases: 0, violations: 0, seen: Default::default() };
+    let reg = regions();
+    let mut img = Img::load(img);
+    let g = open(&mut img);
+    ck.check("gallery", &reg);
+    save(out, "gallery");
+    sel_on(g, &mut img);
+    for i in [1, 2, 4] {
+        tap_tile(g, i);
+    }
+    run(g, &mut img);
+    ck.check("gallery-select", &reg);
+    save(out, "gallery-select");
+    for (msg, (n, scene)) in &ck.seen {
+        println!("{n:6} x  {msg}   [first: {scene}]");
+    }
+    println!("cases {}, violations {}", ck.cases, ck.violations);
+    ck.violations == 0
+}
+
 // ------------------------------------------------------------------ decode
 
 fn read_ref(p: &str) -> Option<(u32, u32, Vec<u16>)> {
@@ -1263,12 +1288,13 @@ fn main() {
     let a: Vec<String> = std::env::args().collect();
     let ok = match a[1].as_str() {
         "ui" => ui(&a[2], &a[3], &a[4]),
+        "manual" => manual(&a[2], &a[3]),
         "decode" => decode(&a[2], &a[3]),
         "lock" => lock(&a[2], &a[3]),
         "select" => select(&a[2]),
         "select-dup" => select_dup(&a[2]),
         "dlg" => dlg(&a[2], &a[3]),
-        _ => panic!("ui | decode | lock | select | select-dup | dlg"),
+        _ => panic!("ui | manual | decode | lock | select | select-dup | dlg"),
     };
     std::process::exit(if ok { 0 } else { 1 });
 }
