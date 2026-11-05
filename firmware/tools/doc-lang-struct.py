@@ -5,7 +5,9 @@ Called by doc-lang-check.sh; prints each difference, exit 1 if any.
 Whole file: the same heading levels in the same order, and identical ``` blocks.
 Per section (heading to heading, text before the H1 is skipped; it holds the
 language line and the translation note):
-  - the same images, inline code spans and list items (count);
+  - the same images, inline code spans and list items (count); an image of a
+    translation is in the language's folder (img/ru/x.png counts as img/x.png)
+    and must exist;
   - the same tables: the rows of each and the columns of each row, in order;
   - the same links. An anchor counts as the number of the heading it reaches,
     so a link has to point at the matching section under its translated title.
@@ -63,6 +65,21 @@ def parse(path):
         for a in re.findall(r'<a\s+(?:name|id)="([^"]+)"', line):
             anchors[a] = len(sections)  # the heading that follows
     return sections, fences, anchors
+
+
+def images(text, path, lang, bad, where):
+    """The images in the form of the English file; missing files go to `bad`."""
+    out = []
+    for t in IMAGE.findall(text):
+        if re.match(r'^[a-z]+:', t):
+            out.append(t)
+            continue
+        if not os.path.exists(os.path.normpath(os.path.join(os.path.dirname(path), t))):
+            bad.append('%s: %s: no such image' % (where, t))
+        if lang and '/img/' in '/' + t and '/img/%s/' % lang not in '/' + t:
+            bad.append('%s: %s: not in the img/%s/ folder' % (where, t, lang))
+        out.append(re.sub(r'(^|/)img/(?:%s)/' % '|'.join(LANGS), r'\1img/', t))
+    return out
 
 
 def has_translation(path):
@@ -152,6 +169,8 @@ def main():
     markup = '--markup' in args
     args = [a for a in args if a != '--markup']
     en, tr = args
+    m = LANG.search(tr)
+    lang = m.group(0).split('.')[1] if m else None
     se, fe, ae = parse(en)
     st, ft, at = parse(tr)
     bad = []
@@ -170,7 +189,7 @@ def main():
             where = '"%s" / "%s"' % (a['title'], b['title'])
             ta, tb = '\n'.join(a['lines']), '\n'.join(b['lines'])
             for name, x, y in (
-                ('image', IMAGE.findall(ta), IMAGE.findall(tb)),
+                ('image', images(ta, en, None, bad, where), images(tb, tr, lang, bad, where)),
                 ('code', CODE.findall(ta), CODE.findall(tb)),
                 ('link', [norm_link(t, en, ae, cache) for t in LINK.findall(CODE.sub('C', ta))],
                          [norm_link(t, tr, at, cache) for t in LINK.findall(CODE.sub('C', tb))]),

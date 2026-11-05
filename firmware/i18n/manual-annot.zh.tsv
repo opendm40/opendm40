@@ -1,0 +1,209 @@
+# Picture labels of the Chinese manual: English<TAB>Chinese. tools/ui-render/manual-annot.py. Machine-written, needs a native review.
+"update"	"update"
+(stock: USB Connect)	(原厂: USB连接)
++ wire	+ 导线
+0 Vpp, offset 1.2 V: DC	0 Vpp, 偏移 1.2 V: 直流
+0.750,,V,OL	0.750,,V,OL
+0.90 / 0.28 mA	0.90 / 0.28 mA
+10 mΩ	10 mΩ
+< Back	< 返回
+A lead in A, no current:	表笔在 A, 无电流:
+A, mA, µA; the power	A, mA, µA; 功率计的
+A: the trace zero	A: 波形零点
+AC+DC, AUTO	AC+DC, AUTO
+AUTO+ by default	默认 AUTO+
+AUTO: autorange; auto-set	AUTO: 自动量程; 自动设置
+After the copy: the question	复制后: 提示
+An adjustable offset	可调偏移
+Auto (per view). Each side also stays on while something needs it.	自动 (按视图)。有功能在用时, 对应部分保持开启。
+C-1-ATK-DM40-CALI (SPP)	C-1-ATK-DM40-CALI (SPP)
+CALIB.BIN  BOOTDATA.BIN	CALIB.BIN  BOOTDATA.BIN
+CALIB.BIN  UID.BIN  ...  FIRMWARE.BIN	CALIB.BIN  UID.BIN  ...  FIRMWARE.BIN
+CH1	CH1
+CH1: popup, zoom in / out	CH1: 弹窗, 缩放
+CUR: cursors	CUR: 光标
+CUR: cursors in one tap	CUR: 一点即开光标
+Combined view	组合视图
+Computer	电脑
+Computer (SCPI)	电脑 (SCPI)
+DC V selected, the leads still in A and COM: a current flows through A, A-JACK	选了 DC V, 表笔仍在 A 和 COM: 电流流过 A, A-JACK
+DC, AC,	DC, AC,
+DC, AC, AC+DC	DC, AC, AC+DC
+DEBUG/	DEBUG/
+DM40	DM40
+DM40A (Bluetooth LE)	DM40A (Bluetooth LE)
+DMM (CH2): on / off, V/div	DMM (CH2): 开/关, V/div
+DMM + Scope	万用表 + 示波器
+Delete, then confirm	删除后确认
+FAST / MED / SLOW,	FAST / MED / SLOW,
+FIRMWARE.BIN	FIRMWARE.BIN
+From the oscilloscope (dashed): MENU,	从示波器 (虚线): MENU,
+Fuse check	保险丝自检
+GEN trace: on / off, V/div	GEN 波形: 开/关, V/div
+Generator	信号发生器
+Generator page	信号发生器页
+INFO/	INFO/
+Inrush current	涌流
+LOAD	负载
+LOADER.BIN  OTP.BIN	LOADER.BIN  OTP.BIN
+LOG001.CSV  LOG002.CSV  FAST001.CSV	LOG001.CSV  LOG002.CSV  FAST001.CSV
+LOGS/	LOGS/
+LOGS/LOG007.CSV	LOGS/LOG007.CSV
+Letting go less than 0.5 s after the beep cancels: the meter starts normally.	提示音后 0.5 秒内松开即取消: 表正常启动。
+Limits: OK, HI, LO	限值: OK, HI, LO
+Loader's USB disk	加载器的 U 盘
+Locked	已锁定
+MATH (FFT): popup, scale	MATH (FFT): 弹窗, 缩放
+MAX, AVG	MAX, AVG
+MENU: main menu	MENU: 主界面
+MF: range page; scope menu	MF: 量程页; 示波器菜单
+MIN and the timer	MIN 和计时器
+MOSFET PE0: A ranges, OVLD, A-PROT	MOSFET PE0: A 量程, OVLD, A-PROT
+MOSFET PE1: mA ranges	MOSFET PE1: mA 量程
+Meter screen	表的屏幕
+Meter: USB disk	表: U 盘
+Meter: USB disk, INFO/	表: U 盘, INFO/
+Multimeter	万用表
+Multimeter page	万用表页
+OPTBYTES.BIN  BACKUP.TXT	OPTBYTES.BIN  BACKUP.TXT
+OSC: the oscilloscope input	OSC: 示波器输入
+OUT: the generator output	OUT: 信号发生器输出
+Offset 1.5 V: around 1.5 V	偏移 1.5 V: 围绕 1.5 V
+Offset auto: 0 V to Vpp	偏移自动: 0 V 到 Vpp
+On-screen help	屏幕帮助
+One finger down:	单指下滑:
+Oscilloscope	示波器
+Oscilloscope page	示波器页
+Overload: the 10 A shunt	过载: 10 A 分流器
+PC can edit, waiting for the re-plug	PC 可编辑, 等待重新插拔
+Phone app	手机 App
+Power key (left edge)	电源键 (左侧)
+Power meter	功率计
+Power-off warning	关机提示
+README.TXT	README.TXT
+REL box: tap	REL 框: 点击
+RUN: HOLD; run / stop	RUN: HOLD; 运行 / 停止
+Recording	记录
+S001.BMP  S002.BMP  S003.BMP	S001.BMP  S002.BMP  S003.BMP
+SCOP001.CSV	SCOP001.CSV
+SCOPE/	SCOPE/
+SHOTS/	SHOTS/
+SOURCE	电源
+SPIFLASH.BIN	SPIFLASH.BIN
+Scope and	示波器和
+Spreadsheet	电子表格
+Stock	原厂
+Stock: 2 mA	原厂: 2 mA
+Stock: 214.5 °F	原厂: 214.5 °F
+Stock: Settings > 5. Other Settings	原厂: 系统设置 > 5.其他设置
+Swipe left / right:	左右滑动:
+T: trigger level	T: 触发电平
+T: trigger position	T: 触发位置
+The 50 kHz limit shown	显示 50 kHz 上限
+The Device page	产品信息页
+The Record page	记录页
+The gallery	图库
+Three fingers down:	三指下滑:
+Timebase corner taps	点击角落调时基
+Trigger position drag	拖动触发位置
+Two fingers down:	双指下滑:
+UID.BIN  ROMBOOT.BIN	UID.BIN  ROMBOOT.BIN
+USB	USB
+USB Connect: the USB disk is on	USB连接: U 盘已开启
+USB disk	U 盘
+USB disk DM40	U 盘 DM40
+USB disk DM40: ejected until re-plug	U 盘 DM40: 已弹出, 需重新插拔
+USB disk: PC can edit (replug)	U盘模式: PC 可编辑 (重插)
+Unlocked	未锁定
+V, Ω, continuity, diode,	V, Ω, 通断, 二极管,
+Voltage across A and COM:	A 和 COM 之间有电压:
+Wave view	Wave 视图
+Wrong-connection alerts	接错线告警
+a private folder,	私有文件夹,
+accuracy of this reading	此读数的准确度
+an extra digit	附加位
+and on	再开机
+backlight	背光
+blinks, beep	闪烁, 蜂鸣
+capacitance	电容
+capacitance, Hz, °C	电容, Hz, °C
+common to all	公共端
+connected over Bluetooth	已通过蓝牙连接
+continuity	通断
+copy once	复制一次
+diode,	二极管,
+dm40_opendm40_	dm40_opendm40_
+dm40_opendm40_v0.1.bin	dm40_opendm40_v0.1.bin
+eject,	弹出,
+faster timebase	更快的时基
+frequency,	频率,
+function	功能
+fuse 10 A	保险丝 10 A
+generator	发生器
+generator output	信号发生器输出
+generator running	发生器运行中
+generator side	发生器侧
+grey: finer than the accuracy	灰色: 超出准确度的位
+hold the power key	按住电源键
+let go:	松开:
+measurements	测量
+measuring instrument (USBTMC, SCPI)	测量仪器 (USBTMC, SCPI)
+meter's current	表的电流
+multimeter (V / A jacks)	万用表 (V / A 插孔)
+next or previous view	下一个或上一个视图
+not seen	未识别
+nothing	无
+off the meter	从表上
+one USB cable	一根 USB 线
+one at a time	一次一个
+one dm40*.bin	只放一个 dm40*.bin
+only	即可
+opendm40	opendm40
+opendm40 starts	opendm40 启动
+opendm40: 12 mA	opendm40: 12 mA
+opendm40: 212.5 °F	opendm40: 212.5 °F
+or Settings > More > Scope swipe	或 设置 > More > Scope swipe
+or dm40_v_2_6.bin	或 dm40_v_2_6.bin
+oscilloscope (CH1)	示波器 (CH1)
+oscilloscope input (CH1 on the screen)	示波器输入 (屏幕上的 CH1)
+power meter:	功率计:
+power off?	关机?
+press	按
+press the power key	按电源键
+press:	按:
+probe touches	探头接触
+rate chip: tap to step	速率标签: 点击切换
+reading	读数
+reads as a current	显示为电流
+record bar	记录条
+run / stop	运行 / 停止
+run state	运行状态
+scale (follows the data)	刻度 (随数据)
+screenshot	截图
+side	侧
+sideways: trigger position	左右: 触发位置
+slower timebase	更慢的时基
+small values	小数值
+source	电源
+start / stop recording	开始 / 停止记录
+state badge	状态标签
+swipe left: next view    swipe right: previous	左滑: 下一视图    右滑: 上一视图
+switch off	关机
+tap: 160 / 320 / 640 ms/div	点击: 160 / 320 / 640 ms/div
+temperature	温度
+test current	测试电流
+the only dm40*.bin	唯一的 dm40*.bin
+the screen lights up	屏幕点亮
+time_s,value,unit,flags	time_s,value,unit,flags
+timebase	时基
+timebase list	时基列表
+trigger	触发
+trigger level	触发电平
+trigger menu	触发菜单
+trigger position	触发位置
+twice quickly	快速两次
+up / down: the selected item	上下: 所选项目
+update loader	升级加载器
+v0.1.bin	v0.1.bin
+voltage	电压
+µA: both off, 47.5 Ω    mA: PE1 on, 0.5 Ω    A: PE0 on, 10 mΩ	µA: 均关, 47.5 Ω    mA: PE1 开, 0.5 Ω    A: PE0 开, 10 mΩ

@@ -1,0 +1,209 @@
+# Picture labels of the Russian manual: English<TAB>Russian. tools/ui-render/manual-annot.py. Machine-written, needs a native review.
+"update"	"update"
+(stock: USB Connect)	(штатная: USB Connect)
++ wire	+ провод
+0 Vpp, offset 1.2 V: DC	0 Vpp, смещение 1.2 V: DC
+0.750,,V,OL	0.750,,V,OL
+0.90 / 0.28 mA	0.90 / 0.28 mA
+10 mΩ	10 mΩ
+< Back	< Назад
+A lead in A, no current:	Щуп в A, тока нет:
+A, mA, µA; the power	A, mA, µA; ток
+A: the trace zero	A: ноль луча
+AC+DC, AUTO	AC+DC, AUTO
+AUTO+ by default	AUTO+ по умолчанию
+After the copy: the question	После копирования: вопрос
+An adjustable offset	Регулируемое смещение
+Auto (per view). Each side also stays on while something needs it.	Авто (по экрану). Каждая часть работает, пока нужна.
+C-1-ATK-DM40-CALI (SPP)	C-1-ATK-DM40-CALI (SPP)
+CALIB.BIN  BOOTDATA.BIN	CALIB.BIN  BOOTDATA.BIN
+CALIB.BIN  UID.BIN  ...  FIRMWARE.BIN	CALIB.BIN  UID.BIN  ...  FIRMWARE.BIN
+CH1	CH1
+CH1: popup, zoom in / out	CH1: меню, масштаб
+CUR: cursors	CUR: курсоры
+CUR: cursors in one tap	CUR: курсоры одним касанием
+Combined view	Совмещённый вид
+Computer	Компьютер
+Computer (SCPI)	Компьютер (SCPI)
+DC V selected, the leads still in A and COM: a current flows through A, A-JACK	Выбран DC V, щупы в A и COM: ток идёт через A, A-JACK
+DC, AC,	DC, AC,
+DC, AC, AC+DC	DC, AC, AC+DC
+DEBUG/	DEBUG/
+DM40	DM40
+DM40A (Bluetooth LE)	DM40A (Bluetooth LE)
+DMM (CH2): on / off, V/div	DMM (CH2): вкл, V/div
+DMM + Scope	DMM + осцилл.
+Delete, then confirm	Удалить и подтвердить
+FAST / MED / SLOW,	FAST / MED / SLOW,
+FIRMWARE.BIN	FIRMWARE.BIN
+From the oscilloscope (dashed): MENU,	Из осциллографа (пунктир): MENU,
+Fuse check	Тест предохр.
+GEN trace: on / off, V/div	Луч GEN: вкл/выкл, V/div
+Generator	Генератор
+Generator page	Страница генератора
+INFO/	INFO/
+Inrush current	Пусковой ток
+LOAD	НАГРУЗКА
+LOADER.BIN  OTP.BIN	LOADER.BIN  OTP.BIN
+LOG001.CSV  LOG002.CSV  FAST001.CSV	LOG001.CSV  LOG002.CSV  FAST001.CSV
+LOGS/	LOGS/
+LOGS/LOG007.CSV	LOGS/LOG007.CSV
+Letting go less than 0.5 s after the beep cancels: the meter starts normally.	Отпустить раньше 0.5 с после сигнала: обычный запуск.
+Limits: OK, HI, LO	Пределы: OK, HI, LO
+Loader's USB disk	USB-диск загрузчика
+Locked	Заблокировано
+MATH (FFT): popup, scale	MATH (FFT): меню, шкала
+MAX, AVG	MAX, AVG
+MENU: main menu	MENU: главное меню
+MF: range page; scope menu	MF: диапазоны; меню осцилл.
+MIN and the timer	MIN и таймер
+MOSFET PE0: A ranges, OVLD, A-PROT	MOSFET PE0: диапазоны A, OVLD, A-PROT
+MOSFET PE1: mA ranges	MOSFET PE1: диапазоны mA
+Meter screen	Экран прибора
+Meter: USB disk	Прибор: USB-диск
+Meter: USB disk, INFO/	Прибор: USB-диск, INFO/
+Multimeter	Мультиметр
+Multimeter page	Страница мультиметра
+OPTBYTES.BIN  BACKUP.TXT	OPTBYTES.BIN  BACKUP.TXT
+OSC: the oscilloscope input	OSC: вход осциллографа
+OUT: the generator output	OUT: выход генератора
+Offset 1.5 V: around 1.5 V	Смещение 1.5 V: вокруг 1.5 V
+Offset auto: 0 V to Vpp	Смещение авто: от 0 V до Vpp
+On-screen help	Справка на экране
+One finger down:	Один палец вниз:
+Oscilloscope	Осциллограф
+Oscilloscope page	Страница осциллографа
+Overload: the 10 A shunt	Перегрузка: шунт 10 A
+PC can edit, waiting for the re-plug	PC может менять, ждёт переподключения
+Phone app	Приложение
+Power key (left edge)	Кнопка питания (слева)
+Power meter	Ваттметр
+Power-off warning	Предупреждение о выключении
+README.TXT	README.TXT
+REL box: tap	Поле REL: касание
+RUN: HOLD; run / stop	RUN: HOLD; пуск / стоп
+Recording	Запись
+S001.BMP  S002.BMP  S003.BMP	S001.BMP  S002.BMP  S003.BMP
+SCOP001.CSV	SCOP001.CSV
+SCOPE/	SCOPE/
+SHOTS/	SHOTS/
+SOURCE	ИСТОЧНИК
+SPIFLASH.BIN	SPIFLASH.BIN
+Scope and	Осцилл. и
+Spreadsheet	Таблица
+Stock	Штатная
+Stock: 2 mA	Штатная: 2 mA
+Stock: 214.5 °F	Штатная: 214.5 °F
+Stock: Settings > 5. Other Settings	Штатная: Settings > 5. Other Settings
+Swipe left / right:	Смахивание влево / вправо:
+T: trigger level	T: уровень синхр.
+T: trigger position	T: положение синхр.
+The 50 kHz limit shown	Показан предел 50 kHz
+The Device page	Страница Device
+The Record page	Страница записи
+The gallery	Галерея
+Three fingers down:	Три пальца вниз:
+Timebase corner taps	Касания углов: развёртка
+Trigger position drag	Перетаскивание синхр.
+Two fingers down:	Два пальца вниз:
+UID.BIN  ROMBOOT.BIN	UID.BIN  ROMBOOT.BIN
+USB	USB
+USB Connect: the USB disk is on	USB Connect: USB-диск включён
+USB disk	USB-диск
+USB disk DM40	USB-диск DM40
+USB disk DM40: ejected until re-plug	USB-диск DM40: извлечён до переподкл.
+USB disk: PC can edit (replug)	USB-диск: запись (переподкл.)
+Unlocked	Разблокировано
+V, Ω, continuity, diode,	V, Ω, прозвонка, диод,
+Voltage across A and COM:	Напряжение на A и COM:
+Wave view	Вид Wave
+Wrong-connection alerts	Предупреждения о подключении
+a private folder,	личная папка,
+accuracy of this reading	точность этого показания
+an extra digit	доп. разряд
+and on	и включить
+backlight	подсветка
+blinks, beep	мигает, сигнал
+capacitance	ёмкость
+capacitance, Hz, °C	ёмкость, Hz, °C
+common to all	общий
+connected over Bluetooth	подключён по Bluetooth
+continuity	прозвонка
+copy once	скопировать раз
+diode,	диод,
+dm40_opendm40_	dm40_opendm40_
+dm40_opendm40_v0.1.bin	dm40_opendm40_v0.1.bin
+eject,	извлечь,
+faster timebase	развёртка быстрее
+frequency,	частота,
+function	функция
+fuse 10 A	предохр. 10 A
+generator	генератор
+generator output	выход генератора
+generator running	генератор работает
+generator side	сторона генератора
+grey: finer than the accuracy	серые: мельче точности
+hold the power key	держать кнопку питания
+let go:	отпустить:
+measurements	измерения
+measuring instrument (USBTMC, SCPI)	измерительный прибор (USBTMC, SCPI)
+meter's current	ток прибора
+multimeter (V / A jacks)	мультиметр (гнёзда V / A)
+next or previous view	следующий или предыдущий вид
+not seen	не виден
+nothing	ничего
+off the meter	с прибора
+one USB cable	один USB-кабель
+one at a time	по одному
+one dm40*.bin	один dm40*.bin
+only	только
+opendm40	opendm40
+opendm40 starts	opendm40 запущена
+opendm40: 12 mA	opendm40: 12 mA
+opendm40: 212.5 °F	opendm40: 212.5 °F
+or Settings > More > Scope swipe	или Settings > More > Scope swipe
+or dm40_v_2_6.bin	или dm40_v_2_6.bin
+oscilloscope (CH1)	осциллограф (CH1)
+oscilloscope input (CH1 on the screen)	вход осциллографа (CH1 на экране)
+power meter:	ваттметр:
+power off?	выключить?
+press	нажать
+press the power key	нажать кнопку питания
+press:	нажатие:
+probe touches	щуп касается
+rate chip: tap to step	метка скорости: касание
+reading	показание
+reads as a current	читается как ток
+record bar	полоса записи
+run / stop	пуск / стоп
+run state	состояние
+scale (follows the data)	шкала (по данным)
+screenshot	снимок
+side	сторона
+sideways: trigger position	вбок: положение синхр.
+slower timebase	развёртка медленнее
+small values	малые значения
+source	источник
+start / stop recording	старт / стоп записи
+state badge	метка состояния
+swipe left: next view    swipe right: previous	влево: следующий вид    вправо: предыдущий
+switch off	выключить
+tap: 160 / 320 / 640 ms/div	тап: 160/320/640 ms/div
+temperature	температура
+test current	тестовый ток
+the only dm40*.bin	единственный dm40*.bin
+the screen lights up	экран загорается
+time_s,value,unit,flags	time_s,value,unit,flags
+timebase	развёртка
+timebase list	список развёрток
+trigger	синхр.
+trigger level	уровень синхр.
+trigger menu	меню синхр.
+trigger position	положение синхр.
+twice quickly	дважды быстро
+up / down: the selected item	вверх / вниз: выбранный элемент
+update loader	загрузчик обновлений
+v0.1.bin	v0.1.bin
+voltage	напряжение
+µA: both off, 47.5 Ω    mA: PE1 on, 0.5 Ω    A: PE0 on, 10 mΩ	µA: оба выкл, 47.5 Ω    mA: PE1 вкл, 0.5 Ω    A: PE0 вкл, 10 mΩ
+AUTO: autorange; auto-set	AUTO: автодиап.; автонастр.
