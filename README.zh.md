@@ -10,7 +10,7 @@ Alientek（正点原子）DM40 万用表、示波器和信号发生器（DM40A�
 
 它的安装方式与原厂升级文件相同，不改动 Alientek 的 bootloader、升级加载器和表的校准，所以随时可以回到原厂固件。
 
-![DM40A 上的 opendm40：万用表页面](docs/manual/img/dmm.png)
+![DM40A 上的 opendm40：万用表页面](docs/manual/img/zh/dmm.png)
 
 *DM40A 上的 opendm40：万用表页面。*
 
@@ -24,15 +24,15 @@ Alientek（正点原子）DM40 万用表、示波器和信号发生器（DM40A�
 
 | | |
 |---|---|
-| ![万用表和示波器同时运行](docs/manual/img/combined.png) | ![带 FFT 的示波器](docs/manual/img/scope.png) |
+| ![万用表和示波器同时运行](docs/manual/img/zh/combined.png) | ![带 FFT 的示波器](docs/manual/img/zh/scope.png) |
 | 万用表和示波器同时运行 | 示波器：硬件触发、20 项测量、FFT、光标、Save CSV |
-| ![功率计](docs/manual/img/power.png) | ![A-JACK 告警](docs/manual/img/ajack.png) |
+| ![功率计](docs/manual/img/zh/power.png) | ![A-JACK 告警](docs/manual/img/zh/ajack.png) |
 | 功率计：P、S、Q、PF、f、Wh，DC、AC 或 AC+DC 耦合 | 接错线告警，危险连接时发出响亮警报 |
-| ![记录](docs/manual/img/record.png) | ![发生器](docs/manual/img/generator.png) |
+| ![记录](docs/manual/img/zh/record.png) | ![发生器](docs/manual/img/zh/generator.png) |
 | 记录到内部磁盘，通过 USB 以 CSV 读取 | 发生器，在所有页面上运行 |
-| ![协议解码器：一个 Modbus RTU 请求](docs/manual/img/scope-decode-modbus.png) | ![协议解码器：帧日志](docs/manual/img/scope-decode-log.png) |
+| ![协议解码器：一个 Modbus RTU 请求](docs/manual/img/zh/scope-decode-modbus.png) | ![协议解码器：帧日志](docs/manual/img/zh/scope-decode-log.png) |
 | 协议解码器：UART 和 DALI；通过 CRC 识别 Modbus RTU 帧 | 帧日志：运行中数据流的每一帧，带时间和状态 |
-| ![示波器通道：CH1、DMM、发生器、数学](docs/manual/img/scope-channels.png) | ![Wave 视图](docs/manual/img/wave.png) |
+| ![示波器通道：CH1、DMM、发生器、数学](docs/manual/img/zh/scope-channels.png) | ![Wave 视图](docs/manual/img/zh/wave.png) |
 | 示波器通道：CH1、万用表作为 CH2、发生器波形、数学 | Wave 视图：万用表插孔上的波形，隔离 |
 
 - **万用表**：全部 16 个原厂功能；所有型号都有 60000 计数量程和 AC+DC；AUTO AC/DC；HOLD、AutoHold、REL、MIN/MAX/AVG、限值、趋势图；负担电压。
@@ -49,7 +49,7 @@ Alientek（正点原子）DM40 万用表、示波器和信号发生器（DM40A�
 你需要一台运行原厂固件的 DM40、一根 USB 线和充好电的电池。
 
 1. 从最新的 [release](https://github.com/opendm40/opendm40/releases/latest) 下载 `dm40_opendm40_v<version>.bin`（旁边有 `SHA256SUMS`），或自行构建（[firmware/README.md，Build](firmware/README.md#build)，英文）。
-2. 在表上：**Settings > Other Settings > USB Connect**，然后接上 USB 线。出现一个 U 盘。
+2. 在表上：**设置 > Other Settings > USB Connect**，然后接上 USB 线。出现一个 U 盘。
 3. 把文件复制上去，作为盘上唯一的 `dm40*.bin` 文件。弹出 U 盘。
 4. 关机再开机。原厂升级流程会安装这个文件。第一次启动需要几秒钟（opendm40 显示进度条）：前 10 秒内不要关机。
 5. 备份你的表：把 opendm40 U 盘上的 `INFO/` 文件夹复制到电脑并保存（[备份](#back-up-with-opendm40)）。

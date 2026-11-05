@@ -17,7 +17,7 @@
 Alientek, загрузчик обновлений и калибровку прибора, поэтому к штатной
 прошивке всегда можно вернуться.
 
-![opendm40 на DM40A: страница мультиметра](docs/manual/img/dmm.png)
+![opendm40 на DM40A: страница мультиметра](docs/manual/img/ru/dmm.png)
 
 *opendm40 на DM40A: страница мультиметра.*
 
@@ -38,15 +38,15 @@ DM40C. Всё, что ещё не работало на реальном
 
 | | |
 |---|---|
-| ![Мультиметр и осциллограф одновременно](docs/manual/img/combined.png) | ![Осциллограф с FFT](docs/manual/img/scope.png) |
+| ![Мультиметр и осциллограф одновременно](docs/manual/img/ru/combined.png) | ![Осциллограф с FFT](docs/manual/img/ru/scope.png) |
 | Мультиметр и осциллограф одновременно | Осциллограф: аппаратная синхронизация, 20 измерений, FFT, курсоры, Save CSV |
-| ![Ваттметр](docs/manual/img/power.png) | ![Предупреждение A-JACK](docs/manual/img/ajack.png) |
+| ![Ваттметр](docs/manual/img/ru/power.png) | ![Предупреждение A-JACK](docs/manual/img/ru/ajack.png) |
 | Ваттметр: P, S, Q, PF, f, Wh со связью DC, AC или AC+DC | Предупреждения о неправильном подключении, с громким сигналом для опасных |
-| ![Запись](docs/manual/img/record.png) | ![Генератор](docs/manual/img/generator.png) |
+| ![Запись](docs/manual/img/ru/record.png) | ![Генератор](docs/manual/img/ru/generator.png) |
 | Запись на внутренний диск, чтение в CSV по USB | Генератор, работающий на любой странице |
-| ![Декодер протоколов: запрос Modbus RTU](docs/manual/img/scope-decode-modbus.png) | ![Декодер протоколов: журнал кадров](docs/manual/img/scope-decode-log.png) |
+| ![Декодер протоколов: запрос Modbus RTU](docs/manual/img/ru/scope-decode-modbus.png) | ![Декодер протоколов: журнал кадров](docs/manual/img/ru/scope-decode-log.png) |
 | Декодер протоколов: UART и DALI; кадры Modbus RTU распознаются по CRC | Журнал кадров: все кадры идущего потока, со временем и статусом |
-| ![Каналы осциллографа: CH1, DMM, генератор, математика](docs/manual/img/scope-channels.png) | ![Wave view](docs/manual/img/wave.png) |
+| ![Каналы осциллографа: CH1, DMM, генератор, математика](docs/manual/img/ru/scope-channels.png) | ![Wave view](docs/manual/img/ru/wave.png) |
 | Каналы осциллографа: CH1, мультиметр как CH2, трасса генератора, математика | Wave view: форма сигнала на гнёздах мультиметра, с изоляцией |
 
 - **Мультиметр:** все 16 штатных функций; диапазоны на 60000 отсчётов и
@@ -81,7 +81,7 @@ DM40C. Всё, что ещё не работало на реальном
    [релиза](https://github.com/opendm40/opendm40/releases/latest)
    (рядом лежит `SHA256SUMS`) или соберите его сами
    ([firmware/README.md, Build](firmware/README.md#build), на английском).
-2. На приборе: **Settings > Other Settings > USB Connect**, и подключите
+2. На приборе: **Настройки > Other Settings > USB Connect**, и подключите
    кабель. Появится USB-диск.
 3. Скопируйте на него файл, единственным файлом `dm40*.bin`. Извлеките диск.
 4. Выключите и включите прибор. Штатная процедура обновления установит файл.

@@ -37,6 +37,10 @@ for f in files:
     text = open(f, encoding='utf-8').read()
     text = re.sub(r'```.*?```', '', text, flags=re.S)
     text = re.sub(r'`[^`\n]*`', lambda m: '' if '](' not in m.group(0) else m.group(0), text)
+    for t in re.findall(r'!\[[^\]]*\]\(([^)\s]+)', text):
+        tgt = os.path.normpath(os.path.join(os.path.dirname(f), urllib.parse.unquote(t)))
+        if not re.match(r'^[a-z]+:', t) and tgt not in tracked:
+            print('%s: missing image %s' % (f, t)); bad += 1
     for m in LINK.finditer(text):
         t = m.group(1) or m.group(2)
         if re.match(r'^[a-z]+:', t) or t.startswith('//'): continue

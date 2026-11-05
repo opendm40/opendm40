@@ -12,7 +12,6 @@ A, mA, µA; the power	A, mA, µA; ток
 A: the trace zero	A: ноль луча
 AC+DC, AUTO	AC+DC, AUTO
 AUTO+ by default	AUTO+ по умолчанию
-AUTO: autorange; auto-set	AUTO: автодиапазон; автонастр.
 After the copy: the question	После копирования: вопрос
 An adjustable offset	Регулируемое смещение
 Auto (per view). Each side also stays on while something needs it.	Авто (по экрану). Каждая часть работает, пока нужна.
@@ -32,7 +31,7 @@ DC, AC, AC+DC	DC, AC, AC+DC
 DEBUG/	DEBUG/
 DM40	DM40
 DM40A (Bluetooth LE)	DM40A (Bluetooth LE)
-DMM (CH2): on / off, V/div	DMM (CH2): вкл/выкл, V/div
+DMM (CH2): on / off, V/div	DMM (CH2): вкл, V/div
 DMM + Scope	DMM + осцилл.
 Delete, then confirm	Удалить и подтвердить
 FAST / MED / SLOW,	FAST / MED / SLOW,
@@ -53,7 +52,7 @@ Letting go less than 0.5 s after the beep cancels: the meter starts normally.	О
 Limits: OK, HI, LO	Пределы: OK, HI, LO
 Loader's USB disk	USB-диск загрузчика
 Locked	Заблокировано
-MATH (FFT): popup, scale	MATH (FFT): меню, масштаб
+MATH (FFT): popup, scale	MATH (FFT): меню, шкала
 MAX, AVG	MAX, AVG
 MENU: main menu	MENU: главное меню
 MF: range page; scope menu	MF: диапазоны; меню осцилл.
@@ -135,7 +134,7 @@ diode,	диод,
 dm40_opendm40_	dm40_opendm40_
 dm40_opendm40_v0.1.bin	dm40_opendm40_v0.1.bin
 eject,	извлечь,
-faster timebase	быстрее развёртка
+faster timebase	развёртка быстрее
 frequency,	частота,
 function	функция
 fuse 10 A	предохр. 10 A
@@ -182,14 +181,14 @@ scale (follows the data)	шкала (по данным)
 screenshot	снимок
 side	сторона
 sideways: trigger position	вбок: положение синхр.
-slower timebase	медленнее развёртка
+slower timebase	развёртка медленнее
 small values	малые значения
 source	источник
 start / stop recording	старт / стоп записи
 state badge	метка состояния
 swipe left: next view    swipe right: previous	влево: следующий вид    вправо: предыдущий
 switch off	выключить
-tap: 160 / 320 / 640 ms/div	касание: 160 / 320 / 640 ms/div
+tap: 160 / 320 / 640 ms/div	тап: 160/320/640 ms/div
 temperature	температура
 test current	тестовый ток
 the only dm40*.bin	единственный dm40*.bin
@@ -207,3 +206,4 @@ update loader	загрузчик обновлений
 v0.1.bin	v0.1.bin
 voltage	напряжение
 µA: both off, 47.5 Ω    mA: PE1 on, 0.5 Ω    A: PE0 on, 10 mΩ	µA: оба выкл, 47.5 Ω    mA: PE1 вкл, 0.5 Ω    A: PE0 вкл, 10 mΩ
+AUTO: autorange; auto-set	AUTO: автодиап.; автонастр.

@@ -438,7 +438,7 @@ lightning from 100 V). opendm40 adds:
 
 #### What the stock firmware has and opendm40 does not
 
-- Chinese menus: opendm40 is English only.
+- Traditional Chinese menus: the `-zh` image is Simplified Chinese only.
 - The 65 520-sample scope capture at timebases faster than 100 ms/div
   (opendm40: 44 032 there).
 
@@ -2530,6 +2530,40 @@ removes it ([SCPI reference](scpi-reference.md#debug-commands)).
 The page does not open during a [fast recording](#fast-recording) or while
 the `LOG:` commands stream readings to a computer
 ([other ways to log](#other-ways-to-log)), and closes when one starts.
+
+### Screen labels
+
+The Russian and Chinese images show their own labels, and the manuals in those languages name them. Installed the English image? Use this table.
+
+<!-- label table: tools/manual-labels.py leaves it -->
+| English | Русский | 中文 |
+|---|---|---|
+| Multimeter | Мультиметр | 万用表 |
+| Oscilloscope | Осциллограф | 示波器 |
+| Signal | Генератор | 信号发生器 |
+| Settings | Настройки | 设置 |
+| Display | Экран | 显示 |
+| Alerts | Предупр. | 告警 |
+| Power | Питание | 电源 |
+| Other | Прочее | 其他 |
+| Dim screen | Затемнение | 暗屏时间 |
+| Shutdown | Выключение | 关机时间 |
+| Backlight | Подсветка | 背光亮度 |
+| Key/alert volume | Громкость | 蜂鸣器音量 |
+| Bluetooth | Bluetooth | 蓝牙开关 |
+| Start page | Старт. экран | 启动界面 |
+| Mode Remember | Запомнить режим | DMM模式记忆 |
+| USB disk | USB-диск | U盘模式 |
+| Burden voltage | Падение напр. | 负荷电压 |
+| Danger alarm | Сигн. опасности | 危险警报 |
+| Jack alerts | Предупр. гнёзд | 插孔告警 |
+| Range | Диапазон | 量程 |
+| Hold & Limits | Удержание, пределы | 保持/限值 |
+| Record | Запись | 记录 |
+| Trigger | Синхр. | 触发 |
+| Measure | Измерения | 测量 |
+| Save CSV | CSV | 保存CSV |
+| Screenshot | Снимок | 截图 |
 
 ## Remote control and connecting from a computer
 
