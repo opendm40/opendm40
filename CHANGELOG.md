@@ -8,6 +8,12 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 - **Scope:** MF > Measure can measure the DMM channel (a CH1 / CH2 cell); CUR Y shows a second Y2-1 at the CH2 V/div.
+### New
+
+- **Chinese README and user manual** (machine translation, not yet reviewed
+  by a native speaker): [README.zh.md](README.zh.md),
+  [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
 ## v0.4.0 (2026-11-02)
 
 ### New
