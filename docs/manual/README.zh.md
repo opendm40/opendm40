@@ -46,7 +46,7 @@ opendm40 是 Alientek（正点原子）DM40 万用表、示波器和信号发生
 
 在运行原厂固件的表上安装 opendm40：
 
-1. 从最新的 [release](https://github.com/opendm40/opendm40/releases/latest) 下载升级文件 `dm40_opendm40_v<version>.bin`，例如 `dm40_opendm40_v0.4.0.bin`。也可以从源码构建（[firmware/README.md，Build](../../firmware/README.md#build)，英文）。
+1. 从最新的 [release](https://github.com/opendm40/opendm40/releases/latest) 下载升级文件 `dm40_opendm40_v<version>.bin`，例如 `dm40_opendm40_v0.4.0.bin`。也可以从源码构建（[firmware/README.md，Build](../../firmware/README.md#build)，英文）。文件名以 `-zh`、`-ru`、`-it`、`-fr` 结尾的文件以中文、俄文、意大利文、法文显示界面。
 2. 在表上：**Settings > Other Settings > USB Connect**。用 USB 线把表连到电脑，出现一个 U 盘。
 3. 把文件复制到这个 U 盘（任何 `dm40*.bin` 文件名都可以）。盘上只保留这一个 `dm40*.bin` 文件（[原因](#从升级加载器安装文件)）。
 4. 在电脑上弹出 U 盘。
@@ -1766,7 +1766,6 @@ Windows 和 macOS：未测试。
 | **Dim screen** | 5 min、10 min、30 min、Never | 5 min | 这段时间没有输入后背光变暗（[电源、电池和休眠](#电源电池和休眠)）。 |
 | **Start page** | Multimeter、Oscilloscope、Signal、Main menu | Multimeter | 开机后的视图。 |
 | **DMM row** | Bargraph、History | Bargraph | [柱状图和历史行](#柱状图和历史行)。 |
-| Language | English / 固件的语言 | English | 仅本地化固件：`dm40_opendm40_v<version>-zh.bin`、`-ru`、`-it`、`-fr`。 |
 
 ### Alerts 标签页
 

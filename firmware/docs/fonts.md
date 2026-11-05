@@ -131,8 +131,9 @@ to region C (not zero-wait): labels are drawn while the AD2 stream ISR runs.
 
 ## 3a. Localized images
 
-[i18n/](../i18n/README.md), [`src/lang.rs`](../src/lang.rs): one language next to
-English per image (features `zh`, `ru`, `it`, `fr`), none in the default image.
+[i18n/](../i18n/README.md), [`src/lang.rs`](../src/lang.rs): one language per
+image (features `zh`, `ru`, `it`, `fr`), resolved at build time (`tr!`); none in
+the default image.
 Chinese: 14 px 1 bpp glyphs in one set for every font of 15 px and up, each hanzi
 stored as U+0400 + its index. Russian: letters shaped like a Latin one use the
 stock glyph (and one byte of text); the others per font, sized by `fit_size` in

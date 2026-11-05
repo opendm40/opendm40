@@ -1,5 +1,5 @@
 #!/bin/sh
-# The localized images: one UI language next to English, each with every check
+# The localized images: one UI language each (src/lang.rs), with every check
 # of build.sh (stack depth, regions A2 / B / C, SRAM). Each is one more release
 # link of the crate; the dependencies are shared.
 #   tools/build-langs.sh [cargo args]    -> dm40_opendm40_v<version>-<lang>.bin

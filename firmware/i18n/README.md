@@ -1,19 +1,25 @@
 # UI languages
 
-A localized image holds one language next to English; **Settings > Display >
-Language** switches. The default image is English only.
+A localized image shows one language; the default image is English. The
+translations are picked at build time ([src/lang.rs](../src/lang.rs)): a UI
+string is written `crate::tr!("...")`, and the image holds only its translation.
 
 - `<lang>.tsv`: English, translation, source. `S`: the stock firmware's wording;
   `R`: the wording of [OpenDM40-Chinese](https://github.com/xingyan4117-sketch/OpenDM40-Chinese);
   `M`: machine-written, *needs a native speaker's review*; `E`: English on
   purpose in this language. A new UI string goes to all four tables or to
   [english.txt](english.txt) ([`tools/lang-check`](../tools/lang-check/run.sh)).
-- [`tools/mklang.py`](../tools/mklang.py) `<lang>` writes `src/lang_<lang>.rs`.
+  Every translated string needs a `tr!` site; text that leaves the device
+  (SCPI, DBG:VIEW?, files) stays a plain English literal.
+- [`tools/mklang.py`](../tools/mklang.py) `<lang>` writes `src/tr_<lang>.rs`
+  (the `tr!` macro) and `src/lang_<lang>.rs` (the glyphs).
   The fonts are not in the repo (Debian: fonts-noto-cjk, fonts-liberation).
 - [font-use.tsv](font-use.tsv): which font draws which string, from
   [`tools/lang-render`](../tools/lang-render/run.sh) (`lang.log`, kind `drawn`).
-- Text in fonts under 12 px (Chinese: under 15 px), and any translation wider
-  than its box or with a glyph missing from its font, stays English.
+- [`tools/lang-render`](../tools/lang-render/run.sh) (CI) fails when a
+  translation is wider than its box, lacks a glyph of its font or is drawn in
+  a font under 12 px (Chinese: under 15 px); such a call site keeps the
+  English literal. A row without a translation shows the English.
 
 ## Sources and licences
 

@@ -77,6 +77,8 @@ DM40A, проверена на DM40A, DM40B и DM40C. Что не провере
    [релиза](https://github.com/opendm40/opendm40/releases/latest). Его можно
    также собрать из исходников
    ([firmware/README.md, Build](../../firmware/README.md#build), на английском).
+   Файлы с `-zh`, `-ru`, `-it` и `-fr` в конце имени показывают экраны
+   на китайском, русском, итальянском и французском.
 2. На приборе: **Settings > Other Settings > USB Connect**. Подключите прибор
    к компьютеру кабелем USB. Появится USB-диск.
 3. Скопируйте файл на этот диск (подходит любое имя `dm40*.bin`). Это должен
@@ -2428,7 +2430,6 @@ Windows и macOS: не проверялось.
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Притушает подсветку через это время без действий ([Питание, аккумулятор и сон](#питание-аккумулятор-и-сон)). |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | Экран после включения. |
 | **DMM row** | Bargraph, History | Bargraph | [Шкала и строка истории](#шкала-и-строка-истории). |
-| Language | English / язык образа | English | Только в локализованных образах: `dm40_opendm40_v<version>-zh.bin`, `-ru`, `-it`, `-fr`. |
 
 ### Вкладка Alerts
 
