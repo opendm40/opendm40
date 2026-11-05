@@ -11,9 +11,11 @@
 #      independent Python RLE4 decode);
 #   2. lock: no disk read while busy, resume, delete in SHOTS/ (fsck clean
 #      after);
-#   3. ui: the worst-case layout matrix (0 / 1 / 6 / 7 / 99 files, long
+#   3. select: multi-select, bulk delete of exactly the ticked files, cancel,
+#      a listing that changes under the ticks, a name in two directories;
+#   4. ui: the worst-case layout matrix (0 / 1 / 6 / 7 / 99 files, long
 #      names, CSV + BMP mixed, unsupported BMP, disk busy, no disk, delete
-#      confirm, info boxes): zero violations; PNG renders (2x) + contact sheet.
+#      confirm, selection, info boxes): zero violations; PNG renders (2x) + contact sheet.
 #   tools/gallery-test/run.sh [out dir]   (default: a temp dir, kept)
 # Exit status 1 on any failure. Needs no hardware.
 set -e
@@ -125,6 +127,13 @@ mcopy -i $W/lock.img $W/hidden.dlg ::LOGS/FAST000.DLG
 "$W/t" lock $W/lock.img $W/d || RC=1
 fsck.fat -n $W/lock.img | tail -1
 fsck.fat -n $W/lock.img >/dev/null 2>&1 && echo "ok: fsck clean after the delete" || { echo "FAIL: fsck"; RC=1; }
+echo "=== select + bulk delete"
+cp $W/img/e99.img $W/select.img
+"$W/t" select $W/select.img || RC=1
+fsck.fat -n $W/select.img >/dev/null 2>&1 && echo "ok: fsck clean after the bulk delete" || { echo "FAIL: fsck"; RC=1; }
+cp $W/img/e99.img $W/dup.img
+mcopy -i $W/dup.img $W/d/S100.BMP ::S100.BMP
+"$W/t" select-dup $W/dup.img || RC=1
 echo "=== ui matrix"
 "$W/t" ui "$OUT" $W/d $W/img | tee "$OUT/check.txt"
 [ "${PIPESTATUS[0]}" = 0 ] || RC=1

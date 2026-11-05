@@ -12,6 +12,8 @@
 //!           the root's; new files are appended to their directory; a deleted
 //!           slot that gets reused breaks the order, there is no RTC date).
 //!           Swipe left / right = next / previous page, title bar = back.
+//!           Select (nav row): a tap ticks a tile, ticks stay across pages,
+//!           "Delete selected" asks and then deletes one file per poll.
 //!   Viewer  BMP: the image full screen, drawn top-down; tap = overlay bar
 //!           ("< Back" | name, index / total | Delete); swipe left / right =
 //!           next / previous file. Log: header info, min / avg / max, a
@@ -64,6 +66,13 @@
 //!     [1] FAT 1. Only used inside one `poll` while the disk is free, never
 //!     kept across passes (screenshot.rs, csvlog commits and the SCPI
 //!     catalog use it between our passes).
+//!
+//! Selection: a bitmap of ranks (one byte per page, `SEL_PAGES`) and a hash of
+//! the whole listing (`ent_hash`), the listing the ticked tiles came from. A
+//! rank means a file only while the listing is the same: when the hash differs
+//! (a new screenshot, a host deleted a file) the ticks are dropped, nothing is
+//! deleted. The delete goes from the oldest tick to the newest (deleting a file
+//! keeps the rank of every newer one) and compares the hash before each file.
 //!
 //! RAM: one `Gallery` (~0.7 KiB .bss); no frame or thumbnail buffers.
 
@@ -119,8 +128,16 @@ const TH_H: u16 = 93;
 const NAV_Y: i16 = 288;
 const NAV_H: i16 = 28;
 const PREV_X: i16 = 10;
-const NEXT_X: i16 = 360;
-const NAV_W: i16 = 110;
+const NEXT_X: i16 = 390;
+const NAV_W: i16 = 80;
+/// Nav row between Prev and Next: Select, then the page text (selecting:
+/// Delete selected).
+const SELECT_X: i16 = 96;
+const SELECT_W: i16 = 96;
+const NAV_MID_X: i16 = 198;
+const NAV_MID_W: i16 = 186;
+/// Pages that can have ticks (one byte each): the newest 192 files.
+const SEL_PAGES: usize = 32;
 /// Viewer bar: name group between "< Back" and Delete; the Delete pill.
 const NAME_X0: i16 = 104;
 const NAME_X1: i16 = 364;
@@ -268,7 +285,24 @@ fn kind_of(e: &[u8]) -> Option<Kind> {
 /// order); `name` set: also the index of that file. Returns the number of
 /// gallery files, the number stored and the found index.
 fn scan(io: &mut Io, lo: u32, hi: u32, out: &mut [Ent], name: Option<&[u8; 11]>) -> Option<(u32, usize, Option<(u32, Ent)>)> {
+    scan_hash(io, lo, hi, out, name, &mut 0)
+}
+
+/// Adds `e` to a listing's hash (FNV-1a), in directory order. A screenshot's
+/// first cluster counts (the same name rewritten is another file); a log's does
+/// not, it changes while the log is being recorded.
+fn ent_hash(mut h: u32, e: &Ent) -> u32 {
+    let start = if e.kind == Kind::Bmp { e.start } else { 0 }.to_le_bytes();
+    for &b in e.name.iter().chain(&start) {
+        h = (h ^ b as u32).wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+/// `scan`; `hash`: the hash of the whole listing.
+fn scan_hash(io: &mut Io, lo: u32, hi: u32, out: &mut [Ent], name: Option<&[u8; 11]>, hash: &mut u32) -> Option<(u32, usize, Option<(u32, Ent)>)> {
     let v = io.v;
+    *hash = 0x811C_9DC5;
     let (mut idx, mut n, mut hit) = (0u32, 0usize, None);
     io.dtag = NONE;
     let r = crate::fatdir::for_each(&mut *io.disk, &v, &[&crate::fatdir::LOGS, &crate::fatdir::SHOTS], io.data, &mut |_, _, e| {
@@ -276,6 +310,7 @@ fn scan(io: &mut Io, lo: u32, hi: u32, out: &mut [Ent], name: Option<&[u8; 11]>)
         let mut nm = [0u8; 11];
         nm.copy_from_slice(&e[..11]);
         let ent = Ent { name: nm, size: le32(e, 0x1C), start: le16(e, 0x1A) as u16, kind };
+        *hash = ent_hash(*hash, &ent);
         if idx >= lo && idx < hi && n < out.len() {
             out[n] = ent;
             n += 1;
@@ -1180,15 +1215,21 @@ fn inside(r: (u16, u16, u16, u16), x: u16, y: u16) -> bool {
     x >= r.0 && x < r.0 + r.2 && y >= r.1 && y < r.1 + r.3
 }
 
-/// The dialog box (dialog.rs layout and colours): title, body line,
-/// buttons (Cancel / `yes`, or a single OK).
-fn dialog_box(title: &str, body: &str, yes: Option<&str>) {
+/// The dialog box without buttons (a delete in progress).
+fn dialog_plain(title: &str, body: &str) {
     let b = crate::dialog::BOX;
     let lab = |r: (u16, u16, u16, u16), s: &str, bg: Color| sf::label(sf::ASCII26, r4(r), s, D_FG, bg, 8, 1);
     lab((b.0, b.1, b.2, 40), title, D_TITLE);
     lab((b.0, b.1 + 40, b.2, 60), body, D_BODY);
     lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, D_BODY);
     frame(b, D_FRAME);
+}
+
+/// The dialog box (dialog.rs layout and colours): title, body line,
+/// buttons (Cancel / `yes`, or a single OK).
+fn dialog_box(title: &str, body: &str, yes: Option<&str>) {
+    dialog_plain(title, body);
+    let lab = |r: (u16, u16, u16, u16), s: &str, bg: Color| sf::label(sf::ASCII26, r4(r), s, D_FG, bg, 8, 1);
     match yes {
         Some(y) => {
             lab(crate::dialog::NO, "Cancel", D_BTN);
@@ -1227,6 +1268,11 @@ enum Dlg {
     Deleting,
     /// Title, body.
     Info(&'static str, &'static str),
+    /// The ticked files: confirm, deleting (one per poll), the result when
+    /// not all of them went (title).
+    SelConfirm,
+    SelDeleting,
+    SelDone(&'static str),
 }
 
 /// Disk / catalog state.
@@ -1332,6 +1378,19 @@ pub struct Gallery {
     /// Viewer: rows to restore after the running job.
     band: Option<(i16, i16)>,
     job: Job,
+    /// Ticks: one bit per tile of each page, the number of ticks.
+    sel: [u8; SEL_PAGES],
+    sel_n: u8,
+    sel_mode: bool,
+    /// The dialog is over the grid, not over the viewer (`cur` means nothing).
+    bulk: bool,
+    /// Tiles whose tick and name row are to be painted.
+    rows: u8,
+    /// Files in the running delete, and how many of them went.
+    del_n: u8,
+    del_ok: u8,
+    /// `ent_hash` of the listing `ents` (and so the ticks) came from.
+    list_hash: u32,
 }
 
 /// Zero-initialised (.bss), set to `Gallery::new()` on the first `get`: as a
@@ -1377,6 +1436,14 @@ impl Gallery {
             vmsg: None,
             band: None,
             job: JOB0,
+            sel: [0; SEL_PAGES],
+            sel_n: 0,
+            sel_mode: false,
+            bulk: false,
+            rows: 0,
+            del_n: 0,
+            del_ok: 0,
+            list_hash: 0,
         }
     }
 
@@ -1405,9 +1472,10 @@ impl Gallery {
     #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
     pub fn back(&mut self) -> Out {
         match self.mode {
-            Mode::Dialog if self.dlg != Dlg::Deleting => self.close_dialog(),
+            Mode::Dialog if !matches!(self.dlg, Dlg::Deleting | Dlg::SelDeleting) => self.close_dialog(),
             Mode::Dialog => {}
             Mode::View => self.to_grid(),
+            Mode::Grid if self.sel_mode => self.leave_sel(),
             Mode::Grid => return Out::Exit,
         }
         Out::Stay
@@ -1426,28 +1494,61 @@ impl Gallery {
                     Some(false) => self.close_dialog(),
                     None => {}
                 },
-                Dlg::Info(..) if inside(OK_BTN, p.x, p.y) => self.close_dialog(),
+                Dlg::SelConfirm => match crate::dialog::power_off_hit(p.x, p.y) {
+                    Some(true) => {
+                        self.dlg = Dlg::SelDeleting;
+                        self.del_n = self.sel_n;
+                        self.del_ok = 0;
+                        self.need |= N_DEL;
+                        self.paint |= P_DLG;
+                    }
+                    Some(false) => self.close_dialog(),
+                    None => {}
+                },
+                Dlg::Info(..) | Dlg::SelDone(_) if inside(OK_BTN, p.x, p.y) => self.close_dialog(),
                 _ => {}
             },
             (Mode::Grid, Gesture::Tap(p)) => {
                 if (p.y as i16) < BAR_H {
+                    if self.sel_mode {
+                        self.leave_sel();
+                        return Out::Stay;
+                    }
                     return Out::Exit;
                 }
                 if self.st != St::Ok || self.total == 0 {
                     return Out::Stay;
                 }
                 if (p.y as i16) >= NAV_Y - 4 {
-                    if (p.x as i16) < PREV_X + NAV_W + 10 {
+                    let x = p.x as i16;
+                    if x < SELECT_X - 3 {
                         self.turn(-1);
-                    } else if (p.x as i16) >= NEXT_X - 10 {
+                    } else if x >= NEXT_X - 3 {
                         self.turn(1);
+                    } else if x < NAV_MID_X - 3 {
+                        if self.sel_mode {
+                            self.leave_sel();
+                        } else {
+                            self.sel_mode = true;
+                            self.rows = 0x3F;
+                            self.paint |= P_NAV | P_INFO;
+                        }
+                    } else if self.sel_mode && self.sel_n > 0 && self.busy.is_none() {
+                        self.mode = Mode::Dialog;
+                        self.dlg = Dlg::SelConfirm;
+                        self.bulk = true;
+                        self.paint |= P_DLG;
                     }
                     return Out::Stay;
                 }
                 for i in 0..self.n {
                     let (x, y) = tile_xy(i);
                     if (x..x + TILE_W).contains(&(p.x as i16)) && (y..y + TILE_H).contains(&(p.y as i16)) {
-                        self.view(self.page * PER_PAGE as u32 + i as u32, self.ents[i], false);
+                        if self.sel_mode {
+                            self.sel_toggle(i);
+                        } else {
+                            self.view(self.page * PER_PAGE as u32 + i as u32, self.ents[i], false);
+                        }
                         break;
                     }
                 }
@@ -1499,6 +1600,8 @@ impl Gallery {
                 self.need |= N_LIST
                     | match self.mode {
                         Mode::Grid => N_PAGE,
+                        // Back on the grid: its own page scan.
+                        _ if self.bulk => 0,
                         _ if self.need & N_CUR != 0 => 0,
                         _ => N_FIND,
                     };
@@ -1512,7 +1615,11 @@ impl Gallery {
         }
         if self.need & N_DEL != 0 {
             self.need &= !N_DEL;
-            self.delete(disk);
+            if self.dlg == Dlg::SelDeleting {
+                self.sel_step(disk);
+            } else {
+                self.delete(disk);
+            }
         } else if self.need & N_LIST != 0 {
             self.need &= !N_LIST;
             self.catalog(disk);
@@ -1527,7 +1634,8 @@ impl Gallery {
             } else if self.need & N_CUR != 0 {
                 self.need &= !N_CUR;
                 self.load_cur(&mut io);
-            } else {
+            } else if self.mode != Mode::Dialog {
+                // A tile's job would draw over the box.
                 self.work(&mut io);
             }
         } else {
@@ -1594,6 +1702,10 @@ impl Gallery {
     }
 
     fn close_dialog(&mut self) {
+        if self.bulk {
+            self.grid_again();
+            return;
+        }
         self.mode = Mode::View;
         if self.cur.kind == Kind::Bmp && self.full && self.vmsg.is_none() {
             let b = crate::dialog::BOX;
@@ -1601,6 +1713,58 @@ impl Gallery {
         } else {
             self.paint |= P_ALL;
         }
+    }
+
+    /// From a dialog over the grid back to the grid; tiles come from the page
+    /// scan, one thumbnail after the other.
+    fn grid_again(&mut self) {
+        self.mode = Mode::Grid;
+        self.bulk = false;
+        self.job = JOB0;
+        self.todo = 0;
+        self.n = 0;
+        self.paint |= P_ALL;
+        self.need |= N_PAGE;
+    }
+
+    fn sel_has(&self, i: usize) -> bool {
+        (self.page as usize) < SEL_PAGES && self.sel[self.page as usize] & (1 << i) != 0
+    }
+
+    /// Whether tile `i` can have a tick: not the file being recorded, and not
+    /// past the bitmap.
+    fn sel_allowed(&self, i: usize) -> bool {
+        (self.page as usize) < SEL_PAGES && csvlog::recording_name() != Some(self.ents[i].name)
+    }
+
+    fn sel_toggle(&mut self, i: usize) {
+        // `ents` is still another page or an old listing: the tile on the
+        // screen is not the file of this rank.
+        if self.need & (N_LIST | N_PAGE) != 0 || !self.sel_allowed(i) {
+            return;
+        }
+        self.sel[self.page as usize] ^= 1 << i;
+        self.sel_n = if self.sel_has(i) { self.sel_n + 1 } else { self.sel_n - 1 };
+        self.rows |= 1 << i;
+        self.paint |= P_NAV | P_INFO;
+    }
+
+    fn sel_clear(&mut self) {
+        self.sel = [0; SEL_PAGES];
+        self.sel_n = 0;
+    }
+
+    fn leave_sel(&mut self) {
+        self.sel_mode = false;
+        self.sel_clear();
+        self.rows = 0x3F;
+        self.paint |= P_NAV | P_INFO;
+    }
+
+    /// The oldest ticked file's rank.
+    fn sel_last(&self) -> Option<u32> {
+        let p = self.sel.iter().rposition(|&b| b != 0)?;
+        Some((p * PER_PAGE) as u32 + 7 - self.sel[p].leading_zeros())
     }
 
     fn toggle_overlay(&mut self) {
@@ -1690,10 +1854,11 @@ impl Gallery {
     fn page_scan(&mut self, io: &mut Io) {
         let mut tmp = [ENT0; PER_PAGE];
         let mut got = None;
+        let mut hash = 0;
         for _ in 0..2 {
             self.page = self.page.min(self.pages() - 1);
             let (lo, hi) = Self::page_range(self.total, self.page);
-            match scan(io, lo, hi, &mut tmp, None) {
+            match scan_hash(io, lo, hi, &mut tmp, None, &mut hash) {
                 None => {
                     self.st = St::Error;
                     self.paint |= P_ALL;
@@ -1720,6 +1885,16 @@ impl Gallery {
         if self.mode != Mode::Grid {
             return;
         }
+        if self.sel_n > 0 && hash != self.list_hash {
+            // The ranks now mean other files.
+            self.sel_clear();
+            self.mode = Mode::Dialog;
+            self.dlg = Dlg::Info("Selection cleared", "Files changed");
+            self.bulk = true;
+            self.paint |= P_DLG;
+            return;
+        }
+        self.list_hash = hash;
         for i in 0..PER_PAGE {
             let was = i < self.n;
             let is = i < n;
@@ -1831,6 +2006,83 @@ impl Gallery {
                     self.need |= N_LIST | N_FIND;
                 }
             }
+        }
+    }
+
+    /// The running delete: one ticked file, the oldest. Exact identity: the
+    /// listing must still be the one that was ticked.
+    fn sel_step(&mut self, disk: &mut dyn BlockDevice) {
+        if self.mode != Mode::Dialog {
+            return;
+        }
+        let (Some(rank), Some(v)) = (self.sel_last(), self.v) else {
+            return self.sel_finish(Some("Disk read error"));
+        };
+        if rank >= self.total {
+            return self.sel_finish(Some("Files changed"));
+        }
+        let idx = self.total - 1 - rank;
+        let mut e = [ENT0; 1];
+        let mut hash = 0;
+        let mut io = Io::new(disk, v);
+        match scan_hash(&mut io, idx, idx + 1, &mut e, None, &mut hash) {
+            Some((t, 1, _)) if t == self.total && hash == self.list_hash => {}
+            None => return self.sel_finish(Some("Disk read error")),
+            _ => return self.sel_finish(Some("Files changed")),
+        }
+        let name = e[0].name;
+        // csvlog::delete_on takes the subdirectory's file of a name first, the
+        // last in the listing: the same name in the root (a file of an earlier
+        // build) must not cost the other one.
+        let same = matches!(scan(&mut io, 0, 0, &mut [], Some(&name)), Some((_, _, Some((i, _)))) if i == idx);
+        drop(io);
+        let r = if same {
+            crate::wdt::kick_if_feeding();
+            let r = csvlog::delete_on(disk, &name);
+            crate::wdt::kick_if_feeding();
+            r
+        } else {
+            Err(GErr::NotFound)
+        };
+        match r {
+            Ok(()) => self.del_ok += 1,
+            // Skipped: gone, a duplicate, or the recording.
+            Err(GErr::NotFound | GErr::Busy) => {}
+            Err(_) => return self.sel_finish(Some("Delete failed")),
+        }
+        self.sel[rank as usize / PER_PAGE] &= !(1 << (rank as usize % PER_PAGE));
+        self.sel_n -= 1;
+        // The listing without this file; nothing else ran since the check.
+        let mut io = Io::new(disk, v);
+        match scan_hash(&mut io, 0, 0, &mut [], None, &mut hash) {
+            Some((t, _, _)) => {
+                self.total = t;
+                self.list_hash = hash;
+            }
+            None => return self.sel_finish(Some("Disk read error")),
+        }
+        if self.sel_n > 0 {
+            self.need |= N_DEL;
+            self.paint |= P_DLG;
+        } else if self.del_ok == self.del_n {
+            self.sel_finish(None);
+        } else {
+            self.sel_finish(Some("Some skipped"));
+        }
+    }
+
+    /// End of the delete: `why`, why not all of the files went.
+    fn sel_finish(&mut self, why: Option<&'static str>) {
+        self.sel_clear();
+        self.sel_mode = false;
+        self.job.stats = false;
+        self.need |= N_LIST;
+        match why {
+            Some(t) => {
+                self.dlg = Dlg::SelDone(t);
+                self.paint |= P_DLG;
+            }
+            None => self.grid_again(),
         }
     }
 
@@ -2191,17 +2443,41 @@ impl Gallery {
                     self.tile(i);
                 }
             }
+            for i in 0..self.n {
+                if self.rows & (1 << i) != 0 {
+                    self.sel_row(i);
+                }
+            }
         }
         self.tpaint = 0;
+        self.rows = 0;
+    }
+
+    fn grid_blank() {
+        title_bar();
+        sf::glyphs(sf::TEXT22, rect(0, 0, 480, BAR_H), "Gallery", FG, BAR, 8, 0);
+        fill((0, BAR_H, 480, 320 - BAR_H), M_BG);
+    }
+
+    fn page_txt(&self, t: &mut Tb) {
+        t.s("Page ");
+        t.u(self.page + 1);
+        t.s(" of ");
+        t.u(self.pages());
     }
 
     fn paint_all(&mut self) {
         self.tpaint = 0;
+        self.rows = 0;
         match self.mode {
+            // Over the grid, no viewer file behind it; the tiles return when
+            // the box closes.
+            Mode::Dialog if self.bulk => {
+                Self::grid_blank();
+                self.paint_dialog();
+            }
             Mode::Grid => {
-                title_bar();
-                sf::glyphs(sf::TEXT22, rect(0, 0, 480, BAR_H), "Gallery", FG, BAR, 8, 0);
-                fill((0, BAR_H, 480, 320 - BAR_H), M_BG);
+                Self::grid_blank();
                 self.job = JOB0;
                 self.todo = 0;
                 match self.st {
@@ -2292,12 +2568,17 @@ impl Gallery {
         if self.st != St::Ok {
             return;
         }
-        let mut a = Tb::new();
-        a.u(self.total);
-        a.s(if self.total == 1 { " file" } else { " files" });
-        let mut b = Tb::new();
-        size_txt(&mut b, self.free);
-        b.s(" free");
+        let (mut a, mut b) = (Tb::new(), Tb::new());
+        if self.sel_mode {
+            a.u(self.sel_n as u32);
+            a.s(" selected");
+            self.page_txt(&mut b);
+        } else {
+            a.u(self.total);
+            a.s(if self.total == 1 { " file" } else { " files" });
+            size_txt(&mut b, self.free);
+            b.s(" free");
+        }
         small(rect(352, 5, 120, 15), a.str(), FG, BAR, 4);
         small(rect(352, 20, 120, 15), b.str(), DIM, BAR, 4);
     }
@@ -2309,17 +2590,23 @@ impl Gallery {
             sf::rbox(rect(x, NAV_Y, NAV_W, NAV_H), 6, M_TILE, M_BG);
             sf::glyphs(sf::TEXT22, rect(x, NAV_Y, NAV_W, NAV_H), txt, if on { FG } else { DIM }, M_TILE, 8, 0);
         }
+        let s = rect(SELECT_X, NAV_Y, SELECT_W, NAV_H);
+        let bg = if self.sel_mode { ACCENT } else { M_TILE };
+        sf::rbox(s, 6, bg, M_BG);
+        sf::glyphs(sf::TEXT22, s, "Select", FG, bg, 8, 0);
+        let mid = rect(NAV_MID_X, NAV_Y, NAV_MID_W, NAV_H);
+        if self.sel_mode && self.busy.is_none() {
+            let (fg, bg) = if self.sel_n > 0 { (FG, D_RED) } else { (DIM, M_TILE) };
+            sf::rbox(mid, 6, bg, M_BG);
+            sf::glyphs(sf::TEXT22, mid, "Delete selected", fg, bg, 8, 0);
+            return;
+        }
         let mut t = Tb::new();
         match self.busy {
             Some(_) => t.s("Disk busy"),
-            None => {
-                t.s("Page ");
-                t.u(self.page + 1);
-                t.s(" of ");
-                t.u(pages);
-            }
+            None => self.page_txt(&mut t),
         }
-        small(rect(PREV_X + NAV_W + 6, NAV_Y, NEXT_X - PREV_X - NAV_W - 12, NAV_H), t.str(), FG, M_BG, 8);
+        small(mid, t.str(), FG, M_BG, 8);
     }
 
     /// Static part of tile `i` (frame, placeholder, name and size); its
@@ -2335,18 +2622,48 @@ impl Gallery {
         probe_begin(((y as u32) << 16) | x as u32, M_TILE);
         fill((x + 4, y + 4, TH_W as i16, TH_H as i16), if e.kind == Kind::Csv { PANEL } else { IMG_BG });
         probe_end();
-        let name = name_txt(&e.name);
-        let mut sz = Tb::new();
-        size_txt(&mut sz, e.size);
-        let (wn, ws) = (small_width(name.str()), small_width(sz.str()));
-        let r = rect(x + 5, y + 99, 138, 14);
-        small(r, name.str(), FG, M_TILE, 1);
-        if wn + 6 + ws <= r.w {
-            small(r, sz.str(), DIM, M_TILE, 4);
-        }
+        self.sel_row(i);
         self.todo |= 1 << i;
         if self.job.kind == JK::Tile(i as u8) {
             self.job = JOB0;
+        }
+    }
+
+    /// Tile `i` without the thumbnail (a tick must not cost a new decode): the
+    /// frame around the thumbnail, the name, and the size or the tick box.
+    fn sel_row(&self, i: usize) {
+        let (x, y) = tile_xy(i);
+        let e = self.ents[i];
+        let on = self.sel_has(i);
+        let c = if on { ACCENT } else { M_TILE };
+        frame((x as u16 + 2, y as u16 + 2, TILE_W as u16 - 4, TH_H + 4), c);
+        frame((x as u16 + 3, y as u16 + 3, TILE_W as u16 - 6, TH_H + 2), c);
+        let name = name_txt(&e.name);
+        let r = rect(x + 5, y + 99, 138, 14);
+        fill((r.x, r.y, r.w, r.h), M_TILE);
+        small(r, name.str(), FG, M_TILE, 1);
+        let mut sz = Tb::new();
+        if self.sel_mode && self.sel_allowed(i) {
+            let (bx, by) = (x + TILE_W - 18, y + 100);
+            probe_begin(((by as u32) << 16) | bx as u32, M_TILE);
+            fill((bx, by, 12, 12), if on { ACCENT } else { DIM });
+            if on {
+                for (dx, dy) in [(2, 5), (3, 6), (4, 7), (5, 6), (6, 5), (7, 4), (8, 3)] {
+                    fill((bx + dx, by + dy, 2, 2), FG);
+                }
+            } else {
+                fill((bx + 1, by + 1, 10, 10), M_TILE);
+            }
+            probe_end();
+            return;
+        }
+        if self.sel_mode && (self.page as usize) < SEL_PAGES {
+            sz.s("REC");
+        } else {
+            size_txt(&mut sz, e.size);
+        }
+        if small_width(name.str()) + 6 + small_width(sz.str()) <= r.w {
+            small(r, sz.str(), DIM, M_TILE, 4);
         }
     }
 
@@ -2357,6 +2674,27 @@ impl Gallery {
                 dialog_box(t, name_txt(&self.cur.name).str(), Some("Delete"))
             }
             Dlg::Info(t, m) => dialog_box(t, m, None),
+            Dlg::SelConfirm => {
+                let mut b = Tb::new();
+                b.s("Files: ");
+                b.u(self.sel_n as u32);
+                dialog_box("Delete selected?", b.str(), Some("Delete"))
+            }
+            Dlg::SelDeleting => {
+                let mut b = Tb::new();
+                b.u((self.del_n - self.sel_n) as u32);
+                b.s(" of ");
+                b.u(self.del_n as u32);
+                dialog_plain("Deleting", b.str())
+            }
+            Dlg::SelDone(t) => {
+                let mut b = Tb::new();
+                b.s("Deleted ");
+                b.u(self.del_ok as u32);
+                b.s(" of ");
+                b.u(self.del_n as u32);
+                dialog_box(t, b.str(), None)
+            }
         }
     }
 
@@ -2399,6 +2737,24 @@ impl Gallery {
     #[cfg(test)]
     pub fn test_info_cur(&self) -> (Option<&'static str>, [u8; 11]) {
         (if let Dlg::Info(_, m) = self.dlg { Some(m) } else { None }, self.cur.name)
+    }
+
+    /// Show the result box of a bulk delete (tests: its layout).
+    #[cfg(test)]
+    pub fn test_sel_done(&mut self, t: &'static str) {
+        self.mode = Mode::Dialog;
+        self.bulk = true;
+        self.dlg = Dlg::SelDone(t);
+    }
+
+    /// Selection mode, ticks, and the first line of the info box (tests).
+    #[cfg(test)]
+    pub fn test_sel(&self) -> (bool, u8, Option<&'static str>) {
+        let t = match self.dlg {
+            Dlg::Info(t, _) | Dlg::SelDone(t) if self.mode == Mode::Dialog => Some(t),
+            _ => None,
+        };
+        (self.sel_mode, self.sel_n, t)
     }
 
     #[cfg(test)]
