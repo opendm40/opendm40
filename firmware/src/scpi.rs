@@ -778,7 +778,7 @@ pub enum Dbg {
     /// (AD1 codes) of the current path and the AD1 conversion period in ms
     /// (dmm.rs `fast_info`).
     Fast,
-    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 22 numbers.
+    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 27 numbers.
     Cap,
     /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
     /// (dmm::set_cap_class; RAM only).

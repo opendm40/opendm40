@@ -995,6 +995,7 @@ impl DmmView {
             12 if aux[0].is_none() && !self.power => 0x10,
             13 if !self.power => match r.aux2 {
                 Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
+                Some(v) if v.unit == crate::dmm::CAP_NOISE_UNIT => 0x22,
                 Some(_) => 0x20,
                 None => 255,
             },
@@ -1136,7 +1137,12 @@ impl DmmView {
                 None => {}
             }
         }
-        if ik & 0xF0 == 0x20 {
+        if ik == 0x22 {
+            if self.last_iohm != ik {
+                cap_noise_label();
+                self.last_iohm = ik;
+            }
+        } else if ik & 0xF0 == 0x20 {
             // Every reading: the node voltage moves.
             cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
             self.last_iohm = ik;
@@ -1238,6 +1244,16 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
     }
     s.push(" V");
     sf::label(sf::F14, rect(b.x + w, b.y, b.w - w, b.h), s.as_str(), DIM, BG, 1, 1);
+}
+
+/// Capacitance, the hunting hold (dmm.rs `CAP_HOLD_MS`): the ranges went
+/// back and forth without a value (a user's 470 uF with a laptop charger on
+/// the USB host, 2026-11-02). DIM, the discharge line's box.
+#[inline(never)] // during a hold only
+pub fn cap_noise_label() {
+    let b = CAP_DIS_RECT;
+    lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+    sf::label(sf::F14, b, "Unstable: unplug USB?", DIM, BG, 1, 1);
 }
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
