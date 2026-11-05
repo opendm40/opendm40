@@ -254,6 +254,12 @@ the combined view switches to the next sub-mode of the current function
 - To switch off: hold the power key 1.5 s, or swipe down with two fingers
   and tap **Yes**.
 - The battery charges from the USB port.
+- **Low battery** (at about 17 % and again at 8 % of the scale, as the stock
+  firmware): a 3 s **Low battery! Please charge** message and a beep at the
+  key/alert volume, once per level; the battery symbol stays red until USB
+  power is connected. During a recording only the symbol changes; the message
+  comes when it ends. The meter does not switch off by itself at the bottom
+  of the scale.
 
 ![The warning 30 s before the automatic power-off](img/auto-off.png)
 

@@ -781,7 +781,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, rec_dim: false, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, bat_low: false, locked: false, rec: true, csv: true, rec_dim: false, page }
 }
 
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
@@ -1838,6 +1838,10 @@ fn main() {
         let mut m = base;
         m.usb = true;
         v.push(("usb", m));
+        let mut low = base;
+        low.battery = 1;
+        low.bat_low = true;
+        v.push(("bat-low", low));
         m.charging = true;
         m.battery = 5;
         v.push(("usb-charged", m));
@@ -2054,7 +2058,8 @@ fn main() {
         std::fs::create_dir_all(&dir).unwrap();
         // (name, bt, usb, csv, locked, bars, charging)
         // `charging` = on a charger (green); the blink is the caller's level.
-        let states: [(&str, bool, bool, bool, bool, u8, bool); 10] = [
+        let states: [(&str, bool, bool, bool, bool, u8, bool); 11] = [
+            ("bat-low", false, false, false, false, 1, false),
             ("plain", false, false, false, false, 4, false),
             ("charged", false, true, false, false, 5, true),
             ("usb", false, true, false, false, 4, false),
@@ -2092,7 +2097,7 @@ fn main() {
                 ck.same_as(&format!("statusbar/blink/{gen}/{dim}"), &want);
             }
         }
-        let states: Vec<_> = states.into_iter().map(|s| (s, false)).chain(std::iter::once((states[4], true))).collect();
+        let states: Vec<_> = states.into_iter().map(|s| (s, false)).chain(std::iter::once((states[5], true))).collect();
         for ((name, bt, usb, csv, locked, bars, charging), dim) in states {
             for gen in [false, true] {
                 host::reset(0);
@@ -2107,6 +2112,7 @@ fn main() {
                 }
                 let mut st = status(0);
                 (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging, st.rec_dim) = (bt, usb, csv, locked, bars, charging, dim);
+                st.bat_low = name == "bat-low";
                 let name = if dim { "all-rec-off" } else { name };
                 let h = if gen { 36 } else { ui::BAR_H as usize };
                 if gen {
@@ -3024,6 +3030,7 @@ fn main() {
         ("Screenshot failed", false),
         (dialog::AUTO_DC, true),
         ("Auto power-off in 30 s", false),
+        (dialog::LOW_BATTERY, false),
         // Tap on the DMM value (resolution / rate), widest variants.
         (rate_widest, true),
         (rate_fast, true),

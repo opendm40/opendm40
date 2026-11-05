@@ -3,6 +3,8 @@
 //!   tools/autooff-test/run.sh
 #[path = "../../src/autooff.rs"]
 mod autooff;
+#[path = "../../src/lowbat.rs"]
+mod lowbat;
 use autooff::*;
 
 static mut BAD: u32 = 0;
@@ -15,6 +17,56 @@ fn t(name: &str, ok: bool) {
             println!("FAIL {name}");
         }
     }
+}
+
+/// The low-battery warning (src/lowbat.rs): feed reads, count the warnings.
+fn lowbat_tests() {
+    use lowbat::*;
+    let n = CONFIRM as usize;
+    let run = |l: &mut LowBat, pct: f32, chg: bool, reads: usize| {
+        let mut w = 0;
+        for _ in 0..reads {
+            l.feed(pct, chg);
+            if l.due() {
+                l.shown();
+                w += 1;
+            }
+        }
+        w
+    };
+    let mut l = LowBat::new();
+    t("lb: above the levels", run(&mut l, 17.0, false, 100) == 0 && !l.low());
+    t("lb: short dip no warning", run(&mut l, 10.0, false, n - 1) == 0 && !l.low());
+    t("lb: interrupted dip starts over", run(&mut l, 50.0, false, 1) == 0 && run(&mut l, 10.0, false, n - 1) == 0);
+    run(&mut l, 50.0, false, 1);
+    t("lb: warns once at 17", run(&mut l, 10.0, false, n) == 1 && l.low());
+    t("lb: no repeat", run(&mut l, 10.0, false, 1000) == 0);
+    t("lb: rebound does not re-arm", run(&mut l, 30.0, false, 100) == 0 && l.low() && run(&mut l, 10.0, false, 100) == 0);
+    t("lb: warns again at 8", run(&mut l, 5.0, false, n) == 1);
+    t("lb: no third", run(&mut l, -5.0, false, 1000) == 0);
+    t("lb: charger clears", run(&mut l, 5.0, true, 1) == 0 && !l.low());
+    t("lb: never on a charger", run(&mut l, 5.0, true, 1000) == 0 && !l.low());
+    t("lb: warns after the unplug", run(&mut l, 5.0, false, n) == 1);
+    let mut l = LowBat::new();
+    t("lb: 0 V is no battery reading", run(&mut l, -366.0, false, 1000) == 0 && !l.low());
+    // Straight under both levels: one warning, stays due until shown.
+    let mut l = LowBat::new();
+    for _ in 0..n {
+        l.feed(5.0, false);
+    }
+    t("lb: both levels at once, one due", l.due());
+    l.shown();
+    for _ in 0..1000 {
+        l.feed(5.0, false);
+    }
+    t("lb: both levels at once, one warning", !l.due());
+    // A warning kept through a recording; a charger cancels it.
+    let mut l = LowBat::new();
+    for _ in 0..n {
+        l.feed(10.0, false);
+    }
+    l.feed(10.0, true);
+    t("lb: charger cancels a waiting warning", !l.due());
 }
 
 const OFF: u64 = 600_000; // Shutdown 10 min
@@ -38,6 +90,7 @@ fn run(end: u64, off_ms: u64, held: bool, state: impl Fn(u64) -> (u8, bool)) -> 
 }
 
 fn main() {
+    lowbat_tests();
     // The rule itself.
     t("PB10 high", usb_power(0b01, false));
     t("PB10 + PB11 (charging)", usb_power(0b11, false));

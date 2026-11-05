@@ -9,6 +9,8 @@ section named after the tag as the release notes; how to cut a release:
 
 - Battery level: no longer jumps up on the charger; it rises slowly with the real charge.
 
+- Low-battery warning: a 3 s message and a beep at about 17 % and 8 %, and a red battery symbol; not on USB power, and it waits for a recording to end.
+
 ## v0.4.0 (2026-11-02)
 
 ### New

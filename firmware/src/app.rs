@@ -1134,6 +1134,7 @@ impl App {
             usb: self.usb_host,
             bars: self.power.shown_bars(self.strip_alt),
             charging: self.power.on_charger(),
+            bat_low: self.power.low.low(),
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),
@@ -1890,6 +1891,12 @@ impl App {
         if self.toast_later_n != 0 {
             self.toast_later_show(now);
             return;
+        }
+        if self.power.low.due() {
+            self.low_battery(now);
+            if self.overlay.is_some() {
+                return;
+            }
         }
         if self.shot_req && now >= self.repaint_at + SHOT_SETTLE_MS {
             self.shot_req = false;
@@ -3287,12 +3294,32 @@ impl App {
     /// watch a bus). Dimming still applies. USB power holds it off through `idle` (`tick`,
     /// autooff.rs).
     fn off_held(&self) -> bool {
-        self.off_ms() == 0
-            || self.meter.stats.rec
+        self.off_ms() == 0 || self.session_runs()
+    }
+
+    /// A recording or another session the user left running.
+    fn session_runs(&self) -> bool {
+        self.meter.stats.rec
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
             || self.scope.log_on()
+    }
+
+    /// The low-battery warning (lowbat.rs), as the stock's 3 s popup, once
+    /// per level at the key / alert volume. It waits while a recording or a
+    /// stream runs, whose page must stay up; the red symbol shows meanwhile.
+    /// Not an input: the idle timers go on, and a dimmed screen stays dimmed
+    /// (a low battery is no reason for more backlight).
+    #[inline(never)]
+    fn low_battery(&mut self, now: u64) {
+        if self.toast_hold || self.session_runs() || crate::hy3131::streaming() || crate::screenshot::frozen() || crate::dialog::log_panel_shown() {
+            return;
+        }
+        self.power.low.shown();
+        self.toast_draw(now, crate::dialog::LOW_BATTERY, false);
+        self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::LOW_BATTERY_MS });
+        self.beep(now, 150);
     }
 
     fn off_warn(&mut self, now: u64, idle: u64) {

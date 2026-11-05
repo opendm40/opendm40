@@ -2058,6 +2058,8 @@ pub struct Status {
     /// `charging`: on a charger (charging or charged), the battery green.
     pub bars: u8,
     pub charging: bool,
+    /// Under a low-battery level (`lowbat.rs`), not on a charger.
+    pub bat_low: bool,
     pub locked: bool,
     /// MIN/MAX recording session on (the DMM statistics, FR-02).
     pub rec: bool,
@@ -2122,13 +2124,24 @@ pub fn status_rec_blink(st: &Status, gen: bool) {
     crate::scope_ui::rec_dot(rec_dot_at(y), bg, st.csv && !st.rec_dim);
 }
 
+/// The status bars' battery: green on a charger, red when low (lowbat.rs).
+fn battery_color(st: &Status) -> Color {
+    if st.charging {
+        0x04A9
+    } else if st.bat_low {
+        0xF800
+    } else {
+        STATUS_FG
+    }
+}
+
 /// Right part of the DMM page status bar (34 px, stock positions): uptime,
 /// REC (CSV recording; the MIN/MAX session has its own line in the chart
 /// column), lock, BT link, USB host, battery.
 pub fn status_right(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
-    let bc = if st.charging { 0x04A9 } else { STATUS_FG };
+    let bc = battery_color(st);
     sf::label(sf::F21, rect(205, 5, 112, 24), hms(&mut t, st.uptime_s), STATUS_FG, BAR, 1, -1);
     status_rec(st, BAR, 10);
     sf::label(sf::LOCK, rect(327, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
@@ -2777,7 +2790,7 @@ pub fn gen_run_hit(x: u16, y: u16) -> bool {
 pub fn gen_status(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
-    let bc = if st.charging { 0x04A9 } else { STATUS_FG };
+    let bc = battery_color(st);
     sf::label(sf::F21, rect(186, 6, 120, 24), hms(&mut t, st.uptime_s), STATUS_FG, G_BAR, 1, -1);
     status_rec(st, G_BAR, 11);
     sf::label(sf::LOCK, rect(327, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);

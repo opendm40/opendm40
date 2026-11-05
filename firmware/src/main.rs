@@ -21,6 +21,7 @@ mod ident;
 mod hyspi;
 mod lcd;
 mod logger;
+mod lowbat;
 mod inrush;
 mod ad2exp;
 mod ad2pll;

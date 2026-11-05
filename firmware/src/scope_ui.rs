@@ -37,6 +37,7 @@ pub const C_ORANGE: Color = 0xfaa0; // STOP badge, TRIG button, Clear
 pub const C_MAGENTA: Color = 0xb833; // timebase badge
 pub const C_WHITE: Color = 0xffff;
 pub const C_GREEN: Color = 0x07e0; // battery bar while charging
+pub const C_RED: Color = 0xf800; // battery when low
 pub const C_DIS: Color = 0x7bef; // label button while its popup is open / pressed
 pub const C_POP_BG: Color = 0xd679; // popup page / selected tab
 pub const C_POP_TAB: Color = 0x5acb; // unselected tab / header
@@ -266,6 +267,8 @@ pub struct Model {
     /// Battery level 0..5 (blinking while charging), on a charger (green).
     pub battery: u8,
     pub charging: bool,
+    /// Under a low-battery level (`lowbat.rs`): the symbol is red.
+    pub bat_low: bool,
     /// A USB host has the meter configured: the small USB symbol between
     /// the trigger badge and the battery (`usb_icon`).
     pub usb: bool,
@@ -406,6 +409,7 @@ impl Model {
         ycur: None,
         battery: 4,
         charging: false,
+        bat_low: false,
         usb: false,
         bt: false,
         roll: false,
@@ -909,16 +913,17 @@ fn icons_dx(m: &Model) -> i16 {
 /// 2.6 battery (outline + level clipped to (437,3,33,12)); `icons_dx` px
 /// further right with both link icons. Painted over both places.
 pub fn battery(m: &Model) {
-    battery_lv(m.battery, m.charging, icons_dx(m));
+    battery_lv(m.battery, m.charging, m.bat_low, icons_dx(m));
 }
 
 /// The battery of level 0..5, `dx` px right of its stock place.
-pub fn battery_lv(level: u8, charging: bool, dx: i16) {
+pub fn battery_lv(level: u8, charging: bool, low: bool, dx: i16) {
     let r = rect(435 + dx, 1, 40, 16);
     let o = Ink::icon(sf::SC_BATT, r, 0x22, 0);
     let l = if level > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + level.min(5) as u32, 0) } else { Ink::none() };
     let clip = rect(437 + dx, 3, 33, 12);
-    let lc = if charging { C_GREEN } else { C_WHITE };
+    let oc = if low && !charging { C_RED } else { C_WHITE };
+    let lc = if charging { C_GREEN } else { oc };
     paint(rect(435, 1, 43, 16), &[(K_ICON, C_BAR), (K_ICON, C_BAR)], |x, y| {
         if clip.has(x, y) {
             if let Some(g) = l.at(x, y) {
@@ -926,7 +931,7 @@ pub fn battery_lv(level: u8, charging: bool, dx: i16) {
             }
         }
         match o.at(x, y) {
-            Some(g) => (C_WHITE, tag(1, g)),
+            Some(g) => (oc, tag(1, g)),
             None => (C_BAR, 0),
         }
     });
@@ -2593,7 +2598,7 @@ pub fn update(m: &Model) {
     if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.rec != m.rec) {
         record_bar(m);
     }
-    if d(ol.battery != m.battery || ol.charging != m.charging || icons_dx(&ol) != icons_dx(m)) {
+    if d(ol.battery != m.battery || ol.charging != m.charging || ol.bat_low != m.bat_low || icons_dx(&ol) != icons_dx(m)) {
         battery(m);
     }
     if d(ol.usb != m.usb || ol.bt != m.bt) {
