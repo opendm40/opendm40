@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- Localized images in Chinese, Russian, Italian and French (`dm40_opendm40_<version>-<lang>.bin`): **Settings > Display > Language**.
+
 ## v0.4.0 (2026-11-02)
 
 ### New

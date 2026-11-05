@@ -10,6 +10,7 @@
 #   tools/ui-render/run.sh <out dir> --manual   the user manual's screens (1x,
 #                                               manual.rs; manual-img.py makes
 #                                               ../../../docs/manual/img/)
+# UIR_LANG=zh|ru|it|fr: built with that language and drawn in it (the same rules).
 # Exit status 1 when any rule is violated. Needs no hardware.
 set -e
 cd "$(dirname "$0")"
@@ -19,7 +20,7 @@ mkdir -p "$OUT"
 B=$(mktemp -d)
 trap 'rm -rf "$B"' EXIT
 CARGO_PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../Cargo.toml | head -1) \
-    rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$B/r"
+    rustc --edition 2021 -O --cfg test ${UIR_LANG:+--cfg feature=\"$UIR_LANG\" --cfg lang_log} -A warnings main.rs -o "$B/r"
 set +e
 "$B/r" "$OUT" "${@:2}" | tee "$OUT/check.txt"
 RC=${PIPESTATUS[0]}

@@ -11,6 +11,10 @@
 
 use crate::lcd::{self, Color};
 
+/// The second UI language of a localized image.
+#[path = "lang.rs"]
+pub mod lang;
+
 /// A font, keyed by its original stock font-object address.
 #[derive(Clone, Copy)]
 pub struct Font(pub u32);
@@ -66,7 +70,7 @@ mod data {
     }
 
     #[allow(non_snake_case, clippy::too_many_arguments)]
-    const fn E(code: u16, off: u16, w: u8, h: u8, adv: u8, yoff: i8, t: u8, ih: u8) -> Entry {
+    pub const fn E(code: u16, off: u16, w: u8, h: u8, adv: u8, yoff: i8, t: u8, ih: u8) -> Entry {
         Entry { code, off, w, h, adv, yoff, t, ih }
     }
 
@@ -415,6 +419,11 @@ mod data {
 
         pub fn glyph(&self, code: u32) -> Option<Glyph> {
             let fd = font_data(self.0)?;
+            if let Some((b, sz)) = super::lang::bits(code) {
+                // Vertically centred in the line, one blank column after it.
+                let (lh, d) = (fd.line_h as i16, fd.descent);
+                return Some(Glyph::own(b, false, sz, sz, sz + 1, (lh - d - sz as i16 - (lh - sz as i16) / 2) as i8));
+            }
             if fd.fmt == HUF && !unsafe { *core::ptr::addr_of!(LUT_OK) } {
                 lut_init();
             }
@@ -442,8 +451,17 @@ mod data {
                     hi = mid;
                 }
             }
-            None
+            fd_extra(self.0, code)
         }
+    }
+
+    /// `code` in the glyphs the UI language adds to this font.
+    #[inline(always)]
+    fn fd_extra(addr: u32, code: u16) -> Option<Glyph> {
+        let fd = super::lang::extra(addr)?;
+        let i = fd.entries.binary_search_by_key(&code, |e| e.code).ok()?;
+        let g = &fd.entries[i];
+        Some(Glyph { blob: fd.blob.get(g.off as usize..).unwrap_or(&[]), fmt: fd.fmt, w: g.w, h: g.h, adv: g.adv, yoff: g.yoff, t: g.t, ih: g.ih })
     }
 }
 
@@ -492,8 +510,46 @@ struct Placed {
     cur: Cur,
 }
 
+/// `text` in the UI language; the English when the translation lacks a glyph
+/// of `font`, takes more than `max` glyphs or is wider than `w`.
+#[inline(always)]
+fn ui_text<'a>(font: Font, text: &'a str, w: i16, spacing: i8, max: usize) -> &'a str {
+    let t = lang::tr(|| font.line_h(), text);
+    #[cfg(lang_log)]
+    lang_log("drawn", font, text);
+    if core::ptr::eq(t, text) {
+        return text;
+    }
+    ui_text_check(font, t, text, w, spacing, max)
+}
+
+#[inline(never)]
+fn ui_text_check<'a>(font: Font, t: &'a str, en: &'a str, w: i16, spacing: i8, max: usize) -> &'a str {
+    let ok = t.chars().count() <= max && t.chars().all(|c| glyph_or_twin(font, c).is_some()) && width_of(font, t, spacing) <= w;
+    #[cfg(lang_log)]
+    lang_log(if ok { "fits" } else { "wide" }, font, en);
+    if ok { t } else { en }
+}
+
+/// ui-render with UIR_LANG: each distinct (kind, font, English text) once.
+#[cfg(lang_log)]
+fn lang_log(kind: &str, font: Font, en: &str) {
+    use std::io::Write;
+    static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+    let line = format!("{kind}\t{:08x}\t{en}", font.0);
+    let mut g = SEEN.lock().unwrap();
+    if g.get_or_insert_with(Default::default).insert(line.clone()) {
+        if let Ok(p) = std::env::var("LANG_LOG") {
+            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(p) {
+                let _ = writeln!(f, "{line}");
+            }
+        }
+    }
+}
+
 /// Every character of `s` has a glyph in `font` (W, k: ours where missing).
 pub fn has_all(font: Font, s: &str) -> bool {
+    let s = ui_text(font, s, i16::MAX, 0, MAXG);
     s.chars().all(|c| glyph_or_twin(font, c).is_some())
 }
 
@@ -675,6 +731,7 @@ fn blend(fg: Color, bg: Color, a: u8) -> Color {
 /// Draw `text` in `r` (background `bg` fills the whole rect, so a redraw
 /// replaces the old text without flicker).
 pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, spacing: i8) {
+    let text = ui_text(font, text, r.w, spacing, MAXG);
     if r.w <= 0 || r.h <= 0 {
         return;
     }
@@ -907,6 +964,7 @@ pub fn rbox(r: Rect, radius: i16, color: Color, outside: Color) {
 /// Draw only the glyph boxes of `text` placed in `r` (pixels outside the
 /// glyphs are left alone): for text over shapes such as rounded buttons.
 pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, spacing: i8) {
+    let text = ui_text(font, text, r.w, spacing, MAXG);
     if !lcd::rows_hit(r.y, r.y + r.h - 1) {
         return;
     }
@@ -963,6 +1021,11 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
 /// Width in pixels of `text` as `label` lays it out (pen advance plus the
 /// last glyph's width), e.g. to place a tag right before right-aligned text.
 pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
+    width_of(font, ui_text(font, text, i16::MAX, spacing, MAXG), spacing)
+}
+
+#[inline(always)]
+fn width_of(font: Font, text: &str, spacing: i8) -> i16 {
     let (mut pen, mut last) = (0i32, 0i32);
     let lh = font.line_h() as i32;
     for ch in text.chars() {
@@ -1142,6 +1205,8 @@ impl Ink {
     /// advances line_h; align 0..8 as `label`; glyph top = line top + line_h
     /// - descent - h - yoff.
     pub fn new(font: Font, r: Rect, text: &str, align: u8, spacing: i8) -> Ink {
+        #[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
+        let text = ui_text(font, text, r.w, spacing, INK_N);
         let mut k = Ink::none();
         let lh = font.line_h() as i32;
         let mut xs = [0i32; INK_N];

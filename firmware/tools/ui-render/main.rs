@@ -1295,6 +1295,7 @@ fn save(out: &str, name: &str) {
 }
 
 fn main() {
+    stockfont::lang::set(cfg!(any(feature = "zh", feature = "ru", feature = "it", feature = "fr")));
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
     host::map_flash();
     // `main <out> --stock <dir>`: only the replica scope scenes, 1x, for the

@@ -1,0 +1,201 @@
+# opendm40 Italian UI strings; tools/mklang.py. English<TAB>Italian<TAB>M machine-written, needs a native review.
+Multimeter	Multimetro	M
+Oscilloscope	Oscilloscopio	M
+Signal	Generatore	M
+Settings	Impostazioni	M
+Scope	Oscillosc.	M
+Main menu	Menu principale	M
+Display	Schermo	M
+Alerts	Avvisi	M
+Power	Alimentazione	M
+Other	Altro	M
+Dim screen	Oscuramento	M
+Shutdown	Spegnimento	M
+Backlight	Retroillum.	M
+Key/alert volume	Volume tasti	M
+Bluetooth	Bluetooth	M
+Start page	Pagina iniziale	M
+Analog power	Aliment. analog.	M
+DMM rate	Velocità DMM	M
+Smoothing	Livellamento	M
+DMM row	Riga DMM	M
+Temp unit	Unità temp.	M
+Swipe	Scorrimento	M
+Press effect	Effetto tocco	M
+Tap step	Passo tocco	M
+Help	Aiuto	M
+Jack alerts	Avvisi boccole	M
+Danger alarm	Allarme pericolo	M
+USB disk	Disco USB	M
+Burden voltage	Caduta tensione	M
+Device info	Info dispositivo	M
+Touch test	Test tocco	M
+Accuracy	Precisione	M
+Negative ohm	Ohm negativi	M
+Mode Remember	Ricorda modo	M
+Never	Mai	M
+1 hour	1 ora	M
+1 min	1 min	M
+5 min	5 min	M
+10 min	10 min	M
+30 min	30 min	M
+On	On	M
+Off	Off	M
+ON	ON	M
+OFF	OFF	M
+Cancel	Annulla	M
+OK	OK	M
+Yes	Sì	M
+No	No	M
+Back	Indietro	M
+< Back	< Indietro	M
+< Prev	< Prec	M
+Next >	Succ >	M
+Save	Salva	M
+Delete	Elimina	M
+Clear	Cancella	M
+Default	Predef.	M
+Reset	Reset	M
+Start	Avvia	M
+Auto	Auto	M
+Normal	Normale	M
+Single	Singolo	M
+Rising	Salita	M
+Falling	Discesa	M
+Edge	Fronte	M
+Pulse	Impulso	M
+Trigger	Trigger	M
+Measure	Misure	M
+Decode	Decodifica	M
+Window	Finestra	M
+Sine	Seno	M
+Square	Quadra	M
+Triangle	Triangolo	M
+Ramp	Rampa	M
+Frequency	Frequenza	M
+Freq	Freq	M
+Duty	Duty	M
+Coupling	Accoppiam.	M
+Probe	Sonda	M
+Type:	Tipo:	M
+Mode:	Modo:	M
+Mode	Modo	M
+Edge:	Fronte:	M
+Persist:	Persist.:	M
+Roll:	Scorri:	M
+Brightness:	Luminosità:	M
+Grid intensity:	Lumin. griglia:	M
+FFT Unit	Unità FFT	M
+Source:	Sorgente:	M
+Threshold:	Soglia:	M
+Width:	Larghezza:	M
+Offset	Offset	M
+Color	Colore	M
+Save CSV	Salva CSV	M
+Save CSV OK	CSV salvato	M
+CSV save failed	Errore CSV	M
+Screenshot	Schermata	M
+Screenshot failed	Errore schermata	M
+Stop the scope first	Prima ferma	M
+Sampling	Acquisizione	M
+Vendor	Produttore	M
+Model	Modello	M
+SN	S/N	M
+Bootloader	Bootloader	M
+Software	Software	M
+Hardware	Hardware	M
+Voltage Settings	Impost. tensione	M
+Current Settings	Impost. corrente	M
+Resistor Settings	Impost. resistenza	M
+Capacitance Settings	Impost. capacità	M
+Temperature Settings	Impost. temperatura	M
+Power Settings	Impost. potenza	M
+Power off	Spegni	M
+Power off?	Spegnere?	M
+Range	Portata	M
+Manual	Manuale	M
+Autorange	Portata auto	M
+Auto Hold	Hold auto	M
+Hold & Limits	Hold e limiti	M
+Limits	Limiti	M
+Lower	Inf.	M
+Upper	Sup.	M
+Lower limit	Limite inf.	M
+Upper limit	Limite sup.	M
+Clear limits	Azzera limiti	M
+Fail beep	Bip fuori limite	M
+Record	Registra	M
+Interval	Intervallo	M
+Change	Variazione	M
+Duration	Durata	M
+Free	Libero	M
+Every reading	Ogni lettura	M
+On change	Se varia	M
+Fast	Veloce	M
+Until stopped	Fino a stop	M
+Start recording	Avvia registraz.	M
+Stop recording	Ferma registraz.	M
+Stop the recording	Ferma registraz.	M
+Stop the recording first	Prima ferma regist.	M
+Recording	Registrazione	M
+Recording CSV	Registra CSV	M
+Saving ...	Salvataggio...	M
+Saving CSV...	Salvo CSV...	M
+Saved	Salvato	M
+Wave	Onda	M
+History	Storico	M
+Bargraph	Barra	M
+Zero	Zero	M
+Inrush	Spunto	M
+Inrush Current	Corrente di spunto	M
+Arm	Arma	M
+Wiring	Cablaggio	M
+Generator is off	Generatore spento	M
+Gallery	Galleria	M
+Gallery: screenshots and logs	Galleria: schermate e log	M
+No screenshots or logs	Nessuna schermata o log	M
+Delete screenshot?	Eliminare schermata?	M
+Delete this log?	Eliminare log?	M
+Delete failed	Eliminazione fallita	M
+Cannot delete	Impossibile eliminare	M
+Log	Log	M
+Log failed	Errore log	M
+No data	Nessun dato	M
+No disk	Nessun disco	M
+Disk full	Disco pieno	M
+Disk busy	Disco occupato	M
+Disk busy, try again	Disco occupato, riprova	M
+Disk read error	Errore lettura disco	M
+Read error	Errore lettura	M
+Empty file	File vuoto	M
+File not found	File non trovato	M
+Loading...	Caricamento...	M
+Try again	Riprova	M
+Again	Ancora	M
+Stopped	Fermato	M
+Discharging...	Scarica...	M
+Check leads	Controlla puntali	M
+Fuse check	Test fusibile	M
+Fuse OK	Fusibile OK	M
+Fuse open	Fusibile aperto	M
+Install it now?	Installare ora?	M
+Installing firmware...	Installo firmware...	M
+Touch calibration	Calibrazione tocco	M
+Calibrate	Calibra	M
+Top bar	Barra sup.	M
+Off (stock)	No (orig.)	M
+OFF (stock)	OFF (orig.)	M
+Halves (stock)	Metà (orig.)	M
+Corners	Angoli	M
+Auto (per view)	Auto (per vista)	M
+Both always	Sempre entrambi	M
+Files live	Sola lettura	M
+PC can edit	PC può scrivere	M
+Files live (replug)	Sola lett. (reinserire)	M
+PC can edit (replug)	Scrittura (reinserire)	M
+Loud	Forte	M
+Volume	Volume	M
+Measuring ...	Misura...	M
+Temp	Temp	M
+Cap	Cap	M
+Diode	Diodo	M
