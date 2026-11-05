@@ -909,6 +909,7 @@ impl App {
         self.dmm_view.label = self.t_label();
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
+        ui::set_btn_mem(self.dmm.sub_mem());
         // The power meter's AC+DC parts layout (doc 3.17): this page only.
         ui::set_pw_parts(self.view == View::Dmm && self.pw_parts_want());
         // The range pages' Record button: red while recording.
@@ -1147,6 +1148,7 @@ impl App {
         if self.band_until == 0 {
             self.pw_btn_glyph();
             ui::set_cpl_auto(self.dmm.cpl_auto());
+            ui::set_btn_mem(self.dmm.sub_mem());
             ui::func_band(self.dmm.button(), self.dmm.shown_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
         }
         self.band_until = now + BAND_MS;

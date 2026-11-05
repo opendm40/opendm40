@@ -1223,6 +1223,26 @@ pub mod submem {
     pub fn hz_temp(mem: u8) -> u8 {
         if mem & 0x20 != 0 { 15 } else { 14 }
     }
+    /// The coupling the V (`amp` false) or A button shows: `sub` while its
+    /// function is in force (`mode`; 255 = the power meter), else what a tap
+    /// opens (A from the power meter: always DC, `Dmm::press`).
+    pub fn btn_coupling(mem: u8, amp: bool, mode: u8, sub: u8) -> u8 {
+        match (amp, mode) {
+            (false, 0..=3) | (true, 4..=9) => sub,
+            (true, 255) => 0,
+            _ => coupling(mem, amp),
+        }
+    }
+    /// The continuity / diode button's first sub-icon: the mode in force,
+    /// else what a tap opens. 11 or 12.
+    pub fn btn_cont_diode(mem: u8, mode: u8) -> u8 {
+        if matches!(mode, 11 | 12) { mode } else { cont_diode(mem) }
+    }
+    /// The Hz / temperature button's first sub-icon, as `btn_cont_diode`. 14
+    /// or 15.
+    pub fn btn_hz_temp(mem: u8, mode: u8) -> u8 {
+        if matches!(mode, 14 | 15) { mode } else { hz_temp(mem) }
+    }
 }
 
 pub fn button_of(mode: u8) -> Button {
@@ -8191,6 +8211,31 @@ mod tests {
         // Back to diode / Hz / DC.
         let m = submem::note(submem::note(submem::note(m, 12, 0), 14, 0), 1, 0);
         assert_eq!((submem::coupling(m, false), submem::cont_diode(m), submem::hz_temp(m)), (0, 12, 14));
+    }
+
+    /// The function buttons' icons: the sub-mode in force, else what a tap
+    /// opens (`Dmm::press`).
+    #[test]
+    fn submem_button_icons() {
+        // Left V AC (1) and A AUTO (3) for ohm: the remembered ones.
+        let m = submem::note(submem::note(0, 0, 1), 8, 3);
+        assert_eq!((submem::btn_coupling(m, false, 10, 0), submem::btn_coupling(m, true, 10, 0)), (1, 3));
+        // AC+DC remembered.
+        let m2 = submem::note(0, 1, 2);
+        assert_eq!(submem::btn_coupling(m2, false, 13, 0), 2);
+        // In force: its sub-mode, whatever is noted.
+        assert_eq!(submem::btn_coupling(m, false, 1, 0), 0);
+        assert_eq!(submem::btn_coupling(m, true, 8, 2), 2);
+        // The other button keeps its memory while one is in force.
+        assert_eq!((submem::btn_coupling(m, true, 1, 0), submem::btn_coupling(m, false, 8, 3)), (3, 1));
+        // The power meter: V its memory, A DC (the A key enters DC A there).
+        assert_eq!((submem::btn_coupling(m, false, 255, 0), submem::btn_coupling(m, true, 255, 0)), (1, 0));
+        // Continuity / diode, Hz / temperature: the mode in force first,
+        // else the remembered one; new meter: diode, Hz.
+        let c = submem::note(submem::note(0, 11, 0), 15, 0);
+        assert_eq!((submem::btn_cont_diode(c, 1), submem::btn_hz_temp(c, 1)), (11, 15));
+        assert_eq!((submem::btn_cont_diode(c, 12), submem::btn_hz_temp(c, 14)), (12, 14));
+        assert_eq!((submem::btn_cont_diode(0, 1), submem::btn_hz_temp(0, 255)), (12, 14));
         assert!(m <= 0x3F);
     }
 
