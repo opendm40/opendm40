@@ -1787,7 +1787,7 @@ Windows 和 macOS：未测试。
 
 | 行 | 取值 | 默认 | 作用 |
 |---|---|---|---|
-| **Shutdown** | 10 min、30 min、1 hour、Never | 30 min | 使用电池时：这段时间没有输入后关机。有 USB 供电时永不关机。 |
+| **Shutdown** | 1、5、10、30 min，1 到 10 hours，Never | 30 min | 使用电池时：这段时间没有输入后关机。有 USB 供电时永不关机。 |
 | **Analog power** | Auto (per view)、Both always | Auto (per view) | [模拟电源](#模拟电源)。 |
 | **Mode Remember** | OFF、ON | OFF | ON：关机再开机后，万用表和示波器保持你离开时的状态（[保留什么](#关机后保留什么)）。 |
 
