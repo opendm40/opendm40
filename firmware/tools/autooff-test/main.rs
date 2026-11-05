@@ -53,17 +53,19 @@ fn setting_tests() {
     for c in 0..OFF_MS.len() {
         t("code round trip", off_code((c as u32) << 4) == c);
     }
-    // A tap walks all 15 once, shortest first, Never last, and wraps.
-    let mut c = 3;
-    let mut prev = 0;
-    for i in 0..OFF_MS.len() {
-        c = off_next(c);
-        if i < OFF_MS.len() - 1 {
-            t("rising order", OFF_MS[c] > prev);
-            prev = OFF_MS[c];
-        }
+    // "+" from the shortest walks all 15, rising, Never last; no wrap-around.
+    let mut c = 4;
+    t("1 min is the first", OFF_MS[c] == 60_000);
+    t("no step below the first", off_step(c, -1) == c);
+    for _ in 0..OFF_MS.len() - 2 {
+        let n = off_step(c, 1);
+        t("rising order", OFF_MS[n] > OFF_MS[c]);
+        t("- undoes +", off_step(n, -1) == c);
+        c = n;
     }
+    c = off_step(c, 1);
     t("Never last", c == 3);
+    t("no step above Never", off_step(c, 1) == 3);
     // The shortest choice: the warning (30 s before) has its whole time.
     let min = OFF_MS.iter().copied().filter(|&m| m != 0).min().unwrap_or(0);
     t("1 min is the shortest", min == 60_000);

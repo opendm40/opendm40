@@ -34,7 +34,7 @@ pub const OFF_TXT: [&str; 15] = [
 ];
 /// The default code (30 min).
 pub const OFF_DEFAULT: usize = 1;
-/// The row's order when tapped, shortest first.
+/// The row's order, shortest first: its -/+ keys walk it, no wrap-around.
 const OFF_ORDER: [u8; 15] = [4, 5, 0, 1, 2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 3];
 
 /// The code in p[0]; an unknown one (15) reads as the default.
@@ -43,10 +43,10 @@ pub fn off_code(p0: u32) -> usize {
     if c < OFF_MS.len() { c } else { OFF_DEFAULT }
 }
 
-/// The code after `code` when the row is tapped.
-pub fn off_next(code: usize) -> usize {
-    let i = OFF_ORDER.iter().position(|&c| c as usize == code).unwrap_or(0);
-    OFF_ORDER[(i + 1) % OFF_ORDER.len()] as usize
+/// The code `d` (-1, +1) steps from `code`.
+pub fn off_step(code: usize, d: i8) -> usize {
+    let i = OFF_ORDER.iter().position(|&c| c as usize == code).unwrap_or(0) as i32;
+    OFF_ORDER[(i + d as i32).clamp(0, OFF_ORDER.len() as i32 - 1) as usize] as usize
 }
 
 /// The warning before the shutdown (App::off_warn), ms.

@@ -927,8 +927,11 @@ fn hit_tests(ck: &mut Ck) {
     }
     // Backlight / volume steppers (ui-review #12): the "-" key (x 322..361)
     // steps down, the "+" key (426..465) up.
-    ck.t("settings stepper: '-' key steps down", ui::settings_step(340) == -1);
-    ck.t("settings stepper: '+' key steps up", ui::settings_step(430) == 1 && ui::settings_step(465) == 1);
+    ck.t("settings stepper: '-' key steps down", ui::settings_step(ui::S_VOLUME, 340) == -1);
+    ck.t("settings stepper: '+' key steps up", ui::settings_step(ui::S_VOLUME, 430) == 1 && ui::settings_step(ui::S_VOLUME, 465) == 1);
+    // Shutdown: the value box is wider, the "-" key at x 292..331.
+    ck.t("Shutdown stepper: '-' key", ui::settings_step(ui::S_SHUTDOWN, 292) == -1 && ui::settings_step(ui::S_SHUTDOWN, 331) == -1);
+    ck.t("Shutdown stepper: '+' key", ui::settings_step(ui::S_SHUTDOWN, 430) == 1 && ui::settings_step(ui::S_SHUTDOWN, 469) == 1);
     // Backlight walks the manual's grid both ways and stays on it at the ends (#91).
     let mut up = vec![55u8];
     for _ in 0..6 { up.push(ui::backlight_step(*up.last().unwrap(), 1)); }

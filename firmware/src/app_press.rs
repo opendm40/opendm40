@@ -76,7 +76,7 @@ impl App {
                 ui::SetHit::Tab(t) => r(0x80 | t as usize, 0),
                 ui::SetHit::Row(k) => {
                     let id = ui::settings_id(self.set_tab, k)?;
-                    r(k, if ui::set_is_stepper(id) { ui::settings_step(x) } else { 0 })
+                    r(k, if ui::set_is_stepper(id) { ui::settings_step(id, x) } else { 0 })
                 }
             },
             View::Limits => r(ui::list_hit(y, ui::LIMIT_ROWS.len())?, 0),
@@ -142,7 +142,7 @@ impl App {
                 let sub = if b == Button::Ohm { self.dmm.ohm_var() } else { self.dmm.sub() };
                 ui::range_press_rect(b, t.row, self.range_sel(), sub)
             }
-            v => ui::press_rect(v, t),
+            v => ui::press_rect(v, t, self.set_tab),
         };
         match r {
             Some(r) => draw_box(r, &mut || self.press_draw_direct(t)),

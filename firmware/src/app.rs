@@ -4134,15 +4134,15 @@ impl App {
                 };
                 match id {
                     ui::S_DIM => self.dim_idx = (self.dim_idx + 1) % 4,
-                    ui::S_SHUTDOWN => self.off_idx = crate::autooff::off_next(self.off_idx),
+                    ui::S_SHUTDOWN => self.off_idx = crate::autooff::off_step(self.off_idx, ui::settings_step(id, x)),
                     // -/+ steppers (ui-review #12): Backlight on the
                     // 10, 15 ... 95, 100 grid, volume 10 % steps, clamped.
                     ui::S_BACKLIGHT => {
-                        self.backlight = ui::backlight_step(self.backlight, ui::settings_step(x));
+                        self.backlight = ui::backlight_step(self.backlight, ui::settings_step(id, x));
                         backlight(self.backlight);
                     }
                     ui::S_VOLUME => {
-                        let d = ui::settings_step(x) as i16 * 10;
+                        let d = ui::settings_step(id, x) as i16 * 10;
                         self.volume = (self.volume as i16 + d).clamp(0, 100) as u8;
                     }
                     ui::S_BT => self.bt_on = !self.bt_on,
