@@ -596,13 +596,6 @@ pub fn finish_disk_writes(now: u64) {
 }
 
 impl App {
-    /// Before a reset (main.rs `reset_at`: DBG:RESET, DBG:UPDATE, an
-    /// install from the disk): backlight, generator output and scope
-    /// acquisition off, then 20 ms for the supply to settle. A reset releases
-    /// the power-hold pins (PE2 / PC4) until the ROM drives them again; a
-    /// DBG:UPDATE right after a scope Save CSV sometimes ended in a power
-    /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
-    /// loader never ran; why the load matters is inferred).
     /// Reset settings (Settings > Other): the confirm, unless a recording or
     /// a host's logger session runs (toast). In region B: the feature variants
     /// (acdc-meth, memprobe) have no room in C for it.
@@ -660,6 +653,17 @@ impl App {
         crate::persist::reset_record(&mut rec.words, crate::persist::word);
     }
 
+    /// Before a reset (main.rs `reset_at`: DBG:RESET, DBG:UPDATE, an
+    /// install from the disk; Reset settings): backlight, generator output
+    /// and scope acquisition off, the SPI flash idle, and the rails as on the
+    /// DMM page: PE2 on, PC4 off (`Scope::rails`), then 150 ms for the DMM
+    /// supply to come up. A reset releases the power-hold pins (PE2 / PC4)
+    /// until the ROM drives both high again. With PE2 off (the scope and
+    /// generator pages, SYST:RAIL AUTO) Reset settings lost the power in 5 of
+    /// 6 tries (device 2026-11-06, on USB: 4 restarts with POR, once the
+    /// meter stayed off; 1 SW), from the DMM page it restarted with SW.
+    /// That the DMM supply starting from off inside the reset is the cause
+    /// is inferred.
     #[inline(always)] // main.rs and the cold reset_answer
     pub fn quiesce_for_reset(&mut self, clk: &mut Clock) {
         backlight(0);
@@ -667,7 +671,9 @@ impl App {
         g.on = false;
         self.gen.apply(g);
         self.scope.stop_hw();
-        clk.delay_ms(20);
+        let _ = crate::spiflash::wait_idle(3000);
+        self.scope.rails(true, false, clk);
+        clk.delay_ms(150);
     }
 }
 

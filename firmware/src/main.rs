@@ -408,9 +408,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             app::finish_disk_writes(now); // never cut a FAT / dir write
             // Hand over quietly (DBG:UPDATE: the loader runs next; a reset
             // drops the power-hold pins until the ROM drives them again):
-            // the big loads off, the SPI flash idle.
+            // the big loads off, the SPI flash idle, the DMM rail on.
             app.quiesce_for_reset(&mut clk);
-            let _ = spiflash::wait_idle(3000);
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
