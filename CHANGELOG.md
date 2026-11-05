@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** the probe factor is kept after a power-off also with Mode Remember OFF.
 ## v0.4.0 (2026-11-02)
 
 ### New
