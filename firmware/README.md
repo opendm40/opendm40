@@ -10,6 +10,7 @@ in the [documentation index](../docs/README.md). Paths below are relative to
 ```
 ./build.sh                    # -> opendm40.bin + dm40_opendm40_v<version>.bin
 tools/build-langs.sh          # -> dm40_opendm40_v<version>-{zh,ru,it,fr}.bin (i18n/README.md)
+tools/ui-render/manual-lang.sh ru   # -> ../docs/manual/img/ru/ (also zh); tools/manual-labels.py names the labels
 tools/reload.sh               # build, upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
 tools/scpi-doc-check/run.sh   # SCPI parser vs docs/manual/scpi-reference.md
