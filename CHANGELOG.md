@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- Power meter from the combined view: the wiring notice returns to the combined view, not the multimeter page.
+
 ## v0.4.0 (2026-11-02)
 
 ### New

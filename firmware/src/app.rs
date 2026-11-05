@@ -1243,11 +1243,9 @@ impl App {
             // AC+DC). Else the wiring dialog until it was confirmed once (owner: no
             // nagging; MF > Power Settings > Wiring shows it again).
             if !self.dmm.pw.on && !self.dmm.pw.wired {
-                // From the combined view's band too: the dialog over the
-                // DMM page (Cancel leaves the DMM page shown).
-                if self.view != View::Dmm {
-                    self.show(View::Dmm, clk);
-                }
+                // On the DMM page or over the combined view (its band): the
+                // page stays below the dialog (no page draws while it is up,
+                // `tick`), and closing it repaints the page.
                 self.pw_open_entry(clk.now_ms());
                 return;
             }
