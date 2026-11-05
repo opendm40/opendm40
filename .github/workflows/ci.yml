@@ -148,7 +148,7 @@ jobs:
         run: python3 firmware/tools/linkcheck.py .
       - name: SCPI reference vs parser (tools/scpi-doc-check)
         run: firmware/tools/scpi-doc-check/run.sh
-      - name: English and Russian docs in step (tools/doc-lang-check.sh)
+      - name: English, Russian and Chinese docs in step (tools/doc-lang-check.sh)
         env:
           # Through env, not inline: the PR description is untrusted text.
           PR_BODY: ${{ github.event.pull_request.body }}

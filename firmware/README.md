@@ -14,7 +14,7 @@ tools/reload.sh               # build, upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
 tools/scpi-doc-check/run.sh   # SCPI parser vs docs/manual/scpi-reference.md
 tools/linkcheck.py ..         # every relative link and #anchor in the *.md files
-tools/doc-lang-check.sh origin/main  # English and Russian README/manual in step
+tools/doc-lang-check.sh origin/main  # English, Russian and Chinese README/manual in step
 ../emu/run.py fwrs --run-for 4 --shot out.png   # run opendm40 in the emulator
 ```
 
@@ -175,7 +175,7 @@ and pull request to `main`; a push that changes only documentation (Markdown, `d
 |---|---|
 | Build | `build.sh --locked` (stack, region and update-file checks fail it), [`tools/build-variants`](tools/build-variants/run.sh); the image and `SHA256SUMS` as a workflow artifact |
 | Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): the host suites listed in the script, `JOBS` at a time (default: the CPU count; each suite's log printed whole after all finish); `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
-| Doc checks | [`tools/linkcheck.py`](tools/linkcheck.py), [`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh), [`tools/doc-lang-check.sh`](tools/doc-lang-check.sh) (the English and Russian README and manual: same headings and images; on a pull request both languages changed, see [AGENTS.md](../AGENTS.md)) |
+| Doc checks | [`tools/linkcheck.py`](tools/linkcheck.py), [`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh), [`tools/doc-lang-check.sh`](tools/doc-lang-check.sh) (the English, Russian and Chinese README and manual: same headings, tables, lists, images, links and code; on a pull request all languages changed, see [AGENTS.md](../AGENTS.md)) |
 | Version | [`tools/version-check.sh`](tools/version-check.sh): fails when the firmware changed since the last `v*` tag but the version did not; on a pull request [`tools/pr-version-check.sh`](tools/pr-version-check.sh) also fails when the PR changes the firmware without raising the version above `main`'s |
 
 The emulator tests ([emu/README.md](../emu/README.md)) are not in CI: they
