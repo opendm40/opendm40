@@ -274,6 +274,9 @@ SECTIONS
          * 1000;...'), so they stay in B. */
         *(.text.*8opendm407new_app*);
         *(.text.*8opendm403app*3App11fuse_dialog*);
+        /* The low-battery messages (once per level; never during a stream). */
+        *(.text.*8opendm403app*3App11low_battery*);
+        *(.text.*8opendm403app*3App15low_battery_off*);
         *(.text.*8opendm403app*3App11limits_page*);
         *(.text.*8opendm403app*3App7kp_open*);
         *(.text.*8opendm403app9app_power*3App13pw_open_entry*);

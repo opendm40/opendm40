@@ -11,7 +11,7 @@ fn save1(out: &str, name: &str) {
 
 /// An ordinary status bar: 00:12:34 since power-on, no REC, no BT host.
 fn status_real() -> ui::Status {
-    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, rec_dim: false, page: 0 }
+    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, bat_low: false, locked: false, rec: false, csv: false, rec_dim: false, page: 0 }
 }
 
 const DMM_REGIONS: [(&str, Bx); 7] = [

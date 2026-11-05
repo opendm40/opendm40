@@ -554,6 +554,7 @@ impl App {
             ycur: if self.cur.y_on { Some([self.cur.y[0] as i16, self.cur.y[1] as i16]) } else { None },
             battery: self.power.shown_bars(now / 1000 & 1 == 1),
             charging: self.power.on_charger(),
+            bat_low: self.power.low.low(),
             usb: self.usb_host,
             bt: self.bt_on && self.power.bt_connected(),
             roll: self.scope.rolling(),

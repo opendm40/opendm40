@@ -107,6 +107,8 @@ pub struct Power {
     pub vbat: f32,
     pub bars: u8,
     level: crate::battlevel::Level,
+    /// The low-battery warning's state (lowbat.rs).
+    pub low: crate::lowbat::LowBat,
     /// MCU die temperature, C (NaN until the first read).
     pub mcu_t: f32,
 }
@@ -141,7 +143,7 @@ impl Power {
             w32(ADC0 + 0x08, 1); // ADON
         }
         pins_init();
-        Power { next: 0, vbat: 4.2, bars: 5, level: crate::battlevel::Level::new(), mcu_t: f32::NAN }
+        Power { next: 0, vbat: 4.2, bars: 5, level: crate::battlevel::Level::new(), low: crate::lowbat::LowBat::new(), mcu_t: f32::NAN }
     }
 
     pub fn poll(&mut self, now: u64) -> bool {
@@ -163,6 +165,8 @@ impl Power {
         let v = convert(16) as f32 * 3.0 / 4096.0;
         unsafe { w32(ADC0 + 0x34, 15) };
         self.mcu_t = (TS_V25 - v) / TS_SLOPE + 25.0;
+        let pct = (self.vbat - 3.3) / 0.9 * 100.0;
+        self.low.feed(pct, crate::autooff::usb_power(self.pins(), USB_CONF.load(core::sync::atomic::Ordering::Relaxed)));
         self.level.feed(self.vbat, p);
         let changed = self.level.bars != self.bars;
         self.bars = self.level.bars;
