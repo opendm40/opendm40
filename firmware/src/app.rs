@@ -1034,10 +1034,6 @@ impl App {
                 vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { "ON" } else { "OFF" };
                 vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" };
                 vals[ui::S_REMEMBER as usize] = if self.mode_remember { "ON" } else { "OFF" };
-                #[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
-                {
-                    vals[ui::S_LANG as usize] = if crate::stockfont::lang::on() { crate::stockfont::lang::NAME } else { "English" };
-                }
                 ui::settings(self.set_tab, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
@@ -2222,9 +2218,9 @@ impl App {
             | (self.start_page as u32) << 8
             | (self.bt_on as u32) << 12
             | (crate::scpi::idn_emul() as u32 & 1) << 14
-            | (self.dmm.sub_mem() as u32) << 16
-            | (crate::stockfont::lang::on() as u32) << 22;
-        // Bit 22: the second UI language (a localized image; 0 = English, every older record).
+            | (self.dmm.sub_mem() as u32) << 16;
+        // Bit 22: reserved (was the UI language switch of the 0.5.0 development
+        // builds; a localized image now shows only its language).
         // (p[0] bit 13 was the old "both rails" flag, default 1: retired so
         // units upgraded from it start in the new Auto default.) Bit 14: SCPI
         // *IDN? emulation (SYST:IDN:EMUL 34401A; never used before, 0 = OFF).
@@ -2362,7 +2358,6 @@ impl App {
         self.off_idx = (p[0] >> 4 & 3) as usize;
         self.start_page = (p[0] >> 8 & 3) as usize;
         self.bt_on = p[0] >> 12 & 1 != 0;
-        crate::stockfont::lang::set(p[0] >> 22 & 1 != 0);
         crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
@@ -4237,13 +4232,6 @@ impl App {
                     ui::S_REMEMBER => {
                         // Mode Remember: applies at the next power-on.
                         self.mode_remember = !self.mode_remember;
-                    }
-                    #[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
-                    ui::S_LANG => {
-                        // Every text changes: the whole page.
-                        crate::stockfont::lang::set(!crate::stockfont::lang::on());
-                        self.redraw = true;
-                        return;
                     }
                     _ => return,
                 }
