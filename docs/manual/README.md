@@ -483,7 +483,8 @@ sub-mode:
 
 A function always starts in autorange. Each button returns to the sub-mode
 it was last in, also after a power-off (new meter: DC, diode, frequency,
-0.90 mA); SCPI `CONF` sets it too. The coupling can
+0.90 mA), and its icon shows that sub-mode (of two, it comes first); SCPI
+`CONF` sets it too. The coupling can
 also be chosen on the [range page](#ranges-the-range-page-mf).
 
 Right after a change, the new unit appears at once and the value shows grey

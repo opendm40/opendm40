@@ -3876,6 +3876,24 @@ fn main() {
         }
     }
 
+    // Function buttons with remembered sub-modes (dmm::submem), another
+    // function in force: the page and the combined view's band.
+    for (tag, mem) in [("ac-cont-temp", 0x35u8), ("acdc", 0x0A), ("auto", 0x0F)] {
+        let (r, l) = find("ohm_k");
+        ui::set_btn_mem(mem);
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.draw_static(Button::Ohm, r.mode, false, false);
+        dv.bar_update(&r);
+        dv.reading(&r, 0, 0);
+        ck.check(&format!("btn-mem/{tag}"), &dmm_page_regions);
+        save(&out, &format!("d30-btn-mem-{tag}"));
+        combined(&r, l, 0, 0, false, false, true, "");
+        let area = Bx::new(0, ui::FUNC_Y as i32, 480, 301 - ui::FUNC_Y as i32);
+        ck.check_area(&format!("btn-mem/{tag}/band"), &[("band", area)], true, Some(area));
+        save(&out, &format!("d31-btn-mem-band-{tag}"));
+    }
+    ui::set_btn_mem(0);
     // Beeper indicator (continuity / diode, App::beep_ind): every style
     // (bit 0 the SHORT / BEEP band, bit 1 the digits green) x SHORT / BEEP
     // x bargraph / history row x limit badge, layout checked; on -> off

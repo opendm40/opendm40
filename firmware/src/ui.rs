@@ -3,7 +3,7 @@
 //! stock orange. No framebuffer: every element is drawn as complete cells /
 //! columns so redraws do not flicker.
 
-use crate::dmm::{Button, Reading};
+use crate::dmm::{submem, Button, Reading};
 use crate::gen;
 use crate::lcd::{self, Color};
 use crate::meter;
@@ -482,6 +482,15 @@ pub fn set_cpl_auto(on: bool) {
     CPL_AUTO.store(on, core::sync::atomic::Ordering::Relaxed);
 }
 
+/// The buttons' last sub-modes (`dmm::submem`), for the next button draw: the
+/// icons of the functions not in force show what a tap opens.
+static BTN_MEM: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+/// `Dmm::sub_mem` for the next button draw.
+pub fn set_btn_mem(mem: u8) {
+    BTN_MEM.store(mem, core::sync::atomic::Ordering::Relaxed);
+}
+
 /// The V / A button in the AUTO coupling: the letter and our "AC/DC" mark
 /// (BTN_GLYPH 0x09, stockfont_w.rs from tools/mkwglyph.py: the stock AC and
 /// DC button glyphs scaled down, side by side with a slash), distinct from
@@ -520,14 +529,22 @@ fn btn_pair(x: i16, y: i16, h: i16, c: Color, a: (sf::Font, &str, i16), b: (sf::
 fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, mode: u8, acdc: bool, ohm_on: bool) {
     let c = if selected { SEL } else { BTN };
     sf::rbox(rect(x, y, BTN_W, h), 8, c, outside);
-    let ac = matches!(mode, 0 | 2 | 4..=6);
-    let sub = if acdc { "\u{6}" } else if ac { "\u{5}" } else { "\u{4}" };
-    let auto = CPL_AUTO.load(core::sync::atomic::Ordering::Relaxed);
+    let mem = BTN_MEM.load(core::sync::atomic::Ordering::Relaxed);
+    let sub = if CPL_AUTO.load(core::sync::atomic::Ordering::Relaxed) {
+        3
+    } else if acdc {
+        2
+    } else {
+        matches!(mode, 0 | 2 | 4..=6) as u8
+    };
     match i {
-        0 if auto && mode <= 3 => auto_pair(x, y, h, c, "V"),
-        1 if auto && (4..=9).contains(&mode) => auto_pair(x, y, h, c, "A"),
-        0 => btn_pair(x, y, h, c, (sf::LETTERS, "V", 0), (sf::BTN_GLYPH, if mode <= 3 { sub } else { "\u{4}" }, 0), 3),
-        1 => btn_pair(x, y, h, c, (sf::LETTERS, "A", 0), (sf::BTN_GLYPH, if (4..=9).contains(&mode) { sub } else { "\u{4}" }, 0), 3),
+        0 | 1 => {
+            let (amp, l) = (i == 1, if i == 1 { "A" } else { "V" });
+            match submem::btn_coupling(mem, amp, mode, sub) {
+                3 => auto_pair(x, y, h, c, l),
+                k => btn_pair(x, y, h, c, (sf::LETTERS, l, 0), (sf::BTN_GLYPH, ["\u{4}", "\u{5}", "\u{6}"][k as usize], 0), 3),
+            }
+        }
         2 => {
             if ohm_on {
                 let w = sf::text_width(sf::BTN_GLYPH, "\u{3a9}", 0);
@@ -539,8 +556,17 @@ fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, 
             }
         }
         3 => sf::glyphs(sf::BTN_GLYPH, rect(x, y, BTN_W, h), "\u{11}", STATUS_FG, c, 8, 0),
-        4 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{8}", -1), (sf::BTN_GLYPH, "\u{7}", 0), 3),
-        5 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{10}", -2), (sf::BTN_GLYPH, "\u{2103}", 0), 3),
+        // The sub-mode in force or a tap's first (`submem`).
+        4 => {
+            let (d, k) = ((sf::BTN_GLYPH, "\u{8}", -1), (sf::BTN_GLYPH, "\u{7}", 0));
+            let (a, b) = if submem::btn_cont_diode(mem, mode) == 11 { (k, d) } else { (d, k) };
+            btn_pair(x, y, h, c, a, b, 3)
+        }
+        5 => {
+            let (f, t) = ((sf::BTN_GLYPH, "\u{10}", -2), (sf::BTN_GLYPH, "\u{2103}", 0));
+            let (a, b) = if submem::btn_hz_temp(mem, mode) == 15 { (t, f) } else { (f, t) };
+            btn_pair(x, y, h, c, a, b, 3)
+        }
         _ => {
             let g = pw_glyph(POWER_COUP.load(core::sync::atomic::Ordering::Relaxed));
             btn_pair(x, y, h, c, (sf::LETTERS, "W", 0), (sf::BTN_GLYPH, g, 0), 3)
