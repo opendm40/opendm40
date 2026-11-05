@@ -18,6 +18,7 @@ section named after the tag as the release notes; how to cut a release:
   emulator only.
 
 - **Multimeter:** the reading with the extra digit sits 4 px further right.
+- **Scope:** the trigger badge takes the new source's colour at once.
 ## v0.4.0 (2026-11-02)
 
 ### New

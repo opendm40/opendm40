@@ -704,6 +704,19 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         }
         scope_ui::update(&m);
         ck.same_as(&format!("gen/{}/update", combined as u8), &want);
+        // The source changed, the level not: the trigger badge in the new
+        // source's colour (GEN's) and back.
+        let badge_px = || (1..18usize).flat_map(|y| (352..414usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::C_GEN_TR).count();
+        let mut m1 = m;
+        m1.tsrc = scope::TSRC_CH1;
+        scope_ui::update(&m1);
+        let ch1 = badge_px();
+        scope_ui::update(&m);
+        let gen = badge_px();
+        ck.cases += 1;
+        if !(ch1 == 0 && gen > 20) {
+            ck.fail("gen/badge-source", format!("trigger badge GEN colour: {ch1} px on CH1, {gen} px on GEN"));
+        }
         for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
             draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
             let add = if tab == 1 {
