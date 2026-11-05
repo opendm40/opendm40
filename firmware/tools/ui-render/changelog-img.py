@@ -42,7 +42,10 @@ def m2(name):
 
 
 def save(im, name):
-    q = im.quantize(colors=256, method=Image.Quantize.LIBIMAGEQUANT, dither=Image.Dither.NONE)
+    try:
+        q = im.quantize(colors=256, method=Image.Quantize.LIBIMAGEQUANT, dither=Image.Dither.NONE)
+    except ValueError:  # a PIL without libimagequant
+        q = im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     q.save(os.path.join(DST, name + '.png'), optimize=True)
     print(name)
 
