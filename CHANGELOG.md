@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
 ## v0.4.0 (2026-11-02)
 
 ### New
