@@ -1,7 +1,11 @@
 #!/bin/sh
 # Build opendm40: the native update file -> opendm40.bin, and the same file
 # under its install name dm40_opendm40_v<version>.bin.
-#   ./build.sh [native] [cargo args]       e.g. ./build.sh --features keep-screen
+#   ./build.sh [native] [--dev] [cargo args]   e.g. ./build.sh --features keep-screen
+# The default is the release image. --dev (or DM40_DEV=1 in the environment)
+# builds the developer image: Cargo feature dbg-dev, the developer DBG:
+# commands the emulator tests and device checks use (Cargo.toml); its
+# install copy is dm40_opendm40_v<version>-dev.bin.
 # (`native` is accepted as a no-op first argument for older callers, e.g.
 # emu/run.py.) Body = 0x08004000..end with the 12-byte loader marker at
 # 0x08008000 as 0xFF, linked with link-native.x, packed by
@@ -34,6 +38,13 @@ export DM40_LLVMBIN="$LLVMBIN"
     { echo "build.sh: no core sources in $(rustc --print sysroot) (rustup component add rust-src)" >&2; exit 1; }
 
 if [ "$1" = native ]; then shift; fi
+case ${DM40_DEV:-0} in 0|'') DEV=0 ;; *) DEV=1 ;; esac
+n=$#
+while [ $n -gt 0 ]; do
+    a=$1; shift; n=$((n - 1))
+    if [ "$a" = --dev ]; then DEV=1; else set -- "$@" "$a"; fi
+done
+if [ $DEV = 1 ]; then set -- "$@" --features dbg-dev; fi
 SCRIPT=link-native.x; TDIR=${DM40_TDIR:-target/native}; OUT=${DM40_OUT:-opendm40.bin}
 mkdir -p "$TDIR"
 # Reproducible image (review L10): the same commit gives the same bytes in
@@ -204,6 +215,7 @@ if 'ad2_stream_irq' in syms:
     print("  AD2 stream ISR   = %d functions, no extra-RAM address" % len(seen))
 PY
 python3 ../stock/dm40fw.py info "$OUT"
+if [ $DEV = 1 ]; then echo "image: developer (dbg-dev)"; else echo "image: release (no developer DBG: commands; --dev builds them)"; fi
 # The FS-loader mis-decodes a short last 128-byte block whose key position is
 # outside it (docs/native-boot.md "Update file format"); dm40fw.py pack --pad pads
 # the body so the file is whole blocks. Fail the build if it is not.
@@ -225,6 +237,7 @@ fi
 # Not for DM40_OUT builds.
 if [ -z "${DM40_OUT:-}" ]; then
     VER=$(tools/fw-version.sh)
+    if [ $DEV = 1 ]; then VER=$VER-dev; fi
     cp "$OUT" "dm40_opendm40_v$VER.bin"
     echo "install file: dm40_opendm40_v$VER.bin"
 fi
