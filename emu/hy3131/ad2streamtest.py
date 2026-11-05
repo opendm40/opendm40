@@ -3,7 +3,7 @@
 the emulator: TIMER6 (TIM7, GD32_Timer in dm40.repl) -> IRQ 55 -> the ISR's
 SPI2 reads through HY3131SpiPort; SCPI over USB/IP on one connection.
 
-  cd firmware && ./build.sh --features ad2-isr
+  cd firmware && ./build.sh --dev --features ad2-isr
   emu/hy3131/ad2streamtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Checks (AC V, 0.5 V 50 Hz on V/COM; 200 MIPS = the device's instruction

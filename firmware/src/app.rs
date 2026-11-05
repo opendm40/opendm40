@@ -98,6 +98,9 @@ const BUZZER_ARR_LO: u32 = 14000;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
+/// DMM page trend chart: two taps on the plot within this time are a double
+/// tap (bargraph <-> history row).
+const CHART_DOUBLE_MS: u64 = 400;
 /// The beeper indicator stays this long after the beeper's condition last
 /// held (`App::beep_ind`): its shortest on-time, and a contact that
 /// chatters faster reads as one indication.
@@ -390,6 +393,9 @@ pub struct App {
     chart: [f32; ui::CHART_W as usize],
     chart_n: usize,
     chart_rate: u8,
+    /// The time of the last tap on the trend chart's plot, for a double tap
+    /// (`CHART_DOUBLE_MS`); 0 = none.
+    chart_tap: u64,
     chart_next: u64,
     chart_unit: &'static str,
     chart_dec: u8,
@@ -748,6 +754,7 @@ impl App {
             chart: [0.0; ui::CHART_W as usize],
             chart_n: 0,
             chart_rate: ui::TREND_DEFAULT,
+            chart_tap: 0,
             chart_next: 0,
             chart_unit: "",
             chart_dec: 0,
@@ -3948,6 +3955,20 @@ impl App {
                     self.chart_rate = ui::trend_next(self.chart_rate);
                     self.chart_n = 0;
                     self.chart_dirty = true;
+                } else if x < ui::CHART_X + ui::CHART_W && ui::chart_rows().contains(&y) {
+                    // The plot (a single tap does nothing there): a double
+                    // tap switches the bargraph <-> the history row, as
+                    // Settings > Display > DMM row (not with the power
+                    // meter, which has its own row).
+                    if self.chart_tap != 0 && now.saturating_sub(self.chart_tap) <= CHART_DOUBLE_MS {
+                        self.chart_tap = 0;
+                        if !self.dmm.pw.on {
+                            self.dmm_view.bar_on = !self.dmm_view.bar_on;
+                            self.redraw = true;
+                        }
+                    } else {
+                        self.chart_tap = now.max(1);
+                    }
                 } else if let Some(i) = ui::button_hit(x, y) {
                     self.press_func(clk, i);
                 }
@@ -4707,6 +4728,7 @@ impl App {
     /// channels' tuning replies): region C (link-native.x), out of
     /// `scpi_dmm`'s frame.
     #[inline(never)]
+    #[cfg(feature = "dbg-dev")]
     fn dbg_gen(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
         match cmd {
@@ -4996,14 +5018,17 @@ impl App {
                 out.put_bytes(if self.meter.smoothing() == Smooth::High { b"SLOW" } else { b"FAST" });
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(Some(m)) => {
                 scope_page::set_pinch_mode(m);
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(None) => {
                 crate::put_u32(out, scope_page::pinch_mode() as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgReadout => {
                 // Emulator tests (ohmhunt, autowaittest, switchtest): what
                 // the DMM readout draws now, whatever the view.
@@ -5051,6 +5076,7 @@ impl App {
                 crate::put_u32(out, self.chart_rate as u32 * 160);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgGest => {
                 // n;target,axis,delta,ms;... oldest first.
                 crate::put_u32(out, self.gest_n as u32);
@@ -5119,10 +5145,12 @@ impl App {
                 out.put_u32(self.dmm.alert_mask() as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(Some(v)) => {
                 self.dmm.set_sent_variant(clk, v);
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(None) => {
                 out.put_u32(crate::sentinel::variant() as u32);
                 true
@@ -5145,6 +5173,7 @@ impl App {
                 out.put_u32(self.volume as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgAlarm => {
                 let a = &self.alarm;
                 for (i, v) in [a.sounding() as u32, a.silenced() as u32, a.events, self.alarm_mode as u32].into_iter().enumerate() {
@@ -5177,15 +5206,19 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(Some(ms)) => {
                 self.dmm.precond_ms = ms;
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(None) => {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             c @ (C::DbgGenLag(_) | C::DbgGenStat | C::DbgCh2Lag(_)) => self.dbg_gen(c, out),
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);
@@ -5535,6 +5568,7 @@ impl App {
             }
             // Comparator trigger (hwtrig.rs, ../docs/history/hwtrig-integration.md H8);
             // a scope command: the scope rail is on for it (calibration).
+            #[cfg(feature = "dbg-dev")]
             C::DbgHwTrig(op, on) => {
                 let hw = &mut self.scope.hw;
                 let put_i = |out: &mut crate::scpi::Scpi, v: i64| {
