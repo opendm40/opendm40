@@ -630,26 +630,6 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           run the temperature row for <ms> (<= 2000, blocking)
 ///                           first (device 40728b8: 24 V on V-COM was seen in DC
 ///                           A only after TEMP; d2aff22: 100 ms is enough)
-///   DBG:ACDC:METH A|B|C / ? AC+DC method (acdcm.rs; RAM only, default A =
-///                           the stock alternation; a change restarts AC+DC).
-///                           METH / STAT / ZERO / R0: feature acdc-meth, else
-///                           undefined header
-///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
-///                           c_per_code,c_offset,lpf_codes,sqrt_rms_codes,
-///                           pk_pp_codes,ac_src,gain_span_codes,gain_src,
-///                           gain_dis_codes,lpf_slope (step 0 the stock DC
-///                           row, 1 meas, 2 run, 3 C V's zero; C V: the
-///                           anchor's per_code / offset, AD2's peak p-p, the
-///                           AC part from 0 the RMS / 1 the peak bound / 2
-///                           none, the gain's span, 0 = the table's; its
-///                           source 0 table / 1 internal zero / 2 two refs /
-///                           3 two refs over a biased zero; the last two-ref
-///                           gain vs the one in use over its span, codes; the
-///                           steady window's LPF slope, codes / s)
-///   DBG:ACDC:ZERO k,v|AUTO / ?  fix slot k's correction (0..3 V ranges, 4..9 A
-///                           unit*2+range; B zero, C A offset) / measure again;
-///                           ? = valid,fixed;c0..c9
-///   DBG:ACDC:R0 1|2 / ?     B 6 V: (i) AD1 SENSE - PB5 / (ii) OP1O - RLU
 ///   DBG:ACDC:TRACE 0|1|2    AC+DC event trace (acdctr.rs; feature acdc-trace, else
 ///                           undefined header): off / on / on with
 ///                           the row read back per DC conversion; re-arms
@@ -1076,10 +1056,9 @@ pub enum Cmd {
     DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
-    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs; feature `acdc-meth`): op 0 METH <m>, 1 METH?,
-    /// 2 STAT?, 3 ZERO <slot>,<v> (NaN: measure again), 4 ZERO?, 5 R0 <1|2>,
-    /// 6 R0?, 7 RANG <item> (255 = AUTO+), 8 TRACE? <from>, 9 TRACE <0|1|2>.
-    DbgAm(u8, u8, f32),
+    /// DBG:ACDC:RANG / TRACE: op 7 RANG <item> (255 = AUTO+), 8 TRACE? <from>,
+    /// 9 TRACE <0|1|2> (ops 0..6 were the removed AC+DC methods B / C).
+    DbgAm(u8, u8),
     /// SYSTem:ALERt?: the wrong-connection alert in force (sentinel.rs).
     SysAlert,
     /// STATus:QUEStionable:CONDition? (sentinel::ques_bits of the alert).
@@ -2418,8 +2397,9 @@ impl Scpi {
                 // Without the feature `acdc-trace`: no such header (Cargo.toml).
                 #[cfg(not(feature = "acdc-trace"))]
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && parts[2] == b"TRACE" => self.err_arg(no_arg, "Undefined header"),
-                // Without the feature `acdc-meth`: no method headers (Cargo.toml).
-                #[cfg(not(feature = "acdc-meth"))]
+                // DBG:ACDC:METH / STAT / ZERO / R0 (the AC+DC prototype methods
+                // B / C, removed; firmware/docs/acdc-approaches.md section 10):
+                // undefined header.
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && matches!(&parts[2][..], b"METH" | b"STAT" | b"ZERO" | b"R0") => {
                     self.err_arg(no_arg, "Undefined header")
                 }
@@ -2427,44 +2407,17 @@ impl Scpi {
                     let a = trim(arg);
                     let mut it = a.split(|&c| c == b',');
                     let a0 = trim(it.next().unwrap_or(&[]));
-                    #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
-                    let a1 = it.next().map(trim);
                     let c = match (&parts[2][..], query) {
-                        #[cfg(feature = "acdc-meth")]
-                        (b"METH", true) => Some(Cmd::DbgAm(1, 0, 0.0)),
-                        #[cfg(feature = "acdc-meth")]
-                        (b"METH", false) => match a0 {
-                            b"A" | b"B" | b"C" => Some(Cmd::DbgAm(0, a0[0] - b'A', 0.0)),
-                            _ => None,
-                        },
-                        #[cfg(feature = "acdc-meth")]
-                        (b"STAT", true) => Some(Cmd::DbgAm(2, 0, 0.0)),
-                        #[cfg(feature = "acdc-meth")]
-                        (b"ZERO", true) => Some(Cmd::DbgAm(4, 0, 0.0)),
-                        #[cfg(feature = "acdc-meth")]
-                        (b"ZERO", false) => match (parse_num(a0), a1) {
-                            (Some(k), Some(v)) if (0.0..10.0).contains(&k) => {
-                                Some(Cmd::DbgAm(3, k as u8, if kw(v, "AUTO") { f32::NAN } else { parse_num(v).unwrap_or(f32::NAN) }))
-                            }
-                            _ => None,
-                        },
                         (b"RANG", false) => match parse_num(a0) {
-                            _ if kw(a0, "AUTO") => Some(Cmd::DbgAm(7, 255, 0.0)),
-                            Some(v) if (0.0..=5.0).contains(&v) => Some(Cmd::DbgAm(7, v as u8, 0.0)),
+                            _ if kw(a0, "AUTO") => Some(Cmd::DbgAm(7, 255)),
+                            Some(v) if (0.0..=5.0).contains(&v) => Some(Cmd::DbgAm(7, v as u8)),
                             _ => None,
                         },
                         #[cfg(feature = "acdc-trace")]
-                        (b"TRACE", true) => Some(Cmd::DbgAm(8, parse_num(a0).unwrap_or(0.0).clamp(0.0, 255.0) as u8, 0.0)),
+                        (b"TRACE", true) => Some(Cmd::DbgAm(8, parse_num(a0).unwrap_or(0.0).clamp(0.0, 255.0) as u8)),
                         #[cfg(feature = "acdc-trace")]
                         (b"TRACE", false) => match parse_num(a0) {
-                            Some(v) if (0.0..=2.0).contains(&v) => Some(Cmd::DbgAm(9, v as u8, 0.0)),
-                            _ => None,
-                        },
-                        #[cfg(feature = "acdc-meth")]
-                        (b"R0", true) => Some(Cmd::DbgAm(6, 0, 0.0)),
-                        #[cfg(feature = "acdc-meth")]
-                        (b"R0", false) => match a0 {
-                            b"1" | b"2" => Some(Cmd::DbgAm(5, a0[0] - b'0', 0.0)),
+                            Some(v) if (0.0..=2.0).contains(&v) => Some(Cmd::DbgAm(9, v as u8)),
                             _ => None,
                         },
                         _ => None,
