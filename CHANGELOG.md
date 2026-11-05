@@ -16,6 +16,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Scope: long DMM units** ("mWh") on the strip in the panel's
+  16 px font; the 20 px font is gone (2.3 KB of flash).
+
+### Changed
+
 - **Release images without the developer `DBG:` commands** (`DBG:IDLE`,
   `DBG:READout?`, `DBG:FLASH?`, `DBG:CAP...`, `DBG:VDISK...` and more,
   [list](docs/manual/scpi-reference.md#developer-image-only)): they answer
