@@ -3070,6 +3070,9 @@ pub struct PopVals {
     /// first start).
     pub ch2_on: bool,
     pub ch2_vdiv: Txt,
+    /// The multimeter's function as CH2's unit: 0 V, 1 A, 2 another one
+    /// (neither shown selected).
+    pub ch2_func: u8,
 }
 
 /// Which popup is open (tab).
@@ -3294,6 +3297,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_c(rect(14, 211, 399, 49), pc, C_POP_BG);
             fill_text(C2_LABEL, pc, C_POP_BG, sf::SC_F16, C2_LABEL, "CH2 (DMM):", C_FILL, 1, 0);
             option_list(C2_LIST, pc, &["On", "Off"], 44, if v.ch2_on { 0 } else { 1 });
+            option_list(C2_UNIT, pc, &["V", "A"], 44, v.ch2_func as usize);
             if v.ch2_on {
                 rbox_text(C2_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
                 rbox_text(C2_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
@@ -3365,6 +3369,9 @@ pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
 pub const C2_LABEL: Rect = rect(24, 213, 180, 20);
 pub const C2_LIST: Rect = rect(24, 233, 88, 24);
+/// MF > Display: CH2's unit V / A (the multimeter's function), right of
+/// its On / Off.
+pub const C2_UNIT: Rect = rect(120, 233, 88, 24);
 pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
 pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
 pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
@@ -3419,6 +3426,8 @@ pub enum MfHit {
     /// The DMM CH2 on, its V/div step (true = up).
     Ch2(bool),
     Ch2Step(bool),
+    /// MF > Display: CH2's unit, true = A (the multimeter follows).
+    Ch2Func(bool),
     PriScr,
     SaveCsv,
     /// The Decode tab's page.
@@ -3471,6 +3480,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::GenTrace(i == 0)
             } else if let Some(i) = option_hit(C2_LIST, 2, 44, x, y) {
                 MfHit::Ch2(i == 0)
+            } else if let Some(i) = option_hit(C2_UNIT, 2, 44, x, y) {
+                MfHit::Ch2Func(i == 1)
             } else if v.ch2_on && near(C2_MINUS) {
                 MfHit::Ch2Step(false)
             } else if v.ch2_on && near(C2_PLUS) {

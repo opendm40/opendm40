@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
 ## v0.4.0 (2026-11-02)
 
 ### New
