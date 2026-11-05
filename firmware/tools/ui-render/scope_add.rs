@@ -729,6 +729,14 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             draw(&m, scope_ui::Popup::None, &pv2, true);
             scope_ui::cells(&m, &["Freq:1.00kHz", "Vp-p:3.00V", "\u{2}Freq:1.00kHz", "\u{2}Y2-1:2.01A"]);
             ck.check_replica("gen/ch2-cells");
+            // The CH2 cells (the last two) in the CH2 colour, the first two not.
+            let cell_px = |x0: i16, x1: i16| (302..319usize).flat_map(|y| (x0 as usize..x1 as usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::C_CH2).count();
+            let (mx, ms) = (scope_ui::MEAS_X, scope_ui::MEAS_STEP);
+            let (ch1, ch2) = (cell_px(mx, mx + 2 * ms), cell_px(mx + 2 * ms, mx + 4 * ms));
+            ck.cases += 1;
+            if !(ch1 == 0 && ch2 > 40) {
+                ck.fail("gen/ch2-cells", format!("CH2 colour in the cells: {ch1} px in CH1's, {ch2} px in CH2's"));
+            }
             save(out, "s08-ch2-cells");
         }
     }

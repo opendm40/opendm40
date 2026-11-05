@@ -1146,7 +1146,7 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
         _ => Txt::new(text),
     };
     let t = Ink::new(sf::SC_F12, r, text.as_str(), 8, 0);
-    let pal = m.pal_text();
+    let pal = if ch2 { C_CH2 } else { m.pal_text() };
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
         if let Some(g) = t.at(x, y) {
             return (pal, tag(2, g));
@@ -1161,8 +1161,8 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
 
 /// The measurement cells: 4 from MEAS_X (the frame's column, >= 4 px from
 /// the screen edge) to the right frame, 2 px apart.
-const MEAS_X: i16 = if GX < 4 { 4 } else { GX };
-const MEAS_STEP: i16 = (GR - MEAS_X) / 4;
+pub const MEAS_X: i16 = if GX < 4 { 4 } else { GX };
+pub const MEAS_STEP: i16 = (GR - MEAS_X) / 4;
 
 /// Every top-bar element.
 pub fn top_bar(m: &Model) {
