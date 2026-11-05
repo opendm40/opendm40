@@ -26,3 +26,8 @@ The README and the user manual exist in English and Russian:
   `firmware/tools/doc-lang-check.sh origin/main` before a push. For a typo
   fix in one language only, add the line `Doc-lang: one-language` to the
   commit message or the PR description.
+
+## Worktrees
+
+- Work in a git worktree under `tmp/` in the main checkout; create nothing outside the repo.
+- When a branch's PR is merged, remove its worktree (`git worktree remove`): `firmware/target` takes about 870 MB per worktree. Whoever merges the PR does it, if the agent has finished by then.
