@@ -659,8 +659,8 @@ impl App {
     /// DMM page: PE2 on, PC4 off (`Scope::rails`), then 150 ms for the DMM
     /// supply to come up. A reset releases the power-hold pins (PE2 / PC4)
     /// until the ROM drives both high again. With PE2 off (the scope and
-    /// generator pages, SYST:RAIL AUTO) Reset settings lost the power in 5 of
-    /// 6 tries (device 2026-11-06, on USB: 4 restarts with POR, once the
+    /// generator pages, SYST:RAIL AUTO) Reset settings lost the power in 4 of
+    /// 5 tries (device 2026-11-06, on USB: 3 restarts with POR, once the
     /// meter stayed off; 1 SW), from the DMM page it restarted with SW.
     /// That the DMM supply starting from off inside the reset is the cause
     /// is inferred.
