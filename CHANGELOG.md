@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Tools:** the stack-depth and ISR extra-RAM checks follow functions by address (developer tools; no change to the image).
 ## v0.4.0 (2026-11-02)
 
 ### New
