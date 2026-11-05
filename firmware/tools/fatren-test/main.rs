@@ -2034,7 +2034,8 @@ fn setfile_cmd(a: &[String], img: Img) {
     // record; the request travels in the slot like any other word.
     {
         let (d, o) = (words(1), words(2));
-        let r = persist::reset_record(&d, &o);
+        let mut r = o;
+        persist::reset_record(&mut r, |i| d[i]);
         let kept = |i: usize| {
             (12..18).contains(&i)
                 || (persist::W_TOUCH_CAL..persist::W_TOUCH_CAL + 6).contains(&i)

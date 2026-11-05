@@ -123,22 +123,44 @@ pub fn words_of(version: u32) -> Option<usize> {
     })
 }
 
-/// The record after Reset settings: `defaults` (a fresh App's words, DC V),
-/// with what is calibration and not a setting taken from `old`: the
-/// thermocouple offsets and the NTC values, the touch calibration, the power
-/// meter's shunt values, V gains and zeros (app_power.rs pw_words).
-pub fn reset_record(defaults: &[u32; WORDS], old: &[u32; WORDS]) -> [u32; WORDS] {
-    let mut w = *defaults;
-    w[2] = w[2] & !0xFF | 1;
-    w[W_REC] &= !REC_RESET;
-    w[12..18].copy_from_slice(&old[12..18]);
-    w[W_TOUCH_CAL..W_TOUCH_CAL + 6].copy_from_slice(&old[W_TOUCH_CAL..W_TOUCH_CAL + 6]);
-    w[W_POWER + 1..W_POWER + 6].copy_from_slice(&old[W_POWER + 1..W_POWER + 6]);
+/// Words that are calibration, not settings: the thermocouple offsets and
+/// the NTC values (12..=17), the power meter's shunt values and V gains
+/// (W_POWER + 1..=5), its AC zeros (W_POWER + 7..=9) and DC zeros (W_POWER_ZD),
+/// the touch calibration (W_TOUCH_CAL). pw_words w[6] is half of each: below.
+const fn is_cal(i: usize) -> bool {
+    matches!(i, 12..=17 | 49..=53 | 55..=57 | 59..=61 | 64..=69)
+}
+const _: () = assert!(W_POWER == 48 && W_POWER_ZD == 59 && W_TOUCH_CAL == 64);
+
+/// The record after Reset settings, in place: `old` is the record that asked
+/// for it, `defaults` a fresh App's words; the calibration stays, the function
+/// is DC V. .cold.
+#[inline(never)]
+pub fn reset_record(old: &mut [u32; WORDS], defaults: impl Fn(usize) -> u32) {
     const ZERO_BITS: u32 = 0x1_FFFF; // pw_words w[6]: zy, zero_ok
-    w[W_POWER + 6] = w[W_POWER + 6] & !ZERO_BITS | old[W_POWER + 6] & ZERO_BITS;
-    w[W_POWER + 7..W_POWER + 10].copy_from_slice(&old[W_POWER + 7..W_POWER + 10]);
-    w[W_POWER_ZD..W_POWER_ZD + 3].copy_from_slice(&old[W_POWER_ZD..W_POWER_ZD + 3]);
-    w
+    let (mut i, z) = (0, old[W_POWER + 6]);
+    while i < WORDS {
+        if !is_cal(i) {
+            old[i] = defaults(i);
+        }
+        i += 1;
+    }
+    old[2] = old[2] & !0xFF | 1;
+    old[W_REC] &= !REC_RESET;
+    old[W_POWER + 6] = old[W_POWER + 6] & !ZERO_BITS | z & ZERO_BITS;
+}
+
+/// Mark the backup SRAM record as asking for the defaults (REC_RESET; .cold).
+#[inline(never)]
+pub fn request_reset() {
+    let mut w = [0u32; WORDS];
+    let mut i = 0;
+    while i < WORDS {
+        w[i] = word(i);
+        i += 1;
+    }
+    w[W_REC] |= REC_RESET;
+    save(&w);
 }
 
 /// CRC-32 (IEEE, as calbackup::crc32) of the words' little-endian bytes.
@@ -210,6 +232,7 @@ pub fn same_session() -> bool {
     crate::boot::info().is_some_and(|i| i.last == LAST_NORMAL || crate::boot::updated_to_this(i.last))
 }
 
+#[inline(always)] // one per main-loop save and one in the cold `request_reset`
 pub fn save(p: &[u32; WORDS]) {
     unsafe {
         w32(BKP, MAGIC);

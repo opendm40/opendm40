@@ -399,12 +399,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if fed {
             wdt::kick();
         }
-        if app.take_reset_req() && reset_at.is_none() {
-            reset_at = Some(now + 50);
-        }
         if reset_at.map(|t| now >= t).unwrap_or(false) {
             app::finish_disk_writes(now); // never cut a FAT / dir write
-            app.reset_commit();
             // Hand over quietly (DBG:UPDATE: the loader runs next; a reset
             // drops the power-hold pins until the ROM drives them again):
             // the big loads off, the SPI flash idle.

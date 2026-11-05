@@ -3201,7 +3201,7 @@ pub const S_OHM_NEG: u8 = 22;
 /// `restore`).
 pub const S_REMEMBER: u8 = 23;
 /// Reset settings: a confirm, then a restart with the defaults (app.rs
-/// `settings_reset`).
+/// `reset_ask`).
 pub const S_RESET: u8 = 24;
 /// Number of settings (the value array's length).
 pub const SET_N: usize = 25;

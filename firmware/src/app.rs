@@ -216,8 +216,6 @@ pub struct App {
     pub bt_on: bool,
     backlight: u8,
     beep_on: bool,
-    /// Reset settings: 1 Yes answered, 2 main.rs restarts (`take_reset_req`).
-    reset_req: u8,
     /// Stock settings (gui_v2_6.h section 2): dim / shutdown index into
     /// IDLE_MS, volume 0..100 %, start page, combined view for the menu row.
     dim_idx: usize,
@@ -599,44 +597,64 @@ impl App {
     /// DBG:UPDATE right after a scope Save CSV sometimes ended in a power
     /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
     /// loader never ran; why the load matters is inferred).
-    /// Reset settings (Settings > Other): whether Yes was answered, once;
-    /// main.rs then restarts (`reset_at`).
-    pub fn take_reset_req(&mut self) -> bool {
-        let r = self.reset_req == 1;
-        if r {
-            self.reset_req = 2;
+    /// Reset settings (Settings > Other): the confirm, unless a recording or
+    /// a host's logger session runs (toast). .cold (link-native.x), as the
+    /// other reset_* functions: a tap, a boot; never on a measurement path.
+    #[inline(never)]
+    fn reset_ask(&mut self, now: u64) {
+        if !self.reset_refused(now) {
+            self.overlay = Some(crate::dialog::Overlay::SettingsReset { until: now + crate::dialog::ENERGY_MS });
+            self.redraw = true;
+            crate::dialog::settings_reset();
+            self.beep(now, 50);
         }
-        r
     }
 
-    /// Right before that restart, the disk writers done: the record asking
-    /// for the defaults, in the backup SRAM and the settings file (App::new,
-    /// persist::reset_record).
+    /// A tap on that confirm. Yes: the disk writers done, the record asking
+    /// for the defaults into the backup SRAM and the settings file (App::new,
+    /// persist::reset_record), then the restart, as DBG:RESET (main.rs).
     #[inline(never)]
-    pub fn reset_commit(&mut self) {
-        if self.reset_req != 0 {
-            let mut w = self.persist_words();
-            w[crate::persist::W_REC] |= crate::persist::REC_RESET;
-            crate::persist::save(&w);
-            crate::setfile::flush();
+    fn reset_answer(&mut self, x: u16, y: u16, now: u64, clk: &mut Clock) {
+        match crate::dialog::power_off_hit(x, y) {
+            Some(true) => {
+                self.overlay_close();
+                if self.reset_refused(now) {
+                    return;
+                }
+                finish_disk_writes(now);
+                self.persist_now();
+                crate::persist::request_reset();
+                crate::setfile::flush();
+                self.quiesce_for_reset(clk);
+                unsafe { w32(0xE000_ED0C, 0x05FA_0004) };
+                loop {}
+            }
+            Some(false) => self.overlay_close(),
+            None => {}
         }
     }
 
     /// No reset during a recording or a host's logger session (toast).
     #[inline(never)]
     fn reset_refused(&mut self, now: u64) -> bool {
-        let busy = self.meter.stats.rec
-            || self.dmm.pw.integrating()
-            || crate::csvlog::active()
-            || crate::inrush::ses().streaming
-            || self.scope.log_on()
-            || self.logger_busy;
+        let busy = self.session_runs() || self.logger_busy;
         if busy {
             self.toast(now, "Stop the recording first", false);
         }
         busy
     }
 
+    /// At boot, a record asking for the defaults: this fresh App's words
+    /// with the old calibration (persist::reset_record). `persist_now` puts
+    /// the fresh words in the backup SRAM; a power cut now finds the request
+    /// in the settings file, so it resets again.
+    #[inline(never)]
+    fn reset_apply(&self, rec: &mut crate::persist::Record) {
+        self.persist_now();
+        crate::persist::reset_record(&mut rec.words, crate::persist::word);
+    }
+
+    #[inline(always)] // main.rs and the cold reset_answer
     pub fn quiesce_for_reset(&mut self, clk: &mut Clock) {
         backlight(0);
         let mut g = self.gen.s;
@@ -702,7 +720,6 @@ impl App {
             bt_on: true,
             backlight: 55,
             beep_on: true,
-            reset_req: 0,
             dim_idx: 0,
             off_idx: 1,
             volume: 50,
@@ -834,7 +851,7 @@ impl App {
             // continued session, for the power meter's values.
             let reset = rec.words[crate::persist::W_REC] & crate::persist::REC_RESET != 0;
             if reset {
-                rec.words = crate::persist::reset_record(&a.persist_words(), &rec.words);
+                a.reset_apply(&mut rec);
             }
             a.restore(&rec, reset || from_bkp && crate::persist::same_session(), clk);
         }
@@ -3094,18 +3111,7 @@ impl App {
                     Some(false) => self.overlay_close(),
                     None => {}
                 },
-                (crate::dialog::Overlay::SettingsReset { .. }, Gesture::Tap(p)) => match crate::dialog::power_off_hit(p.x, p.y) {
-                    Some(true) => {
-                        self.overlay_close();
-                        if self.reset_refused(now) {
-                            return false;
-                        }
-                        self.toast(now, "Restarting...", true);
-                        self.reset_req = 1;
-                    }
-                    Some(false) => self.overlay_close(),
-                    None => {}
-                },
+                (crate::dialog::Overlay::SettingsReset { .. }, Gesture::Tap(p)) => self.reset_answer(p.x, p.y, now, clk),
                 (crate::dialog::Overlay::FuseCheck { stage, .. }, Gesture::Tap(p)) => match (stage, crate::dialog::fuse_hit(p.x, p.y)) {
                     // Start / Again.
                     (0, Some(true)) | (2, Some(false)) => {
@@ -3346,8 +3352,12 @@ impl App {
     /// watch a bus). Dimming still applies. USB power holds it off through `idle` (`tick`,
     /// autooff.rs).
     fn off_held(&self) -> bool {
-        self.off_ms() == 0
-            || self.meter.stats.rec
+        self.off_ms() == 0 || self.session_runs()
+    }
+
+    /// A recording or another session the user left running.
+    fn session_runs(&self) -> bool {
+        self.meter.stats.rec
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
@@ -4278,13 +4288,7 @@ impl App {
                         return;
                     }
                     ui::S_RESET => {
-                        let now = clk.now_ms();
-                        if !self.reset_refused(now) {
-                            self.overlay = Some(crate::dialog::Overlay::SettingsReset { until: now + crate::dialog::ENERGY_MS });
-                            self.redraw = true;
-                            crate::dialog::settings_reset();
-                            self.beep(now, 50);
-                        }
+                        self.reset_ask(clk.now_ms());
                         return;
                     }
                     ui::S_ACC => {

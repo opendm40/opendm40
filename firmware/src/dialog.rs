@@ -125,36 +125,31 @@ fn button(r: (u16, u16, u16, u16), label: &str, bg: Color) {
 
 /// Draw the power-off confirm.
 pub fn power_off() {
-    let b = BOX;
-    centred((b.0, b.1, b.2, 40), "Power off?", FG, TITLE_BG);
-    centred((b.0, b.1 + 40, b.2, 60), "Cancels in 3 s", FG, BODY_BG);
-    lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
-    frame(b, FRAME);
-    button(NO, "No", BTN);
-    button(YES, "Yes", BTN_RED);
+    confirm("Power off?", "Cancels in 3 s");
 }
 
 /// Draw the energy reset confirm (power meter: a long press on the energy
 /// readout / the side column); hit test = `power_off_hit`.
 pub fn energy_reset() {
+    confirm("Reset energy?", "Wh, VAh and the time");
+}
+
+/// A title, one line of text, No and Yes (hit test = `power_off_hit`).
+#[inline(never)]
+fn confirm(title: &str, body: &str) {
     let b = BOX;
-    centred((b.0, b.1, b.2, 40), "Reset energy?", FG, TITLE_BG);
-    centred((b.0, b.1 + 40, b.2, 60), "Wh, VAh and the time", FG, BODY_BG);
+    centred((b.0, b.1, b.2, 40), title, FG, TITLE_BG);
+    centred((b.0, b.1 + 40, b.2, 60), body, FG, BODY_BG);
     lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
     frame(b, FRAME);
     button(NO, "No", BTN);
     button(YES, "Yes", BTN_RED);
 }
 
-/// Draw the Reset settings confirm; hit test = `power_off_hit`.
+/// Draw the Reset settings confirm; hit test = `power_off_hit`. .cold.
+#[inline(never)]
 pub fn settings_reset() {
-    let b = BOX;
-    centred((b.0, b.1, b.2, 40), "Reset settings?", FG, TITLE_BG);
-    centred((b.0, b.1 + 40, b.2, 60), "Calibration and files stay", FG, BODY_BG);
-    lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
-    frame(b, FRAME);
-    button(NO, "No", BTN);
-    button(YES, "Yes", BTN_RED);
+    confirm("Reset settings?", "Calibration, files stay");
 }
 
 /// The firmware install question (vwrite.rs: a valid update file copied
@@ -167,13 +162,7 @@ pub const FW_MS: u64 = 60_000;
 pub const FW_BAD: &str = "Not a DM40 update file";
 
 pub fn fw_install() {
-    let b = BOX;
-    centred((b.0, b.1, b.2, 40), FW_TITLE, FG, TITLE_BG);
-    centred((b.0, b.1 + 40, b.2, 60), FW_BODY, FG, BODY_BG);
-    lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
-    frame(b, FRAME);
-    button(NO, "No", BTN);
-    button(YES, "Yes", BTN_RED);
+    confirm(FW_TITLE, FW_BODY);
 }
 
 /// Power-off confirm hit test: Some(true) = Yes, Some(false) = No, None =

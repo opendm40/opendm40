@@ -274,6 +274,14 @@ SECTIONS
          * 1000;...'), so they stay in B. */
         *(.text.*8opendm407new_app*);
         *(.text.*8opendm403app*3App11fuse_dialog*);
+        /* Settings > Other > Reset settings: a tap, a boot. */
+        *(.text.*8opendm403app*3App9reset_ask*);
+        *(.text.*8opendm403app*3App12reset_answer*);
+        *(.text.*8opendm403app*3App13reset_refused*);
+        *(.text.*8opendm403app*3App11reset_apply*);
+        *(.text.*8opendm407persist13request_reset*);
+        *(.text.*8opendm407persist12reset_record*);
+        *(.text.*8opendm406dialog14settings_reset*);
         *(.text.*8opendm403app*3App11limits_page*);
         *(.text.*8opendm403app*3App7kp_open*);
         *(.text.*8opendm403app9app_power*3App13pw_open_entry*);
