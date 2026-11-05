@@ -2430,7 +2430,7 @@ goes back to the main menu.
 | **Device info** | | | Opens the [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
 | **Help** | | | The [on-screen help](#on-screen-help). |
-| **Reset settings** | | | After **Yes** the meter restarts with all settings at their defaults, in DC V. Touch, temperature and power meter calibration, files and Bluetooth pairing stay. Refused during a recording. |
+| **Reset settings** | | | After **Yes** the meter restarts with all settings at their defaults, in DC V. Touch and power meter calibration, files and Bluetooth pairing stay. Refused during a recording. |
 
 ### The Device page
 

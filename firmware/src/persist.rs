@@ -123,12 +123,13 @@ pub fn words_of(version: u32) -> Option<usize> {
     })
 }
 
-/// Words that are calibration, not settings: the thermocouple offsets and
-/// the NTC values (12..=17), the power meter's shunt values and V gains
-/// (W_POWER + 1..=5), its AC zeros (W_POWER + 7..=9) and DC zeros (W_POWER_ZD),
-/// the touch calibration (W_TOUCH_CAL). pw_words w[6] is half of each: below.
+/// Words that are calibration, not settings (owner, PR #282: the
+/// thermocouple offsets and NTC values reset): the power meter's shunt
+/// values and V gains (W_POWER + 1..=5), its AC zeros (W_POWER + 7..=9) and
+/// DC zeros (W_POWER_ZD), the touch calibration (W_TOUCH_CAL). pw_words w[6]
+/// is half of each: below.
 const fn is_cal(i: usize) -> bool {
-    matches!(i, 12..=17 | 49..=53 | 55..=57 | 59..=61 | 64..=69)
+    matches!(i, 49..=53 | 55..=57 | 59..=61 | 64..=69)
 }
 const _: () = assert!(W_POWER == 48 && W_POWER_ZD == 59 && W_TOUCH_CAL == 64);
 

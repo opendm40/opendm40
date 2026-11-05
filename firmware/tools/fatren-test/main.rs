@@ -2037,8 +2037,7 @@ fn setfile_cmd(a: &[String], img: Img) {
         let mut r = o;
         persist::reset_record(&mut r, |i| d[i]);
         let kept = |i: usize| {
-            (12..18).contains(&i)
-                || (persist::W_TOUCH_CAL..persist::W_TOUCH_CAL + 6).contains(&i)
+            (persist::W_TOUCH_CAL..persist::W_TOUCH_CAL + 6).contains(&i)
                 || (persist::W_POWER + 1..persist::W_POWER + 6).contains(&i)
                 || (persist::W_POWER + 7..persist::W_POWER + 10).contains(&i)
                 || (persist::W_POWER_ZD..persist::W_POWER_ZD + 3).contains(&i)

@@ -6,8 +6,8 @@
 
 One emulator run, driven like a user (DBG:KEY / DBG:TAP): settings changed over
 SCPI and saved; No keeps them; Yes restarts the firmware; afterwards the
-settings are the defaults and the function DC V, the thermocouple offset
-stays; a setting changed then
+settings are the defaults and the function DC V, the thermocouple offset and
+the NTC values too; a setting changed then
 survives a further DBG:RESET, so the request is gone from the record.
 Exit status 0 = PASS. Private disk copy; USB/IP port in 63900-63999 unless
 --port.
@@ -77,6 +77,8 @@ def state(l):
         'vol': l.q('SYST:BEEP:VOL?'),
         'alarm': l.q('SYST:ALER:ALAR?'),
         'func': l.q('FUNC?'),
+        'toffs': l.q('TEMP:OFFS?'),
+        'ntc': l.q('TEMP:NTC?'),
     }
 
 
@@ -110,9 +112,8 @@ def main():
         l = Link()
         d0 = state(l)
         print('  defaults', d0, flush=True)
-        l.w('TEMP:OFFS 1.5')  # calibration: stays
-        off = l.q('TEMP:OFFS?')
-        check(float(off) == 1.5, 'thermocouple offset set %s' % off)
+        l.w('TEMP:OFFS 1.5')
+        l.w('TEMP:NTC 12345,3456')
         l.w('SYST:BEEP:VOL 30')
         l.w('SYST:ALER:ALAR VOLUME')
         l.w('FUNC "VOLT:AC"')
@@ -130,7 +131,6 @@ def main():
         l = Link()
         s2 = state(l)
         check(s2 == d0, 'after Yes the defaults %s' % s2)
-        check(l.q('TEMP:OFFS?') == off, 'the offset stays')
         check(l.q('DBG:VIEW?').startswith('Multimeter'), 'on the DMM page')
         l.w('SYST:BEEP:VOL 40')
         time.sleep(4)
