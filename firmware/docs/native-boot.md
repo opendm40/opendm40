@@ -1397,7 +1397,7 @@ per build, so the rows do not add up exactly).
 | SRAM free | 9 324 B | 9 580 B | 9 324 B |
 | stack headroom (static worst path) | 21 108 B | 21 136 B | 21 108 B |
 
-The developer image is byte for byte release/0.5.0's default image.
+The developer image has the sizes of release/0.5.0's default image (its bytes differ slightly; not investigated).
 
 ### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
 
