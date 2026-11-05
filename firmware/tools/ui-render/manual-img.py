@@ -13,8 +13,13 @@ stored as an exact palette PNG (the screens have fewer than 256 colours;
 otherwise it is quantised to 256). Without OUT4 (no such directory) the
 gallery images stay as they are. Then manual-annot.py makes the composed
 and annotated pictures. Needs PIL.
+
+MANUAL_LANG=ru|zh (manual-lang.sh, with renders of that language): into
+docs/manual/img/<lang>/, which starts as a copy of docs/manual/img, so what is
+not rendered here (gallery, stock captures) is the English picture.
 """
 import glob
+import shutil
 import subprocess
 import os
 import sys
@@ -22,7 +27,9 @@ import sys
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DST = os.path.normpath(os.path.join(HERE, '../../../docs/manual/img'))
+EN = os.path.normpath(os.path.join(HERE, '../../../docs/manual/img'))
+LANG = os.environ.get('MANUAL_LANG', '')
+DST = os.path.join(EN, LANG) if LANG else EN
 
 if len(sys.argv) not in (5, 6):
     sys.exit(__doc__)
@@ -37,6 +44,9 @@ SRC['gallery'] = f'{gallery}/g01-grid-p1.png'
 SRC['gallery-view'] = f'{gallery}/g05-overlay.png'
 
 os.makedirs(DST, exist_ok=True)
+if LANG:
+    for p in glob.glob(f'{EN}/*.png'):
+        shutil.copyfile(p, os.path.join(DST, os.path.basename(p)))
 for name, path in sorted(SRC.items()):
     if not os.path.exists(path) and name.startswith('gallery') and os.path.exists(os.path.join(DST, name + '.png')):
         print(f'{name:15s} kept')

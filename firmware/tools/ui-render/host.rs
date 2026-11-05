@@ -282,6 +282,13 @@ pub fn save_ppm(path: &str, k: usize) {
     if std::env::var_os("UIR_NOSAVE").is_some() {
         return;
     }
+    // UIR_SAVE_ONLY=<names, comma separated> (manual-lang.sh): only these screens.
+    if let Ok(only) = std::env::var("UIR_SAVE_ONLY") {
+        let name = std::path::Path::new(path).file_stem().and_then(|n| n.to_str()).unwrap_or("");
+        if !only.split(',').any(|n| n == name) {
+            return;
+        }
+    }
     let e = emu();
     let mut out = format!("P6 {} {} 255\n", W * k, H * k).into_bytes();
     for y in 0..H * k {

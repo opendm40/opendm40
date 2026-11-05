@@ -13,6 +13,11 @@ screenshots already in docs/manual/img. The device itself (front and top
 edge) is drawn by emu/panel_draw.py, the emulator window's panel drawing. One visual language: white
 background, #0a7bd6 arrows and callouts, DejaVu Sans labels, a thin grey
 frame around each screenshot. Stored as palette PNGs (256 colours).
+
+MANUAL_LANG=ru|zh: the pictures of docs/manual/img/<lang>/, every label through
+i18n/manual-annot.<lang>.tsv (DejaVu has Cyrillic; Chinese: Noto Sans CJK SC,
+fonts-noto-cjk). Text boxes that overlap or leave the picture fail the run;
+so does a label with no entry in the table.
 """
 import math
 import os
@@ -21,7 +26,8 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DST = os.path.normpath(os.path.join(HERE, '../../../docs/manual/img'))
+LANG = os.environ.get('MANUAL_LANG', '')
+DST = os.path.normpath(os.path.join(HERE, '../../../docs/manual/img', LANG))
 FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
 BOLD = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 MONO = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf'
@@ -35,8 +41,67 @@ RENDERS = None
 STOCK = None
 
 
+CJK = '/usr/share/fonts/opentype/noto/NotoSansCJK-%s.ttc'
+
+
 def font(size, bold=False, mono=False):
+    if LANG == 'zh' and not mono:
+        return ImageFont.truetype(CJK % ('Bold' if bold else 'Regular'), size, index=2)
     return ImageFont.truetype(MONO if mono else BOLD if bold else FONT, size)
+
+
+# ---- localized labels and the text checks
+
+TR = {}
+if LANG:
+    with open(os.path.join(HERE, '../../i18n/manual-annot.%s.tsv' % LANG), encoding='utf-8') as _f:
+        TR = dict(l.rstrip('\n').split('\t', 1) for l in _f if l.strip() and l[0] != '#')
+MISSING = set()
+PROBLEMS = []
+BOXES = {}
+
+
+def tr(t):
+    if not LANG:
+        return t
+    if t in TR:
+        return TR[t]
+    if sum(c.isalpha() for c in t) >= 2 and t not in MISSING:
+        MISSING.add(t)
+    return t
+
+
+class Draw(ImageDraw.ImageDraw):
+    """ImageDraw with the labels translated and their boxes recorded."""
+
+    def __init__(self, im, mode=None):
+        super().__init__(im, mode)
+        self.pil = im
+
+    def textlength(self, text, *a, **k):
+        return super().textlength(tr(text), *a, **k)
+
+    def text(self, xy, text, *a, **k):
+        t = tr(text)
+        f = k.get('font')
+        if f is not None and hasattr(f, 'getbbox') and t.strip() and '\n' not in t:
+            x0, y0, x1, y1 = f.getbbox(t, anchor=k.get('anchor'))
+            BOXES.setdefault(id(self.pil), []).append((xy[0] + x0, xy[1] + y0, xy[0] + x1, xy[1] + y1, t))
+        return super().text(xy, t, *a, **k)
+
+
+ImageDraw.Draw = lambda im, mode=None: Draw(im, mode)
+
+
+def check_text(im, name):
+    b = BOXES.pop(id(im), [])
+    w, h = im.size
+    for i, p in enumerate(b):
+        if p[0] < 0 or p[1] < 0 or p[2] > w or p[3] > h:
+            PROBLEMS.append('%s: %r leaves the picture' % (name, p[4]))
+        for q in b[i + 1:]:
+            if p[0] < q[2] and q[0] < p[2] and p[1] < q[3] and q[1] < p[3]:
+                PROBLEMS.append('%s: %r over %r' % (name, p[4], q[4]))
 
 
 def shot(name, scale=1.0, crop=None, src=None):
@@ -119,6 +184,7 @@ def finger(im, x, y, r=17, n=1, gap=30):
 
 
 def save(im, name):
+    check_text(im, name)
     # libimagequant keeps small distinct colours (the green status-bar logo
     # came out olive with MEDIANCUT); MEDIANCUT where PIL lacks it.
     try:
@@ -1083,6 +1149,15 @@ def main():
     shunt_chain()
     if STOCK:
         stock_pairs()
+    for p in PROBLEMS:
+        print('text:', p)
+    for t in sorted(MISSING):
+        print('no %s label: %r' % (LANG, t))
+    if os.environ.get('MANUAL_LABELS'):
+        with open(os.environ['MANUAL_LABELS'], 'w', encoding='utf-8') as o:
+            o.writelines(t + '\n' for t in sorted(MISSING))
+    if LANG and (PROBLEMS or MISSING):
+        sys.exit(1)
 
 
 if __name__ == '__main__':
