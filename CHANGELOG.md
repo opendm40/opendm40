@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
 ## v0.4.0 (2026-11-02)
 
 ### New
