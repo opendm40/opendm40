@@ -2341,6 +2341,14 @@ To open it: main menu, **Gallery: screenshots and logs** (the top tile).
 - In the viewer, tap to show the bar: **< Back**, the name and number, and
   **Delete**. Swipe left / right for the next or previous file.
 - **Delete** asks for confirmation (**Cancel** / **Delete**).
+- To delete several files: **Select** in the grid, tap the tiles (the ticks
+  stay when you turn the page), **Delete selected**. Tap **Select** again to
+  leave. The file being recorded cannot be ticked.
+
+![Selecting files in the gallery](img/gallery-select.png)
+
+*Selecting files in the gallery.*
+
 - **< Back** in the title bar or **MENU** goes back.
 
 The gallery also shows the screenshots made by the stock firmware.

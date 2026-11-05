@@ -7,6 +7,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Gallery: select several files and delete them together**
+  ([manual](docs/manual/README.md#the-gallery)).
+
 ## v0.4.0 (2026-11-02)
 
 ### New

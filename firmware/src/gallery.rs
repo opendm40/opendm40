@@ -1659,6 +1659,8 @@ impl Gallery {
         self.job = JOB0;
         self.todo = 0;
         self.need |= N_PAGE;
+        // Selecting: the title bar shows the page.
+        self.paint |= P_INFO;
     }
 
     fn view(&mut self, rank: u32, e: Ent, overlay: bool) {
