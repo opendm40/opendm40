@@ -258,8 +258,10 @@ the combined view switches to the next sub-mode of the current function
   firmware): a 3 s **Low battery! Please charge** message and a beep at the
   key/alert volume, once per level; the battery symbol stays red until USB
   power is connected. During a recording only the symbol changes; the message
-  comes when it ends. The meter does not switch off by itself at the bottom
-  of the scale.
+  comes when it ends.
+- **Empty battery** (below about 1 %, 3.31 V, for 30 s, as the stock firmware):
+  **Battery empty: off in 30 s** (then 20, 10) with a beep, then the meter
+  closes a recording, saves the settings and switches off. USB power stops it.
 
 ![The warning 30 s before the automatic power-off](img/auto-off.png)
 

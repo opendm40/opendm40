@@ -1740,10 +1740,20 @@ impl App {
             self.persist_now();
             power_off();
         }
+        // The battery is empty (lowbat.rs): as the others, power_off closes
+        // a recording and writes the settings file.
+        if self.power.low.cut_due() {
+            backlight(0);
+            self.persist_now();
+            power_off();
+        }
         // Not while a screenshot reads the panel (its toast would land in the
         // rows not read yet; screenshot.rs "Frozen image").
         if !crate::screenshot::frozen() {
             self.off_warn(now, idle);
+            if self.power.low.cut_warning() && !crate::hy3131::streaming() {
+                self.low_battery_off(now);
+            }
         }
         // RUN held in a DMM view: AutoHold on/off. The key-down already
         // toggled HOLD; set_ahold releases it again. AUTO held: the default
@@ -1892,7 +1902,7 @@ impl App {
             self.toast_later_show(now);
             return;
         }
-        if self.power.low.due() {
+        if self.power.low.due() && !crate::hy3131::streaming() {
             self.low_battery(now);
             if self.overlay.is_some() {
                 return;
@@ -3306,14 +3316,33 @@ impl App {
             || self.scope.log_on()
     }
 
+    /// The countdown before the power-off on an empty battery: a toast at
+    /// 30, 20 and 10 s and a beep at the key / alert volume, also during a
+    /// recording (it goes on under the toast); not over a stream's page (the
+    /// caller: .cold, link-native.x). A dimmed screen lights up, as for the
+    /// idle power-off's warning.
+    #[inline(never)]
+    fn low_battery_off(&mut self, now: u64) {
+        let Some(secs) = self.power.low.take_cut_warn() else { return };
+        if self.dimmed {
+            backlight(self.backlight);
+        }
+        self.beep(now, 200);
+        let txt = crate::dialog::low_battery_off(secs);
+        if !self.toast_defer(txt, false) {
+            self.toast_draw(now, txt, false);
+        }
+    }
+
     /// The low-battery warning (lowbat.rs), as the stock's 3 s popup, once
     /// per level at the key / alert volume. It waits while a recording or a
     /// stream runs, whose page must stay up; the red symbol shows meanwhile.
     /// Not an input: the idle timers go on, and a dimmed screen stays dimmed
-    /// (a low battery is no reason for more backlight).
+    /// (a low battery is no reason for more backlight). .cold (link-native.x);
+    /// the caller checks for a stream.
     #[inline(never)]
     fn low_battery(&mut self, now: u64) {
-        if self.toast_hold || self.session_runs() || crate::hy3131::streaming() || crate::screenshot::frozen() || crate::dialog::log_panel_shown() {
+        if self.toast_hold || self.session_runs() || crate::screenshot::frozen() || crate::dialog::log_panel_shown() {
             return;
         }
         self.power.low.shown();

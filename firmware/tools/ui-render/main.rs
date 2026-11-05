@@ -3031,6 +3031,7 @@ fn main() {
         (dialog::AUTO_DC, true),
         ("Auto power-off in 30 s", false),
         (dialog::LOW_BATTERY, false),
+        (dialog::low_battery_off(30), false),
         // Tap on the DMM value (resolution / rate), widest variants.
         (rate_widest, true),
         (rate_fast, true),

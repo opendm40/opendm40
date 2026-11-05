@@ -49,6 +49,68 @@ fn lowbat_tests() {
     t("lb: warns after the unplug", run(&mut l, 5.0, false, n) == 1);
     let mut l = LowBat::new();
     t("lb: 0 V is no battery reading", run(&mut l, -366.0, false, 1000) == 0 && !l.low());
+    // The power-off: 30 s under 1 %, then the 30 s countdown.
+    let confirm = CUT_CONFIRM as usize;
+    let warn = CUT_WARN as usize;
+    let mut l = LowBat::new();
+    for _ in 0..confirm - 1 {
+        l.feed(0.5, false);
+    }
+    t("cut: no warning before the confirm", l.take_cut_warn().is_none() && !l.cut_due());
+    l.feed(5.0, false);
+    for _ in 0..confirm - 1 {
+        l.feed(0.5, false);
+    }
+    t("cut: a good read starts over", l.take_cut_warn().is_none());
+    let mut said = vec![];
+    let mut reads = confirm - 1;
+    while !l.cut_due() && reads < 100 {
+        l.feed(0.5, false);
+        reads += 1;
+        if let Some(s) = l.take_cut_warn() {
+            said.push((reads, s));
+        }
+    }
+    t("cut: 30, 20, 10 s in time", said == vec![(confirm, 30), (confirm + 5, 20), (confirm + 10, 10)]);
+    t("cut: due after 60 s", reads == confirm + warn && l.cut_due());
+    t("cut: no warning once due", l.take_cut_warn().is_none());
+    // USB power: never, also mid-countdown and after it ran out.
+    let mut l = LowBat::new();
+    for _ in 0..1000 {
+        l.feed(0.5, true);
+    }
+    t("cut: never on USB power", !l.cut_due() && l.take_cut_warn().is_none());
+    for _ in 0..confirm + 2 {
+        l.feed(0.5, false);
+    }
+    t("cut: countdown runs", l.take_cut_warn().is_some());
+    l.feed(0.5, true);
+    t("cut: USB power ends it", !l.cut_due() && l.take_cut_warn().is_none());
+    for _ in 0..confirm - 1 {
+        l.feed(0.5, false);
+    }
+    t("cut: confirm again after USB", l.take_cut_warn().is_none());
+    // A recovery in the countdown: 1..3 % holds it, 3 % ends it.
+    let mut l = LowBat::new();
+    for _ in 0..confirm + 2 {
+        l.feed(0.5, false);
+    }
+    l.take_cut_warn();
+    for _ in 0..1000 {
+        l.feed(2.0, false);
+    }
+    t("cut: a read under the clear level holds", !l.cut_due());
+    l.feed(3.0, false);
+    for _ in 0..confirm - 1 {
+        l.feed(0.5, false);
+    }
+    t("cut: the clear level ends it", l.take_cut_warn().is_none() && !l.cut_due());
+    // A dead ADC (0 V, the emulator) is no empty battery.
+    let mut l = LowBat::new();
+    for _ in 0..1000 {
+        l.feed(-366.0, false);
+    }
+    t("cut: 0 V is no reading", !l.cut_due() && l.take_cut_warn().is_none());
     // Straight under both levels: one warning, stays due until shown.
     let mut l = LowBat::new();
     for _ in 0..n {
