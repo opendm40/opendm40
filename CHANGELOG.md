@@ -15,6 +15,8 @@ section named after the tag as the release notes; how to cut a release:
   measures. When the ripple is too strong to measure, the meter shows
   dashes and "Unstable: unplug USB?". Not checked on the device.
 
+## Unreleased
+
 ## v0.4.0 (2026-11-02)
 
 ### New
