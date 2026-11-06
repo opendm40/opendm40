@@ -74,6 +74,28 @@ static CH2_COLOUR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::
 /// The CH2 colour names in `CH2_COLOUR` order.
 pub const CH2_COLOUR_NAMES: [&str; 11] = ["magenta", "red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold", "cyan"];
 
+/// MF > Display GEN "Color": the PALETTE index after the present one,
+/// skipping CH1's (`ch1`, a PALETTE index: two traces in one colour cannot
+/// be told apart).
+pub fn next_gen_colour(ch1: u8) -> u8 {
+    let mut i = (gen_colour_idx() + 1) % NPAL as u8;
+    if i == ch1 {
+        i = (i + 1) % NPAL as u8;
+    }
+    i
+}
+
+/// MF > Display CH2 "Color": the `CH2_COLOUR` index after the present one,
+/// skipping CH1's colour (as `next_gen_colour`).
+pub fn next_ch2_colour(ch1: u8) -> u8 {
+    let n = NPAL as u8 + 1;
+    let mut i = (ch2_colour_idx() + 1) % n;
+    if i == ch1 + 1 {
+        i = (i + 1) % n;
+    }
+    i
+}
+
 pub fn ch2_colour_idx() -> u8 {
     CH2_COLOUR.load(core::sync::atomic::Ordering::Relaxed)
 }

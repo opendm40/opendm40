@@ -2666,15 +2666,16 @@ impl App {
                 self.ch2_step(up, now);
             }
             su::MfHit::GenColour => {
-                // The next GEN colour: the whole page again (as CH2's).
-                su::set_gen_colour(su::gen_colour_idx() + 1);
+                // The next GEN colour (not CH1's): the whole page again (as
+                // CH2's).
+                su::set_gen_colour(su::next_gen_colour(self.sp.colour));
                 self.sp_settings_changed();
                 self.redraw = true;
             }
             su::MfHit::Ch2Colour => {
-                // The next CH2 colour: the whole page again (trace, marker,
+                // The next CH2 colour (not CH1's): the whole page again (trace, marker,
                 // DMM block, CH2 cells; the popup over it).
-                su::set_ch2_colour(su::ch2_colour_idx() + 1);
+                su::set_ch2_colour(su::next_ch2_colour(self.sp.colour));
                 self.sp_settings_changed();
                 self.redraw = true;
             }
