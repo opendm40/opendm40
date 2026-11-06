@@ -384,7 +384,7 @@ while a phone is connected; anything else received on the UART is forwarded to t
 | `AT+SSSW<0/1>` | 1 char | SPP off / on (default 1). Reset |
 | `AT+SSPW<pppp>` | 4 chars | PIN for legacy pairing (default `1234`); also turns the PIN switch on |
 | `AT+SSPSW<0/1>` | 1 char | PIN switch (default 0): 0 = Secure Simple Pairing, 1 = legacy PIN pairing. Reset |
-| `AT+STXP<nn>` | 00..09 | TX power level of the controller (default 9; BLE capped at 6), applied at once |
+| `AT+STXP<nn>` | 00..09 | TX power level (default 9), applied at once; BLE is capped at level 6. Jieli's reference power for BD19 levels 0..9: −17.6, −14.0, −11.5, −9.6, −6.6, −4.4, −0.79, +1.12, +3.8, +5.65 dBm (`include_lib/btctrler/btcontroller_modules.h` in the [SDK](https://github.com/Jieli-Tech/fw-AC63_BT_SDK)) |
 | `AT+SADVT<nn>` | 00..07 | advertising interval 250, 500, 750, 1000, 1500, 2000, 3000, 4000 ms (default 01 = 500 ms). Reset |
 | `AT+SUART<nn>` | 00..16 | UART baud index: 00 115200, 01 2400, 02 4800, 03 9600, 04 19200, 05 31250, 06 38400, 07 57600, 08 115200 (default), 09 230400, 10 256000, 11 460800, 12 512000, 13 750000, 14 800000, 15 921600, 16 1000000. Reset |
 | `AT+SU0<hhhh>` .. `AT+SU3<hhhh>` | 4 hex digits | GATT UUIDs (defaults FFF0..FFF3): SU0 service, SU1 characteristic write + notify, SU2 read + notify, SU3 write. Reset |
