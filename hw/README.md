@@ -648,7 +648,7 @@ sections by commit ("f80524f", "d8e249d", "519fb8a", "469f354", "6bc494a",
 - DAC output buffer (DAC_CR BOFF1), the same split as the stock: on for
   square, off for sine / triangle / ramp
   ([`firmware/src/gen.rs`](../firmware/src/gen.rs),
-  [`scope_gen_v2_6.h`](../stock/re/analysis/scope_gen_v2_6.h)). GD32F427
+  `stock/re/analysis/scope_gen_v2_6.h`). GD32F427
   datasheet ([table 4-33](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf)):
   buffer on: 0.2 V .. VDDA−0.2 V guaranteed, load ≥ 5 kΩ and ≤ 50 pF,
   settling 0.5..1 µs; buffer off: rail to rail, output impedance up to
