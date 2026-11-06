@@ -2032,6 +2032,16 @@ impl App {
                     self.sp.guide_until = now + GUIDE_MS;
                     return;
                 }
+                1 if self.scope.s.tsrc == scope::TSRC_CH2 && self.ch2.on => {
+                    // Source DMM: the middle of the CH2 trace (its rows on
+                    // screen, at the present position), not of CH1's.
+                    let c = cache();
+                    let (lo, hi) = c.c2seg.iter().fold((i32::MAX, i32::MIN), |(lo, hi), &(a, b)| if (a, b) == su::EMPTY { (lo, hi) } else { (lo.min(a as i32), hi.max(b as i32)) });
+                    if lo > hi {
+                        return;
+                    }
+                    st.trig_row = ((lo + hi) / 2 + (self.ch2.pos - c.c2pos) as i32).clamp(-10, 290);
+                }
                 1 => {
                     let (hi, lo) = (self.meas_res.v[12], self.meas_res.v[13]);
                     if !(hi.is_finite() && lo.is_finite()) {
