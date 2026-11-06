@@ -36,8 +36,12 @@ the probe factor is kept.
 - **Scope:** the trigger badge takes the new source's colour at once.
 - **Diode:** the resistance stays on screen while the SHORT / BEEP band is on
   (0.4.0 hid it below 22 mV).
+
+  ![The SHORT band with the resistance](docs/changelog/v0.4.1/diode-short.png)
 - **Function buttons:** V and A show the remembered DC / AC / AC+DC / AUTO;
   continuity / diode and Hz / °C put the remembered sub-mode first.
+
+  ![Function buttons after V AC, A AC, continuity and °C](docs/changelog/v0.4.1/buttons.png)
 - **Power meter from the combined view:** the wiring notice returns to the
   combined view, not the multimeter page.
 
