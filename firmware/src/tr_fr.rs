@@ -29,6 +29,7 @@ macro_rules! tr {
     ("Both always") => { "Toujours les deux" };
     ("Brightness:") => { "Luminosit\u{1} :" };
     ("Burden voltage") => { "Chute tension" };
+    ("CH2 (DMM) is off") => { "CH2 (DMM) \u{1}teint" };
     ("CSV save failed") => { "Erreur CSV" };
     ("Calibrate") => { "Calibrer" };
     ("Calibration, files stay") => { "Calibrage, fichiers gard\u{1}s" };
@@ -198,6 +199,7 @@ macro_rules! tr {
     ("Touch calibration") => { "Calibrage tactile" };
     ("Touch test") => { "Test tactile" };
     ("Trigger") => { "D\u{1}clench." };
+    ("Trigger source: CH1") => { "Source trigger : CH1" };
     ("Try again") => { "R\u{1}essayer" };
     ("Type:") => { "Type :" };
     ("USB disk") => { "Disque USB" };
@@ -250,6 +252,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Both always", "Toujours les deux"),
     ("Brightness:", "Luminosit\u{1} :"),
     ("Burden voltage", "Chute tension"),
+    ("CH2 (DMM) is off", "CH2 (DMM) \u{1}teint"),
     ("CSV save failed", "Erreur CSV"),
     ("Calibrate", "Calibrer"),
     ("Calibration, files stay", "Calibrage, fichiers gard\u{1}s"),
@@ -419,6 +422,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Touch calibration", "Calibrage tactile"),
     ("Touch test", "Test tactile"),
     ("Trigger", "D\u{1}clench."),
+    ("Trigger source: CH1", "Source trigger : CH1"),
     ("Try again", "R\u{1}essayer"),
     ("Type:", "Type :"),
     ("USB disk", "Disque USB"),

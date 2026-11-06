@@ -29,6 +29,7 @@ macro_rules! tr {
     ("Both always") => { "Sempre entrambi" };
     ("Brightness:") => { "Luminosit\u{1}:" };
     ("Burden voltage") => { "Caduta tens." };
+    ("CH2 (DMM) is off") => { "CH2 (DMM) spento" };
     ("CSV save failed") => { "Errore CSV" };
     ("Calibrate") => { "Calibra" };
     ("Calibration, files stay") => { "Calibrazione e file salvi" };
@@ -193,6 +194,7 @@ macro_rules! tr {
     ("Touch calibration") => { "Calibrazione tocco" };
     ("Touch test") => { "Test tocco" };
     ("Triangle") => { "Triangolo" };
+    ("Trigger source: CH1") => { "Sorgente trigger: CH1" };
     ("Try again") => { "Riprova" };
     ("Type:") => { "Tipo:" };
     ("USB disk") => { "Disco USB" };
@@ -244,6 +246,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Both always", "Sempre entrambi"),
     ("Brightness:", "Luminosit\u{1}:"),
     ("Burden voltage", "Caduta tens."),
+    ("CH2 (DMM) is off", "CH2 (DMM) spento"),
     ("CSV save failed", "Errore CSV"),
     ("Calibrate", "Calibra"),
     ("Calibration, files stay", "Calibrazione e file salvi"),
@@ -408,6 +411,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Touch calibration", "Calibrazione tocco"),
     ("Touch test", "Test tocco"),
     ("Triangle", "Triangolo"),
+    ("Trigger source: CH1", "Sorgente trigger: CH1"),
     ("Try again", "Riprova"),
     ("Type:", "Tipo:"),
     ("USB disk", "Disco USB"),
