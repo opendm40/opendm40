@@ -3,7 +3,7 @@
 (emulator time; owner report 2026-10-26 "the longer the beep, the longer the
 redraw").
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/popupbeep.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
       [--port N] [--mips 110] [--cycles 2] [--max-ms 80]
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """opendm40 scope: level-marker drag latency on the screen (emulator time).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/draglat.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port N]
       [--item trig|ch1] [--tb 0.005] [--mips 110] [--touchlog] [--keep | --shots DIR]
 

@@ -3,7 +3,7 @@
 "I ranging...", the chart's right column is not the multimeter's (no MAX /
 AVG / REL box / MIN).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/pwrangingtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
 
 5 V / 4 mA DC on the jacks (the I channel walks down from 10 A). W, then OK

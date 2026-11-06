@@ -3,7 +3,7 @@
 LOG:CSV:INTerval CHANge) in the emulator: a stepped DC input gives rows only
 at the steps and as the 60 s heartbeat.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/onchangetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Input on V-COM (virtual time): 1 V, 2 V from T1, 2.01 V from T2 (+0.17 % of

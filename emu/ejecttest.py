@@ -5,7 +5,7 @@ attach`), mounted and ejected with udisks / gio as a desktop does.
 (src/msc.rs: after START STOP UNIT LoEj=1 Start=0 the medium stays absent,
 02/3A/00, until a re-plug; Windows used to mount it again at once.)
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/ejecttest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P]
 
 Steps (exit status 0 = PASS):

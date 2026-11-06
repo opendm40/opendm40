@@ -74,10 +74,10 @@ impl Wave {
 
     pub fn name(self) -> &'static str {
         match self {
-            Wave::Sine => "Sine",
-            Wave::Square => "Square",
-            Wave::Triangle => "Triangle",
-            Wave::Ramp => "Ramp",
+            Wave::Sine => crate::tr!("Sine"),
+            Wave::Square => crate::tr!("Square"),
+            Wave::Triangle => crate::tr!("Triangle"),
+            Wave::Ramp => crate::tr!("Ramp"),
         }
     }
 

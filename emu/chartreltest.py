@@ -3,7 +3,7 @@
 as the stock (FUN_0803e398 / FUN_0803e408 leave the chart's point count; only
 a function change clears it): the absolute and the REL points both stay.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/chartreltest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
 
 3.3 V DC on V-COM, the chart full of 3.3 V points (8 s; it holds 6.4 s).

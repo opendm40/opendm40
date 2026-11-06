@@ -4,7 +4,7 @@ SRAM after the settings record, .usbhs_bss in the USBHS FIFO RAM): the
 buffers there start zeroed whatever the areas held, and the settings record
 and its sequence words survive a reset while the buffers are in use.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/xramtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 One run:
