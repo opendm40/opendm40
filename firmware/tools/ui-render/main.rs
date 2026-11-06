@@ -3014,6 +3014,81 @@ fn main() {
         println!("rate toast: widest {widest:?}, {}", all.iter().map(|(_, t)| t.as_str()).collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(" | "));
         (&*Box::leak(widest.into_boxed_str()), &*Box::leak(fast.into_boxed_str()))
     };
+    // The 0L caption's range line fits its box, every function and range
+    // (ui::ol_range_text; the units as the DMM's readings spell them).
+    {
+        // (mode, range, unit, decimals): the ranges the DMM has.
+        let mut all: Vec<(u8, i8, &str, u8)> = vec![(11, 0, "\u{3a9}", 2), (12, 0, "V", 4)];
+        for (u, d) in [("V", 1), ("V", 2), ("V", 3), ("V", 4), ("mV", 2), ("mV", 3), ("A", 3), ("A", 4), ("mA", 2), ("mA", 3), ("uA", 2), ("uA", 3)] {
+            all.push((1, 0, u, d));
+        }
+        for (u, d) in [("\u{3a9}", 2), ("\u{3a9}", 3), ("k\u{3a9}", 2), ("k\u{3a9}", 3), ("k\u{3a9}", 4), ("M\u{3a9}", 2), ("M\u{3a9}", 3), ("M\u{3a9}", 4)] {
+            all.push((10, 0, u, d));
+        }
+        for rg in 0..=7i8 {
+            all.push((13, rg, if rg <= 2 { "nF" } else { "\u{b5}F" }, 2));
+        }
+        let mut widest = (0, String::new());
+        for (mode, range, u, dec) in all {
+            let mut r = cases[0].1;
+            r.main = ol(dec, u);
+            (r.mode, r.range) = (mode, range);
+            let mut b = [0u8; 24];
+            let t = ui::ol_range_text(&mut b, &r);
+            let w = stockfont::text_width(stockfont::TEXT22, t, 1);
+            ck.cases += 1;
+            if w > ui::OL_WORD.w {
+                ck.fail("ol-range/width", format!("{t:?} {w} px > {}", ui::OL_WORD.w));
+            }
+            if w > widest.0 {
+                widest = (w, t.to_string());
+            }
+        }
+        println!("0L range line: widest {:?} {} px", widest.1, widest.0);
+    }
+    // The 0L caption on the DMM page, for the contact sheet: bargraph and
+    // history row, a limit badge, HOLD, a range change while it stays 0L.
+    for (i, (name, mode, range, u, dec, bar, hold, lim)) in [
+        ("60v", 1u8, 0i8, "V", 3u8, true, 0u8, meter::V_NONE),
+        ("1000v", 1, 3, "V", 1, true, 0, meter::V_HI),
+        ("600mv-hist", 1, 0, "mV", 2, false, 1, meter::V_NONE),
+        ("600kohm", 10, 3, "k\u{3a9}", 2, true, 0, meter::V_NONE),
+        ("600mohm", 10, 7, "M\u{3a9}", 2, true, 0, meter::V_HI),
+        ("cont", 11, 0, "\u{3a9}", 2, true, 0, meter::V_NONE),
+        ("diode", 12, 0, "V", 4, true, 0, meter::V_NONE),
+        ("cap-60mf", 13, 7, "\u{b5}F", 0, true, 0, meter::V_NONE),
+        ("600ma", 5, 0, "mA", 2, true, 0, meter::V_NONE),
+        ("temp", 15, 0, "\u{b0}C", 1, true, 0, meter::V_NONE),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        host::reset(0);
+        let r = rd(mode, ol(dec, u), None, None, false);
+        let r = Reading { range, ..r };
+        let mut dv = ui::DmmView::new();
+        dv.bar_on = bar;
+        dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
+        dv.bar_update(&r);
+        dv.reading(&r, hold, lim);
+        ui::status_right(&status(0));
+        ck.check(&format!("ol-range/{name}"), &[("screen", Bx::new(0, 0, 480, 320))]);
+        save(&out, &format!("o{:02}-ol-{name}", i + 1));
+    }
+    // A range change while it stays 0L: the line follows, nothing else moves.
+    {
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.draw_static(Button::Volt, 1, false, false);
+        dv.reading(&rd(1, ol(3, "V"), None, None, false), 0, meter::V_NONE);
+        dv.reading(&rd(1, ol(2, "V"), None, None, false), 0, meter::V_NONE);
+        let got = emu().fb.clone();
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.draw_static(Button::Volt, 1, false, false);
+        dv.reading(&rd(1, ol(2, "V"), None, None, false), 0, meter::V_NONE);
+        ck.same_as("ol-range/range-change", &got);
+    }
     let toasts = [
         ("Disk in use by PC - eject first", false),
         ("Saved LOG000.DLG", true),

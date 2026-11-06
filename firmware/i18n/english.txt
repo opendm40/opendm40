@@ -553,6 +553,7 @@ kWh
 list_page {title}: values vs rows
 logic level
 mA
+mF
 mHz
 mV
 mVA

@@ -11,6 +11,8 @@ section named after the tag as the release notes; how to cut a release:
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
 
+- Overflow names the range: **>60V**, **>600MΩ** beside the big 0L, in manual ranges and at the top of AUTO.
+
 - **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
 
 - **Gallery: select several files and delete them together**
