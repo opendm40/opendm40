@@ -19,6 +19,7 @@ section named after the tag as the release notes; how to cut a release:
 
 - **Multimeter:** the reading with the extra digit sits 4 px further right.
 - **Scope:** the trigger badge takes the new source's colour at once.
+- **Scope:** the probe factor is kept after a power-off also with Mode Remember OFF.
 - Function buttons: V and A show the remembered AC / DC / AC+DC / AUTO; continuity / diode and Hz / °C put the remembered sub-mode first.
 
 - Diode: the resistance stays on screen while the SHORT / BEEP band is on (0.4.0 hid it below 22 mV).
