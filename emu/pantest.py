@@ -2,7 +2,7 @@
 """opendm40 stopped scope record: pan by touch and zoom across the long
 record, in the emulator.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/pantest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port N]
 
 An 8 Hz 2-12 V square on the MCX (the low level off the CH1 zero line),

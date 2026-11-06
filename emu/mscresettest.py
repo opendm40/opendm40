@@ -7,7 +7,7 @@ and a USB port reset when that does not help. (Device check d8e249d 6b: a
 command never completed, usb-storage reset the meter twice, then the
 meter hung and the watchdog reset it.)
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/mscresettest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Cases (each: then a TEST UNIT READY, READ(10) of the boot sector and of

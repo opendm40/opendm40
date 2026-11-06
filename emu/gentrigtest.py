@@ -6,7 +6,7 @@ failures) and the computed trigger fires in Normal sweep on a stream
 timebase; the PWM path (square 2 MHz) triggers at 100 ns and 1 us/div;
 TRIG:SOUR CHAN1 (the short form) is accepted; the generator off: WAIT.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/gentrigtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 The emulator's TIM6 counts but moves no DMA (PwmTimer, GD32_DMA): the DAC

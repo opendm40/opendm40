@@ -112,6 +112,7 @@ $MARK
 | | |
 |---|---|
 | SHA-256 | \`$SUM\` |
+| Localized images | \`$NAME-zh.bin\`, \`-ru\`, \`-it\`, \`-fr\` in the [same release]($SERVER/$REPO/releases/tag/$TAG) |
 | Built from | $built |
 | CI | [run #$RUNNUM]($SERVER/$REPO/actions/runs/$RUN): $CONCL |
 
@@ -134,10 +135,16 @@ if ! gh release view "$TAG" -R "$REPO" > /dev/null 2>&1; then
         gh release view "$TAG" -R "$REPO" > /dev/null
 fi
 OLD=$(assets "$PR")
-gh release upload "$TAG" -R "$REPO" --clobber "$BIN"
+# The localized images of this build (data, like $BIN).
+LANG_BINS=()
+for f in "$DIR"/a/"$NAME"-??.bin; do
+    [ -f "$f" ] && [ ! -L "$f" ] && LANG_BINS+=("$f")
+done
+gh release upload "$TAG" -R "$REPO" --clobber "$BIN" "${LANG_BINS[@]}"
 # This PR's earlier builds: one current build per PR.
 echo "$OLD" | while read -r id name; do
-    [ -n "$id" ] && [ "$name" != "$NAME.bin" ] || continue
+    case $name in "$NAME".bin|"$NAME"-??.bin) continue ;; esac
+    [ -n "$id" ] || continue
     echo "pr-build: delete $name"
     gh api -X DELETE "repos/$REPO/releases/assets/$id"
 done

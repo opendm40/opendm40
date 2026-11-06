@@ -24,6 +24,13 @@ default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log"]
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
+# A second UI language next to English (src/lang.rs, i18n/<lang>.tsv): Settings
+# > Display > Language. One per image, none in the default image: the text and
+# glyphs take region B.
+zh = []
+ru = []
+it = []
+fr = []
 # AD2 logger stream on ONE timer interrupt (TIMER6 = STM32 TIM7, IRQ 55) with
 # the HY3131 bus handed to the ISR exclusively while an AD2 session runs
 # (../docs/history/decisions-2026-10-22.md #3; src/hy3131.rs `stream`, src/logger.rs
@@ -75,6 +82,16 @@ dbg-acdc = []
 # commands are refused (undefined header). Build with --features dbg-touch
 # for a touch session (docs/native-boot.md "SRAM audit").
 dbg-touch = []
+# The developer image: its DBG: commands for tests, tuning and experiments
+# (DBG:DRAG, IDLE, FLASH?, ISR?, FAST?, CAP..., CHG..., SCANLINE..., TE?,
+# VDISK..., PINCH, GEST?, READout?, ALARm?, SENTinel:LOG? / VARiant / PRECond,
+# CH2:LAG, GENTRIG..., HWTRIG..., POWer:ROW? / RAW? / POKE / STAT / DISC).
+# Off by default: the release images (English and every language) refuse
+# them as undefined headers and gain ~15 KB of region B. `./build.sh --dev`
+# builds the developer image; tools/reload.sh and the emulator build it by
+# default. The other DBG: commands (PING, BOOT?, VIEW?, TAP, SWIPE, KEY,
+# UPLoad, UPDATE, ...) are in every image.
+dbg-dev = []
 # DBG:PROF? / DBG:PROF:RESET, the main-loop profiler (src/prof.rs; 1 KB of
 # RAM and its hooks in every pass). Off by default: the hooks are empty and
 # the two commands are refused (undefined header).
@@ -88,12 +105,6 @@ dbg-ohm6 = []
 # DBG:SENTinel? / DBG:SENTinel:REG? (Sentinel::diag_text, Dmm::reg_text).
 dbg-sent = []
 # DBG:SRC: dbg-src above.
-# DBG:ACDC:METH / STAT / ZERO / R0, the AC+DC prototype methods B and C
-# (src/acdcm.rs; docs/acdc-approaches.md; ~6.6 KB of region B, 2.7 KB of
-# region C, 480 B of RAM). Off by default: AC+DC is method A (the stock
-# alternation, dmm.rs) only and the four commands are refused (undefined
-# header).
-acdc-meth = []
 # DBG:ACDC:TRACE, the AC+DC event trace (src/acdctr.rs; a 64-entry ring,
 # 1.8 KB of RAM). Off by default: the trace never records and the command is
 # refused (undefined header).
@@ -128,3 +139,7 @@ usbd-storage = { version = "3.0.0", features = ["bbb", "scsi"] }
 # region B, ~0.8 KB).
 [patch.crates-io]
 usbd-storage = { path = "vendor/usbd-storage" }
+
+[lints.rust]
+# ui-render's string log (tools/ui-render/run.sh UIR_LANG).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(lang_log)'] }
