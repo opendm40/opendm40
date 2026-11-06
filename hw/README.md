@@ -351,9 +351,9 @@ scope and generator ground (*inferred*).
   [datasheets/README.md](datasheets/README.md)), own 24 MHz crystal, PCB meander antenna at the board edge
   ([main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg)). Classic SPP (RFCOMM channel 1,
   [`docs/bt-protocol.md`](../docs/bt-protocol.md)) and BLE ([`firmware/src/bt.rs`](../firmware/src/bt.rs)).
-- Firmware in the chip: a Jieli SDK application built as "KT6368A-BLE", variant "BLE03",
-  version `VER2.1-20240615` (its start text); it matches the SDK's `spp_and_le` example
-  (*inferred* from the strings). It has 25 `AT+` commands, of which the meter
+- Firmware in the chip: a Jieli SDK (v2.0.0) application built as "KT6368A-BLE", variant
+  "BLE03", version `VER2.1-20240615` (its start text): the SDK's `spp_and_le` transparent-data
+  example with the module vendor's AT layer. It has 25 `AT+` commands, of which the meter
   uses `AT+SBN`, `AT+CBN`, `AT+SLED`, `AT+RESET`; the public KT6368A manual describes a different
   command set. Command table: [Module AT commands](#module-at-commands); chip key and flash layout: `stock/re/docs/bt-module-ac6328a.md`.
 - UART4: TX PA0, RX PA1 (AF8), 115200 8N1, no RTS/CTS ([`bt.rs`](../firmware/src/bt.rs)). The
