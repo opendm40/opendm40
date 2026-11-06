@@ -22,6 +22,7 @@
  mA
  nA
  of 
+ ohm
  pt
  pts
  px
@@ -365,6 +366,7 @@ NTC10K3950
 NTC10k B3435
 NTC10k B3950
 NTCUSER
+NULL
 Needs the P + PF method
 No AC: DC is more precise
 No frames yet
@@ -373,6 +375,7 @@ No record to save
 Noise
 Not a DM40 update file
 Not while logging
+Null 
 OFF: V, P at the jacks
 OHM
 OK,

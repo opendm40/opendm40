@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Multimeter:** Null on the Resistor Settings page takes the test leads' resistance off the ohm reading.
 - **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
 
 - **Gallery: select several files and delete them together**
