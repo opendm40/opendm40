@@ -2648,7 +2648,7 @@ impl App {
     }
 
     /// The continuity / diode beeper indicator (ui::SHORT_STYLE: a green
-    /// SHORT / BEEP band over the aux row, the digits green), after every
+    /// BEEP band over the aux row, the digits green), after every
     /// DMM poll (5 ms; `polled` false while the logger owns the HY3131: no
     /// condition, off). On at once with the condition (`Dmm::beeping`:
     /// continuity's comparator, the diode pattern), off BEEP_HOLD_MS after
