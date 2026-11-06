@@ -1,6 +1,14 @@
 //! Host test of src/autooff.rs: the idle shutdown runs on battery only.
 //! Simulates App::tick's use of it (one pass per 100 ms). Needs no hardware.
 //!   tools/autooff-test/run.sh
+// src/lang.rs `tr!` as in the English image.
+#[macro_export]
+macro_rules! tr {
+    ($s:literal) => {
+        $s
+    };
+}
+
 #[path = "../../src/autooff.rs"]
 mod autooff;
 #[path = "../../src/lowbat.rs"]
@@ -151,7 +159,44 @@ fn run(end: u64, off_ms: u64, held: bool, state: impl Fn(u64) -> (u8, bool)) -> 
     None
 }
 
+/// The Shutdown setting's codes in p[0], old records first.
+fn setting_tests() {
+    // A record from before the longer list: bits 4..5 hold 0..3, bits 6..7
+    // are 0; its other p[0] fields do not change the meaning.
+    for (code, ms, txt) in [(0u32, 600_000u64, "10 min"), (1, 1_800_000, "30 min"), (2, 3_600_000, "1 hour"), (3, 0, "Never")] {
+        for other in [0u32, 0xFFFF_FF0F] {
+            let c = off_code(code << 4 | other);
+            t("old record's Shutdown keeps its meaning", OFF_MS[c] == ms && OFF_TXT[c] == txt);
+        }
+    }
+    t("default 30 min", OFF_MS[OFF_DEFAULT] == 1_800_000);
+    t("unknown code reads as the default", off_code(15 << 4) == OFF_DEFAULT);
+    // Every code survives the write + read of bits 4..7.
+    for c in 0..OFF_MS.len() {
+        t("code round trip", off_code((c as u32) << 4) == c);
+    }
+    // "+" from the shortest walks all 15, rising, Never last; no wrap-around.
+    let mut c = 4;
+    t("1 min is the first", OFF_MS[c] == 60_000);
+    t("no step below the first", off_step(c, -1) == c);
+    for _ in 0..OFF_MS.len() - 2 {
+        let n = off_step(c, 1);
+        t("rising order", OFF_MS[n] > OFF_MS[c]);
+        t("- undoes +", off_step(n, -1) == c);
+        c = n;
+    }
+    c = off_step(c, 1);
+    t("Never last", c == 3);
+    t("no step above Never", off_step(c, 1) == 3);
+    // The shortest choice: the warning (30 s before) has its whole time.
+    let min = OFF_MS.iter().copied().filter(|&m| m != 0).min().unwrap_or(0);
+    t("1 min is the shortest", min == 60_000);
+    t("warning fits the shortest", min >= 2 * OFF_WARN_MS);
+    t("not due at the warning", !off_due(min - OFF_WARN_MS, min, false));
+}
+
 fn main() {
+    setting_tests();
     lowbat_tests();
     // The rule itself.
     t("PB10 high", usb_power(0b01, false));
