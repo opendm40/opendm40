@@ -8,7 +8,8 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 The meter's screens in Chinese, Russian, Italian and French, a settings
-reset, multi-select delete in the gallery and a wider scope MF menu.
+reset, multi-select delete in the gallery and a wider scope MF menu. It
+includes all the fixes of v0.4.1.
 
 ### New
 
