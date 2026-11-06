@@ -413,6 +413,9 @@ pub fn page(v: &SetupVals, pc: Rect) {
     fill_c(pc, pc, C_POP_BG);
     let dali = dc::is_dali(v.proto);
     for (r, t) in SU_LABELS.iter().zip(if dali { DL_TEXTS } else { SU_TEXTS }) {
+        if off_strip(*r) {
+            continue;
+        }
         let k = Ink::new(sf::SC_F16, *r, t, 1, 0);
         paint(isect(isect(k.bx, *r), pc), &[(K_TEXT, C_POP_BG)], |x, y| match k.at(x, y) {
             Some(g) => (C_FILL, tag(1, g)),
