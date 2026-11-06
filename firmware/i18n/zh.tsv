@@ -233,3 +233,8 @@ Deleting	正在删除	M
 Selection cleared	已清除选择	M
 Files changed	文件已更改	M
 Some skipped	部分已跳过	M
+Low battery! Please charge	电量低! 请充电	M
+Battery empty: off in 30 s	电池耗尽: 30 秒后关机	M
+Battery empty: off in 20 s	电池耗尽: 20 秒后关机	M
+Battery empty: off in 10 s	电池耗尽: 10 秒后关机	M
+Unstable: unplug USB?	Unstable: unplug USB?	E

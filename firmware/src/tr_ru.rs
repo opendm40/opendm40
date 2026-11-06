@@ -5,72 +5,75 @@
 macro_rules! tr {
     ("0 A for 60 s: check the fuse?") => { "0 A 60 c: \u{6}pe\u{7}oxpa\u{2}\u{1}\u{3}e\u{5}\u{8}?" };
     ("1 hour") => { "1 \u{15}ac" };
-    ("1 min") => { "1 \u{b}\u{1}\u{2}" };
-    ("10 min") => { "10 \u{b}\u{1}\u{2}" };
-    ("30 min") => { "30 \u{b}\u{1}\u{2}" };
-    ("5 min") => { "5 \u{b}\u{1}\u{2}" };
+    ("1 min") => { "1 \u{c}\u{1}\u{2}" };
+    ("10 min") => { "10 \u{c}\u{1}\u{2}" };
+    ("30 min") => { "30 \u{c}\u{1}\u{2}" };
+    ("5 min") => { "5 \u{c}\u{1}\u{2}" };
     ("< Back") => { "< Ha\u{e}a\u{7}" };
     ("< Prev") => { "< \u{f}pe\u{7}" };
-    ("A input path intact") => { "\u{426}e\u{6}\u{8} \u{c}xo\u{7}a A \u{1b}e\u{5}a" };
-    ("A jack current: 10 A shunt on") => { "To\u{4} \u{c} A: \u{16}y\u{2}\u{3} 10 A \u{c}\u{4}\u{5}." };
-    ("AC voltage here: use AC V?") => { "\u{f}epe\u{b}e\u{2}\u{2}oe U: AC V?" };
-    ("AUTO starts on mV: AUTO+ is safer") => { "AUTO c mV: AUTO+ \u{10}e\u{e}o\u{6}ac\u{2}ee" };
-    ("AUTO+ recommended: never steps to mV") => { "\u{1f}y\u{15}\u{16}e AUTO+: \u{10}e\u{e} \u{6}epexo\u{7}a \u{2}a mV" };
+    ("A input path intact") => { "\u{426}e\u{6}\u{8} \u{b}xo\u{7}a A \u{1b}e\u{5}a" };
+    ("A jack current: 10 A shunt on") => { "To\u{4} \u{b} A: \u{16}y\u{2}\u{3} 10 A \u{b}\u{4}\u{5}." };
+    ("AC voltage here: use AC V?") => { "\u{f}epe\u{c}e\u{2}\u{2}oe U: AC V?" };
+    ("AUTO starts on mV: AUTO+ is safer") => { "AUTO c mV: AUTO+ \u{11}e\u{e}o\u{6}ac\u{2}ee" };
+    ("AUTO+ recommended: never steps to mV") => { "\u{41b}y\u{15}\u{16}e AUTO+: \u{11}e\u{e} \u{6}epexo\u{7}a \u{2}a mV" };
     ("Accuracy") => { "To\u{15}\u{2}oc\u{3}\u{8}" };
     ("Again") => { "E\u{1e}\u{451} pa\u{e}" };
     ("Alerts") => { "\u{f}pe\u{7}y\u{6}p." };
     ("Analog power") => { "A\u{2}a\u{5}o\u{13}. \u{6}\u{1}\u{3}." };
-    ("Arm") => { "B\u{e}\u{c}ec\u{3}\u{1}" };
-    ("Auto") => { "A\u{c}\u{3}o" };
-    ("Auto (per view)") => { "A\u{c}\u{3}o (\u{44d}\u{4}pa\u{2})" };
-    ("Auto Hold") => { "A\u{c}\u{3}oy\u{7}ep\u{17}a\u{2}\u{1}e" };
-    ("Autorange") => { "A\u{c}\u{3}o\u{7}\u{1}a\u{6}a\u{e}o\u{2}" };
+    ("Arm") => { "B\u{e}\u{b}ec\u{3}\u{1}" };
+    ("Auto") => { "A\u{b}\u{3}o" };
+    ("Auto (per view)") => { "A\u{b}\u{3}o (\u{44d}\u{4}pa\u{2})" };
+    ("Auto Hold") => { "A\u{b}\u{3}oy\u{7}ep\u{17}a\u{2}\u{1}e" };
+    ("Autorange") => { "A\u{b}\u{3}o\u{7}\u{1}a\u{6}a\u{e}o\u{2}" };
     ("Back") => { "Ha\u{e}a\u{7}" };
-    ("Backlight") => { "\u{f}o\u{7}c\u{c}e\u{3}\u{4}a" };
+    ("Backlight") => { "\u{f}o\u{7}c\u{b}e\u{3}\u{4}a" };
     ("Bargraph") => { "\u{428}\u{4}a\u{5}a" };
-    ("Bootloader") => { "\u{19}a\u{13}py\u{e}\u{15}\u{1}\u{4}" };
-    ("Both always") => { "O\u{10}a \u{c}ce\u{13}\u{7}a" };
+    ("Battery empty: off in 10 s") => { "\u{411}a\u{3}ape\u{10} \u{6}yc\u{3}a: \u{b}\u{12}\u{4}\u{5}. 10 c" };
+    ("Battery empty: off in 20 s") => { "\u{411}a\u{3}ape\u{10} \u{6}yc\u{3}a: \u{b}\u{12}\u{4}\u{5}. 20 c" };
+    ("Battery empty: off in 30 s") => { "\u{411}a\u{3}ape\u{10} \u{6}yc\u{3}a: \u{b}\u{12}\u{4}\u{5}. 30 c" };
+    ("Bootloader") => { "\u{18}a\u{13}py\u{e}\u{15}\u{1}\u{4}" };
+    ("Both always") => { "O\u{11}a \u{b}ce\u{13}\u{7}a" };
     ("Brightness:") => { "\u{42f}p\u{4}oc\u{3}\u{8}:" };
     ("Burden voltage") => { "\u{f}a\u{7}e\u{2}\u{1}e \u{2}a\u{6}p." };
-    ("CSV save failed") => { "O\u{16}\u{1}\u{10}\u{4}a CSV" };
-    ("Calibrate") => { "Ka\u{5}\u{1}\u{10}p." };
-    ("Calibration, files stay") => { "Ka\u{5}\u{1}\u{10}p. \u{1} \u{444}a\u{14}\u{5}\u{11} \u{1b}e\u{5}\u{11}" };
-    ("Cancel") => { "O\u{3}\u{b}e\u{2}a" };
-    ("Cannot delete") => { "He\u{5}\u{8}\u{e}\u{12} y\u{7}a\u{5}\u{1}\u{3}\u{8}" };
+    ("CSV save failed") => { "O\u{16}\u{1}\u{11}\u{4}a CSV" };
+    ("Calibrate") => { "Ka\u{5}\u{1}\u{11}p." };
+    ("Calibration, files stay") => { "Ka\u{5}\u{1}\u{11}p. \u{1} \u{444}a\u{14}\u{5}\u{12} \u{1b}e\u{5}\u{12}" };
+    ("Cancel") => { "O\u{3}\u{c}e\u{2}a" };
+    ("Cannot delete") => { "He\u{5}\u{8}\u{e}\u{10} y\u{7}a\u{5}\u{1}\u{3}\u{8}" };
     ("Capacitance Settings") => { "Hac\u{3}po\u{14}\u{4}a C" };
-    ("Change") => { "\u{1d}\u{e}\u{b}e\u{2}e\u{2}\u{1}e" };
-    ("Check leads") => { "\u{f}po\u{c}ep\u{8}\u{3}e \u{1e}y\u{6}\u{11}" };
+    ("Change") => { "\u{1d}\u{e}\u{c}e\u{2}e\u{2}\u{1}e" };
+    ("Check leads") => { "\u{f}po\u{b}ep\u{8}\u{3}e \u{1e}y\u{6}\u{12}" };
     ("Clear") => { "O\u{15}\u{1}c\u{3}\u{1}\u{3}\u{8}" };
-    ("Clear limits") => { "C\u{2}\u{12}\u{3}\u{8} \u{6}pe\u{7}e\u{5}\u{11}" };
-    ("Color") => { "\u{426}\u{c}e\u{3}" };
-    ("Corners") => { "\u{18}\u{13}\u{5}\u{11}" };
-    ("Coupling") => { "C\u{c}\u{12}\u{e}\u{8}" };
+    ("Clear limits") => { "C\u{2}\u{10}\u{3}\u{8} \u{6}pe\u{7}e\u{5}\u{12}" };
+    ("Color") => { "\u{426}\u{b}e\u{3}" };
+    ("Corners") => { "\u{19}\u{13}\u{5}\u{12}" };
+    ("Coupling") => { "C\u{b}\u{10}\u{e}\u{8}" };
     ("Current Settings") => { "Hac\u{3}po\u{14}\u{4}a I" };
-    ("Current in A jack: check leads") => { "To\u{4} \u{c} A: \u{6}po\u{c}ep\u{8}\u{3}e \u{1e}y\u{6}\u{11}" };
-    ("Current too high: reduce it") => { "To\u{4} \u{c}e\u{5}\u{1}\u{4}: y\u{b}e\u{2}\u{8}\u{16}\u{1}\u{3}e" };
-    ("DC voltage here: use DC V?") => { "\u{f}oc\u{3}o\u{12}\u{2}\u{2}oe U: DC V?" };
+    ("Current in A jack: check leads") => { "To\u{4} \u{b} A: \u{6}po\u{b}ep\u{8}\u{3}e \u{1e}y\u{6}\u{12}" };
+    ("Current too high: reduce it") => { "To\u{4} \u{b}e\u{5}\u{1}\u{4}: y\u{c}e\u{2}\u{8}\u{16}\u{1}\u{3}e" };
+    ("DC voltage here: use DC V?") => { "\u{f}oc\u{3}o\u{10}\u{2}\u{2}oe U: DC V?" };
     ("DMM rate") => { "C\u{4}opoc\u{3}\u{8}" };
-    ("DMM row") => { "\u{428}\u{4}a\u{5}a/\u{1}c\u{3}op\u{1}\u{12}" };
+    ("DMM row") => { "\u{428}\u{4}a\u{5}a/\u{1}c\u{3}op\u{1}\u{10}" };
     ("Danger alarm") => { "C\u{1}\u{13}\u{2}. o\u{6}ac\u{2}oc\u{3}\u{1}" };
     ("Decode") => { "\u{1c}e\u{4}o\u{7}ep" };
-    ("Default") => { "\u{18}\u{b}o\u{5}\u{15}." };
-    ("Delete") => { "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8}" };
-    ("Delete failed") => { "O\u{16}\u{1}\u{10}\u{4}a y\u{7}a\u{5}e\u{2}\u{1}\u{12}" };
-    ("Delete screenshot?") => { "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8} c\u{2}\u{1}\u{b}o\u{4}?" };
-    ("Delete selected") => { "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{c}\u{11}\u{10}p." };
-    ("Delete selected?") => { "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{c}\u{11}\u{10}pa\u{2}\u{2}\u{11}e?" };
-    ("Delete this log?") => { "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}?" };
-    ("Deleting") => { "\u{18}\u{7}a\u{5}e\u{2}\u{1}e" };
-    ("Device info") => { "O \u{6}p\u{1}\u{10}ope" };
-    ("Dim screen") => { "\u{19}a\u{3}e\u{b}\u{2}e\u{2}\u{1}e" };
-    ("Discharging...") => { "Pa\u{e}p\u{12}\u{7}..." };
-    ("Disk busy") => { "\u{1c}\u{1}c\u{4} \u{e}a\u{2}\u{12}\u{3}" };
-    ("Disk busy, try again") => { "\u{1c}\u{1}c\u{4} \u{e}a\u{2}\u{12}\u{3}, \u{6}o\u{c}\u{3}op\u{1}\u{3}e" };
+    ("Default") => { "\u{19}\u{c}o\u{5}\u{15}." };
+    ("Delete") => { "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8}" };
+    ("Delete failed") => { "O\u{16}\u{1}\u{11}\u{4}a y\u{7}a\u{5}e\u{2}\u{1}\u{10}" };
+    ("Delete screenshot?") => { "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8} c\u{2}\u{1}\u{c}o\u{4}?" };
+    ("Delete selected") => { "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{b}\u{12}\u{11}p." };
+    ("Delete selected?") => { "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{b}\u{12}\u{11}pa\u{2}\u{2}\u{12}e?" };
+    ("Delete this log?") => { "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}?" };
+    ("Deleting") => { "\u{19}\u{7}a\u{5}e\u{2}\u{1}e" };
+    ("Device info") => { "O \u{6}p\u{1}\u{11}ope" };
+    ("Dim screen") => { "\u{18}a\u{3}e\u{c}\u{2}e\u{2}\u{1}e" };
+    ("Discharging...") => { "Pa\u{e}p\u{10}\u{7}..." };
+    ("Disk busy") => { "\u{1c}\u{1}c\u{4} \u{e}a\u{2}\u{10}\u{3}" };
+    ("Disk busy, try again") => { "\u{1c}\u{1}c\u{4} \u{e}a\u{2}\u{10}\u{3}, \u{6}o\u{b}\u{3}op\u{1}\u{3}e" };
     ("Disk full") => { "\u{1c}\u{1}c\u{4} \u{6}o\u{5}o\u{2}" };
-    ("Disk read error") => { "O\u{16}\u{1}\u{10}\u{4}a \u{15}\u{3}e\u{2}\u{1}\u{12} \u{7}\u{1}c\u{4}a" };
+    ("Disk read error") => { "O\u{16}\u{1}\u{11}\u{4}a \u{15}\u{3}e\u{2}\u{1}\u{10} \u{7}\u{1}c\u{4}a" };
     ("Display") => { "\u{42d}\u{4}pa\u{2}" };
-    ("Duration") => { "Bpe\u{b}\u{12}" };
-    ("Duty") => { "\u{19}a\u{6}o\u{5}\u{2}." };
+    ("Duration") => { "Bpe\u{c}\u{10}" };
+    ("Duty") => { "\u{18}a\u{6}o\u{5}\u{2}." };
     ("Edge") => { "\u{424}po\u{2}\u{3}" };
     ("Edge:") => { "\u{424}po\u{2}\u{3}:" };
     ("Empty file") => { "\u{f}yc\u{3}o\u{14} \u{444}a\u{14}\u{5}" };
@@ -78,100 +81,101 @@ macro_rules! tr {
     ("FFT Unit") => { "E\u{7}. FFT" };
     ("Fail beep") => { "C\u{1}\u{13}\u{2}. \u{6}pe\u{7}e\u{5}a" };
     ("Falling") => { "C\u{6}a\u{7}" };
-    ("Fast") => { "\u{411}\u{11}c\u{3}po" };
+    ("Fast") => { "\u{411}\u{12}c\u{3}po" };
     ("File not found") => { "\u{424}a\u{14}\u{5} \u{2}e \u{2}a\u{14}\u{7}e\u{2}" };
-    ("Files changed") => { "\u{424}a\u{14}\u{5}\u{11} \u{1}\u{e}\u{b}e\u{2}\u{1}\u{5}\u{1}c\u{8}" };
+    ("Files changed") => { "\u{424}a\u{14}\u{5}\u{12} \u{1}\u{e}\u{c}e\u{2}\u{1}\u{5}\u{1}c\u{8}" };
     ("Files live") => { "To\u{5}\u{8}\u{4}o \u{15}\u{3}e\u{2}\u{1}e" };
     ("Files live (replug)") => { "\u{427}\u{3}e\u{2}\u{1}e (\u{6}epe\u{6}o\u{7}\u{4}\u{5}.)" };
-    ("Free") => { "C\u{c}o\u{10}o\u{7}\u{2}o" };
+    ("Free") => { "C\u{b}o\u{11}o\u{7}\u{2}o" };
     ("Freq") => { "\u{427}ac\u{3}." };
     ("Frequency") => { "\u{427}ac\u{3}o\u{3}a" };
     ("Fuse OK") => { "\u{f}pe\u{7}oxp. \u{1b}e\u{5}" };
     ("Fuse check") => { "Tec\u{3} \u{6}pe\u{7}oxp." };
     ("Fuse open") => { "\u{f}pe\u{7}oxp. c\u{13}ope\u{5}" };
-    ("Gallery") => { "\u{1a}a\u{5}epe\u{12}" };
-    ("Gallery: screenshots and logs") => { "\u{1a}a\u{5}epe\u{12}: c\u{2}\u{1}\u{b}\u{4}\u{1} \u{1} \u{e}a\u{6}\u{1}c\u{1}" };
-    ("Generator is off") => { "\u{1a}e\u{2}epa\u{3}op \u{c}\u{11}\u{4}\u{5}." };
+    ("Gallery") => { "\u{1a}a\u{5}epe\u{10}" };
+    ("Gallery: screenshots and logs") => { "\u{1a}a\u{5}epe\u{10}: c\u{2}\u{1}\u{c}\u{4}\u{1} \u{1} \u{e}a\u{6}\u{1}c\u{1}" };
+    ("Generator is off") => { "\u{1a}e\u{2}epa\u{3}op \u{b}\u{12}\u{4}\u{5}." };
     ("Grid intensity:") => { "\u{42f}p\u{4}oc\u{3}\u{8} ce\u{3}\u{4}\u{1}:" };
-    ("Halves (stock)") => { "\u{f}o\u{5}o\u{c}\u{1}\u{2}\u{11} (\u{16}\u{3}a\u{3}\u{2}.)" };
+    ("Halves (stock)") => { "\u{f}o\u{5}o\u{b}\u{1}\u{2}\u{12} (\u{16}\u{3}a\u{3}\u{2}.)" };
     ("Hardware") => { "\u{f}\u{5}a\u{3}a" };
-    ("Help") => { "C\u{6}pa\u{c}\u{4}a" };
-    ("History") => { "\u{1d}c\u{3}op\u{1}\u{12}" };
-    ("Hold & Limits") => { "\u{18}\u{7}ep\u{17}a\u{2}\u{1}e, \u{6}pe\u{7}e\u{5}\u{11}" };
+    ("Help") => { "C\u{6}pa\u{b}\u{4}a" };
+    ("History") => { "\u{1d}c\u{3}op\u{1}\u{10}" };
+    ("Hold & Limits") => { "\u{19}\u{7}ep\u{17}a\u{2}\u{1}e, \u{6}pe\u{7}e\u{5}\u{12}" };
     ("Inrush") => { "\u{f}yc\u{4}. \u{3}o\u{4}" };
-    ("Inrush Current") => { "\u{f}yc\u{4}o\u{c}o\u{14} \u{3}o\u{4}" };
-    ("Install it now?") => { "\u{18}c\u{3}a\u{2}o\u{c}\u{1}\u{3}\u{8}?" };
-    ("Installing firmware...") => { "\u{18}c\u{3}a\u{2}o\u{c}\u{4}a \u{6}po\u{16}\u{1}\u{c}\u{4}\u{1}..." };
-    ("Interval") => { "\u{1d}\u{2}\u{3}ep\u{c}a\u{5}" };
+    ("Inrush Current") => { "\u{f}yc\u{4}o\u{b}o\u{14} \u{3}o\u{4}" };
+    ("Install it now?") => { "\u{19}c\u{3}a\u{2}o\u{b}\u{1}\u{3}\u{8}?" };
+    ("Installing firmware...") => { "\u{19}c\u{3}a\u{2}o\u{b}\u{4}a \u{6}po\u{16}\u{1}\u{b}\u{4}\u{1}..." };
+    ("Interval") => { "\u{1d}\u{2}\u{3}ep\u{b}a\u{5}" };
     ("Jack alerts") => { "\u{f}pe\u{7}y\u{6}p. \u{13}\u{2}\u{451}\u{e}\u{7}" };
-    ("Key/alert volume") => { "\u{1a}po\u{b}\u{4}oc\u{3}\u{8}" };
-    ("Lead from V/ohm jack to A") => { "\u{429}y\u{6} \u{1}\u{e} \u{13}\u{2}e\u{e}\u{7}a V/\u{3a9} \u{c} A" };
-    ("Limits") => { "\u{1f}\u{1}\u{b}\u{1}\u{3}\u{11}" };
-    ("Loading...") => { "\u{19}a\u{13}py\u{e}\u{4}a..." };
+    ("Key/alert volume") => { "\u{1a}po\u{c}\u{4}oc\u{3}\u{8}" };
+    ("Lead from V/ohm jack to A") => { "\u{429}y\u{6} \u{1}\u{e} \u{13}\u{2}e\u{e}\u{7}a V/\u{3a9} \u{b} A" };
+    ("Limits") => { "\u{41b}\u{1}\u{c}\u{1}\u{3}\u{12}" };
+    ("Loading...") => { "\u{18}a\u{13}py\u{e}\u{4}a..." };
     ("Log") => { "\u{416}yp\u{2}a\u{5}" };
-    ("Log failed") => { "O\u{16}\u{1}\u{10}\u{4}a \u{e}a\u{6}\u{1}c\u{1}" };
-    ("Loud") => { "\u{1a}po\u{b}\u{4}o" };
+    ("Log failed") => { "O\u{16}\u{1}\u{11}\u{4}a \u{e}a\u{6}\u{1}c\u{1}" };
+    ("Loud") => { "\u{1a}po\u{c}\u{4}o" };
+    ("Low battery! Please charge") => { "\u{18}ap\u{10}\u{7}\u{1}\u{3}e \u{11}a\u{3}ape\u{1f}!" };
     ("Lower") => { "H\u{1}\u{17}\u{2}\u{1}\u{14}" };
     ("Lower = reading") => { "H\u{1}\u{e} = \u{6}o\u{4}a\u{e}." };
     ("Lower limit") => { "H\u{1}\u{17}\u{2}\u{1}\u{14} \u{6}pe\u{7}e\u{5}" };
-    ("Main menu") => { "\u{1a}\u{5}a\u{c}\u{2}oe \u{b}e\u{2}\u{44e}" };
+    ("Main menu") => { "\u{1a}\u{5}a\u{b}\u{2}oe \u{c}e\u{2}\u{1f}" };
     ("Manual") => { "Py\u{15}\u{2}o\u{14}" };
-    ("Measure") => { "\u{1d}\u{e}\u{b}epe\u{2}\u{1}\u{12}" };
-    ("Measuring ...") => { "\u{1d}\u{e}\u{b}epe\u{2}\u{1}e..." };
-    ("Mode") => { "Pe\u{17}\u{1}\u{b}" };
-    ("Mode Remember") => { "\u{19}a\u{6}o\u{b}\u{2}\u{1}\u{3}\u{8} pe\u{17}\u{1}\u{b}" };
-    ("Mode:") => { "Pe\u{17}\u{1}\u{b}:" };
+    ("Measure") => { "\u{1d}\u{e}\u{c}epe\u{2}\u{1}\u{10}" };
+    ("Measuring ...") => { "\u{1d}\u{e}\u{c}epe\u{2}\u{1}e..." };
+    ("Mode") => { "Pe\u{17}\u{1}\u{c}" };
+    ("Mode Remember") => { "\u{18}a\u{6}o\u{c}\u{2}\u{1}\u{3}\u{8} pe\u{17}\u{1}\u{c}" };
+    ("Mode:") => { "Pe\u{17}\u{1}\u{c}:" };
     ("Model") => { "Mo\u{7}e\u{5}\u{8}" };
-    ("Multimeter") => { "My\u{5}\u{8}\u{3}\u{1}\u{b}e\u{3}p" };
-    ("Negative ohm") => { "O\u{3}p\u{1}\u{1b}. O\u{b}" };
+    ("Multimeter") => { "My\u{5}\u{8}\u{3}\u{1}\u{c}e\u{3}p" };
+    ("Negative ohm") => { "O\u{3}p\u{1}\u{1b}. O\u{c}" };
     ("Never") => { "H\u{1}\u{4}o\u{13}\u{7}a" };
     ("Next >") => { "C\u{5}e\u{7} >" };
     ("No") => { "He\u{3}" };
-    ("No data") => { "He\u{3} \u{7}a\u{2}\u{2}\u{11}x" };
+    ("No data") => { "He\u{3} \u{7}a\u{2}\u{2}\u{12}x" };
     ("No disk") => { "He\u{3} \u{7}\u{1}c\u{4}a" };
-    ("No ohm reading") => { "He\u{3} \u{6}o\u{4}a\u{e}a\u{2}\u{1}\u{12} \u{3a9}" };
-    ("No screenshots or logs") => { "He\u{3} c\u{2}\u{1}\u{b}\u{4}o\u{c} \u{1} \u{e}a\u{6}\u{1}ce\u{14}" };
-    ("Normal") => { "Hop\u{b}." };
-    ("OFF") => { "B\u{42b}K\u{1f}" };
-    ("OFF (stock)") => { "B\u{42b}K\u{1f} (\u{16}\u{3}a\u{3}\u{2}.)" };
+    ("No ohm reading") => { "He\u{3} \u{6}o\u{4}a\u{e}a\u{2}\u{1}\u{10} \u{3a9}" };
+    ("No screenshots or logs") => { "He\u{3} c\u{2}\u{1}\u{c}\u{4}o\u{b} \u{1} \u{e}a\u{6}\u{1}ce\u{14}" };
+    ("Normal") => { "Hop\u{c}." };
+    ("OFF") => { "B\u{42b}K\u{41b}" };
+    ("OFF (stock)") => { "B\u{42b}K\u{41b} (\u{16}\u{3}a\u{3}\u{2}.)" };
     ("OK") => { "OK" };
     ("OL: no path from V to A") => { "OL: \u{2}e\u{3} \u{1b}e\u{6}\u{1} o\u{3} V \u{4} A" };
-    ("ON") => { "BK\u{1f}" };
-    ("Off") => { "B\u{11}\u{4}\u{5}" };
-    ("Off (stock)") => { "B\u{11}\u{4}\u{5} (\u{16}\u{3}a\u{3}\u{2}.)" };
-    ("Offset") => { "C\u{b}e\u{1e}e\u{2}\u{1}e" };
+    ("ON") => { "BK\u{41b}" };
+    ("Off") => { "B\u{12}\u{4}\u{5}" };
+    ("Off (stock)") => { "B\u{12}\u{4}\u{5} (\u{16}\u{3}a\u{3}\u{2}.)" };
+    ("Offset") => { "C\u{c}e\u{1e}e\u{2}\u{1}e" };
     ("On") => { "B\u{4}\u{5}" };
-    ("On change") => { "\u{f}p\u{1} \u{1}\u{e}\u{b}e\u{2}e\u{2}\u{1}\u{1}" };
-    ("One lead V/ohm to A only") => { "To\u{5}\u{8}\u{4}o o\u{7}\u{1}\u{2} \u{1e}y\u{6}: V/\u{3a9} \u{c} A" };
+    ("On change") => { "\u{f}p\u{1} \u{1}\u{e}\u{c}e\u{2}e\u{2}\u{1}\u{1}" };
+    ("One lead V/ohm to A only") => { "To\u{5}\u{8}\u{4}o o\u{7}\u{1}\u{2} \u{1e}y\u{6}: V/\u{3a9} \u{b} A" };
     ("Oscilloscope") => { "Oc\u{1b}\u{1}\u{5}\u{5}o\u{13}pa\u{444}" };
     ("Other") => { "\u{f}po\u{15}ee" };
     ("Overload: 10 A shunt selected") => { "\u{f}epe\u{13}py\u{e}\u{4}a: \u{16}y\u{2}\u{3} 10 A" };
-    ("PC can edit") => { "\u{f}K \u{b}o\u{17}e\u{3} \u{b}e\u{2}\u{12}\u{3}\u{8}" };
-    ("PC can edit (replug)") => { "\u{19}a\u{6}\u{1}c\u{8} (\u{6}epe\u{6}o\u{7}\u{4}\u{5}.)" };
-    ("Persist:") => { "\u{f}oc\u{5}ec\u{c}e\u{15}e\u{2}\u{1}e:" };
+    ("PC can edit") => { "\u{f}K \u{c}o\u{17}e\u{3} \u{c}e\u{2}\u{10}\u{3}\u{8}" };
+    ("PC can edit (replug)") => { "\u{18}a\u{6}\u{1}c\u{8} (\u{6}epe\u{6}o\u{7}\u{4}\u{5}.)" };
+    ("Persist:") => { "\u{f}oc\u{5}ec\u{b}e\u{15}e\u{2}\u{1}e:" };
     ("Power") => { "\u{f}\u{1}\u{3}a\u{2}\u{1}e" };
     ("Power Settings") => { "Hac\u{3}po\u{14}\u{4}a P" };
-    ("Power off") => { "B\u{11}\u{4}\u{5}\u{44e}\u{15}\u{1}\u{3}\u{8}" };
-    ("Power off?") => { "B\u{11}\u{4}\u{5}\u{44e}\u{15}\u{1}\u{3}\u{8}?" };
-    ("Press effect") => { "\u{42d}\u{444}\u{444}. \u{2}a\u{17}a\u{3}\u{1}\u{12}" };
+    ("Power off") => { "B\u{12}\u{4}\u{5}\u{1f}\u{15}\u{1}\u{3}\u{8}" };
+    ("Power off?") => { "B\u{12}\u{4}\u{5}\u{1f}\u{15}\u{1}\u{3}\u{8}?" };
+    ("Press effect") => { "\u{42d}\u{444}\u{444}. \u{2}a\u{17}a\u{3}\u{1}\u{10}" };
     ("Probe") => { "\u{429}y\u{6}" };
-    ("Pulse") => { "\u{1d}\u{b}\u{6}." };
+    ("Pulse") => { "\u{1d}\u{c}\u{6}." };
     ("Ramp") => { "\u{f}\u{1}\u{5}a" };
     ("Range") => { "\u{1c}\u{1}a\u{6}a\u{e}o\u{2}" };
-    ("Read error") => { "O\u{16}\u{1}\u{10}\u{4}a \u{15}\u{3}e\u{2}\u{1}\u{12}" };
-    ("Record") => { "\u{19}a\u{6}\u{1}c\u{8}" };
-    ("Recording") => { "\u{19}a\u{6}\u{1}c\u{8} \u{1}\u{7}\u{451}\u{3}" };
-    ("Recording CSV") => { "\u{19}a\u{6}\u{1}c\u{8} CSV" };
-    ("Replace: 10 A ceramic fuse") => { "\u{19}a\u{b}e\u{2}a: \u{4}epa\u{b}. 10 A" };
-    ("Reset") => { "C\u{10}poc" };
-    ("Reset Wh") => { "C\u{10}poc Wh" };
-    ("Reset settings") => { "C\u{10}poc \u{2}ac\u{3}poe\u{4}" };
-    ("Reset settings?") => { "C\u{10}poc\u{1}\u{3}\u{8} \u{2}ac\u{3}po\u{14}\u{4}\u{1}?" };
+    ("Read error") => { "O\u{16}\u{1}\u{11}\u{4}a \u{15}\u{3}e\u{2}\u{1}\u{10}" };
+    ("Record") => { "\u{18}a\u{6}\u{1}c\u{8}" };
+    ("Recording") => { "\u{18}a\u{6}\u{1}c\u{8} \u{1}\u{7}\u{451}\u{3}" };
+    ("Recording CSV") => { "\u{18}a\u{6}\u{1}c\u{8} CSV" };
+    ("Replace: 10 A ceramic fuse") => { "\u{18}a\u{c}e\u{2}a: \u{4}epa\u{c}. 10 A" };
+    ("Reset") => { "C\u{11}poc" };
+    ("Reset Wh") => { "C\u{11}poc Wh" };
+    ("Reset settings") => { "C\u{11}poc \u{2}ac\u{3}poe\u{4}" };
+    ("Reset settings?") => { "C\u{11}poc\u{1}\u{3}\u{8} \u{2}ac\u{3}po\u{14}\u{4}\u{1}?" };
     ("Resistor Settings") => { "Hac\u{3}po\u{14}\u{4}a R" };
     ("Rising") => { "Poc\u{3}" };
     ("Roll:") => { "\u{f}po\u{4}py\u{3}\u{4}a:" };
     ("SN") => { "Cep. \u{2116}" };
-    ("Sampling") => { "C\u{10}op \u{7}a\u{2}\u{2}\u{11}x" };
+    ("Sampling") => { "C\u{11}op \u{7}a\u{2}\u{2}\u{12}x" };
     ("Save") => { "Coxp." };
     ("Save CSV") => { "CSV" };
     ("Save CSV OK") => { "CSV coxpa\u{2}\u{451}\u{2}" };
@@ -179,58 +183,59 @@ macro_rules! tr {
     ("Saving ...") => { "Coxpa\u{2}e\u{2}\u{1}e..." };
     ("Saving CSV...") => { "Coxpa\u{2}e\u{2}\u{1}e CSV..." };
     ("Scope") => { "Oc\u{1b}\u{1}\u{5}\u{5}." };
-    ("Screenshot") => { "C\u{2}\u{1}\u{b}o\u{4}" };
-    ("Screenshot failed") => { "O\u{16}\u{1}\u{10}\u{4}a c\u{2}\u{1}\u{b}\u{4}a" };
-    ("Select") => { "B\u{11}\u{10}pa\u{3}\u{8}" };
-    ("Selection cleared") => { "B\u{11}\u{10}op c\u{10}po\u{16}e\u{2}" };
+    ("Screenshot") => { "C\u{2}\u{1}\u{c}o\u{4}" };
+    ("Screenshot failed") => { "O\u{16}\u{1}\u{11}\u{4}a c\u{2}\u{1}\u{c}\u{4}a" };
+    ("Select") => { "B\u{12}\u{11}pa\u{3}\u{8}" };
+    ("Selection cleared") => { "B\u{12}\u{11}op c\u{11}po\u{16}e\u{2}" };
     ("Settings") => { "Hac\u{3}po\u{14}\u{4}\u{1}" };
-    ("Shutdown") => { "B\u{11}\u{4}\u{5}\u{44e}\u{15}e\u{2}\u{1}e" };
+    ("Shutdown") => { "B\u{12}\u{4}\u{5}\u{1f}\u{15}e\u{2}\u{1}e" };
     ("Signal") => { "\u{1a}e\u{2}epa\u{3}op" };
     ("Sine") => { "C\u{1}\u{2}yc" };
     ("Single") => { "O\u{7}\u{2}o\u{4}p." };
-    ("Smoothing") => { "C\u{13}\u{5}a\u{17}\u{1}\u{c}a\u{2}\u{1}e" };
-    ("Software") => { "\u{f}po\u{16}\u{1}\u{c}\u{4}a" };
+    ("Smoothing") => { "C\u{13}\u{5}a\u{17}\u{1}\u{b}a\u{2}\u{1}e" };
+    ("Software") => { "\u{f}po\u{16}\u{1}\u{b}\u{4}a" };
     ("Some skipped") => { "\u{427}ac\u{3}\u{8} \u{6}po\u{6}y\u{1e}e\u{2}a" };
     ("Source:") => { "\u{1d}c\u{3}o\u{15}\u{2}\u{1}\u{4}:" };
-    ("Square") => { "\u{f}p\u{12}\u{b}oy\u{13}." };
+    ("Square") => { "\u{f}p\u{10}\u{c}oy\u{13}." };
     ("Start") => { "C\u{3}ap\u{3}" };
     ("Start page") => { "C\u{3}ap\u{3}. \u{44d}\u{4}pa\u{2}" };
     ("Start recording") => { "Ha\u{15}a\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}" };
-    ("Stop recording") => { "Oc\u{3}a\u{2}o\u{c}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}" };
-    ("Stop the recording") => { "Oc\u{3}a\u{2}o\u{c}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}" };
+    ("Stop recording") => { "Oc\u{3}a\u{2}o\u{b}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}" };
+    ("Stop the recording") => { "Oc\u{3}a\u{2}o\u{b}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}" };
     ("Stop the recording first") => { "C\u{2}a\u{15}a\u{5}a c\u{3}o\u{6} \u{e}a\u{6}\u{1}c\u{1}" };
     ("Stop the scope first") => { "C\u{2}a\u{15}a\u{5}a c\u{3}o\u{6}" };
-    ("Stopped") => { "Oc\u{3}a\u{2}o\u{c}\u{5}e\u{2}o" };
-    ("Swipe") => { "C\u{b}ax\u{1}\u{c}a\u{2}\u{1}e" };
-    ("Tap step") => { "\u{428}a\u{13} \u{4}aca\u{2}\u{1}\u{12}" };
-    ("Temp unit") => { "E\u{7}. \u{3}e\u{b}\u{6}." };
-    ("Temperature Settings") => { "Hac\u{3}po\u{14}\u{4}a \u{3}e\u{b}\u{6}." };
+    ("Stopped") => { "Oc\u{3}a\u{2}o\u{b}\u{5}e\u{2}o" };
+    ("Swipe") => { "C\u{c}ax\u{1}\u{b}a\u{2}\u{1}e" };
+    ("Tap step") => { "\u{428}a\u{13} \u{4}aca\u{2}\u{1}\u{10}" };
+    ("Temp unit") => { "E\u{7}. \u{3}e\u{c}\u{6}." };
+    ("Temperature Settings") => { "Hac\u{3}po\u{14}\u{4}a \u{3}e\u{c}\u{6}." };
     ("Threshold:") => { "\u{f}opo\u{13}:" };
     ("Top bar") => { "Bepx \u{44d}\u{4}pa\u{2}a" };
-    ("Touch calibration") => { "Ka\u{5}\u{1}\u{10}po\u{c}\u{4}a ce\u{2}copa" };
+    ("Touch calibration") => { "Ka\u{5}\u{1}\u{11}po\u{b}\u{4}a ce\u{2}copa" };
     ("Touch test") => { "Tec\u{3} ce\u{2}copa" };
     ("Triangle") => { "Tpey\u{13}." };
     ("Trigger") => { "Tp\u{1}\u{13}\u{13}ep" };
-    ("Try again") => { "\u{f}o\u{c}\u{3}op\u{1}\u{3}e" };
+    ("Try again") => { "\u{f}o\u{b}\u{3}op\u{1}\u{3}e" };
     ("Type:") => { "T\u{1}\u{6}:" };
     ("USB disk") => { "USB-\u{7}\u{1}c\u{4}" };
-    ("Until stopped") => { "\u{1c}o oc\u{3}a\u{2}o\u{c}\u{4}\u{1}" };
+    ("Unstable: unplug USB?") => { "Hec\u{3}a\u{11}\u{1}\u{5}\u{8}\u{2}o: o\u{3}\u{4}\u{5}\u{1f}\u{15}\u{1}\u{3}e USB?" };
+    ("Until stopped") => { "\u{1c}o oc\u{3}a\u{2}o\u{b}\u{4}\u{1}" };
     ("Upper") => { "Bepx\u{2}\u{1}\u{14}" };
     ("Upper = reading") => { "Bepx = \u{6}o\u{4}a\u{e}." };
     ("Upper limit") => { "Bepx\u{2}\u{1}\u{14} \u{6}pe\u{7}e\u{5}" };
-    ("Vendor") => { "\u{f}po\u{1}\u{e}\u{c}o\u{7}\u{1}\u{3}e\u{5}\u{8}" };
+    ("Vendor") => { "\u{f}po\u{1}\u{e}\u{b}o\u{7}\u{1}\u{3}e\u{5}\u{8}" };
     ("Voltage Settings") => { "Hac\u{3}po\u{14}\u{4}a U" };
-    ("Voltage on V jack, no current") => { "Ha\u{6}p\u{12}\u{17}e\u{2}\u{1}e \u{2}a V, \u{3}o\u{4}a \u{2}e\u{3}" };
-    ("Voltage on circuit - power off") => { "C\u{2}\u{1}\u{b}\u{1}\u{3}e \u{2}a\u{6}p\u{12}\u{17}e\u{2}\u{1}e c \u{1b}e\u{6}\u{1}" };
-    ("Volume") => { "\u{1a}po\u{b}\u{4}oc\u{3}\u{8}" };
-    ("Wave") => { "\u{424}op\u{b}a" };
+    ("Voltage on V jack, no current") => { "Ha\u{6}p\u{10}\u{17}e\u{2}\u{1}e \u{2}a V, \u{3}o\u{4}a \u{2}e\u{3}" };
+    ("Voltage on circuit - power off") => { "C\u{2}\u{1}\u{c}\u{1}\u{3}e \u{2}a\u{6}p\u{10}\u{17}e\u{2}\u{1}e c \u{1b}e\u{6}\u{1}" };
+    ("Volume") => { "\u{1a}po\u{c}\u{4}oc\u{3}\u{8}" };
+    ("Wave") => { "\u{424}op\u{c}a" };
     ("Width:") => { "\u{428}\u{1}p\u{1}\u{2}a:" };
     ("Window") => { "O\u{4}\u{2}o" };
-    ("Wiring") => { "Cxe\u{b}a" };
+    ("Wiring") => { "Cxe\u{c}a" };
     ("Yes") => { "\u{1c}a" };
     ("Zero") => { "Ho\u{5}\u{8}" };
-    ("expect ~48 \u{3a9}") => { "o\u{17}\u{1}\u{7}ae\u{3}c\u{12} ~48 \u{3a9}" };
-    ("nothing else connected") => { "\u{10}o\u{5}\u{8}\u{16}e \u{2}\u{1}\u{15}e\u{13}o \u{2}e \u{6}o\u{7}\u{4}\u{5}." };
+    ("expect ~48 \u{3a9}") => { "o\u{17}\u{1}\u{7}ae\u{3}c\u{10} ~48 \u{3a9}" };
+    ("nothing else connected") => { "\u{11}o\u{5}\u{8}\u{16}e \u{2}\u{1}\u{15}e\u{13}o \u{2}e \u{6}o\u{7}\u{4}\u{5}." };
     ($s:literal) => { $s };
 }
 
@@ -239,72 +244,75 @@ macro_rules! tr {
 pub const PAIRS: &[(&str, &str)] = &[
     ("0 A for 60 s: check the fuse?", "0 A 60 c: \u{6}pe\u{7}oxpa\u{2}\u{1}\u{3}e\u{5}\u{8}?"),
     ("1 hour", "1 \u{15}ac"),
-    ("1 min", "1 \u{b}\u{1}\u{2}"),
-    ("10 min", "10 \u{b}\u{1}\u{2}"),
-    ("30 min", "30 \u{b}\u{1}\u{2}"),
-    ("5 min", "5 \u{b}\u{1}\u{2}"),
+    ("1 min", "1 \u{c}\u{1}\u{2}"),
+    ("10 min", "10 \u{c}\u{1}\u{2}"),
+    ("30 min", "30 \u{c}\u{1}\u{2}"),
+    ("5 min", "5 \u{c}\u{1}\u{2}"),
     ("< Back", "< Ha\u{e}a\u{7}"),
     ("< Prev", "< \u{f}pe\u{7}"),
-    ("A input path intact", "\u{426}e\u{6}\u{8} \u{c}xo\u{7}a A \u{1b}e\u{5}a"),
-    ("A jack current: 10 A shunt on", "To\u{4} \u{c} A: \u{16}y\u{2}\u{3} 10 A \u{c}\u{4}\u{5}."),
-    ("AC voltage here: use AC V?", "\u{f}epe\u{b}e\u{2}\u{2}oe U: AC V?"),
-    ("AUTO starts on mV: AUTO+ is safer", "AUTO c mV: AUTO+ \u{10}e\u{e}o\u{6}ac\u{2}ee"),
-    ("AUTO+ recommended: never steps to mV", "\u{1f}y\u{15}\u{16}e AUTO+: \u{10}e\u{e} \u{6}epexo\u{7}a \u{2}a mV"),
+    ("A input path intact", "\u{426}e\u{6}\u{8} \u{b}xo\u{7}a A \u{1b}e\u{5}a"),
+    ("A jack current: 10 A shunt on", "To\u{4} \u{b} A: \u{16}y\u{2}\u{3} 10 A \u{b}\u{4}\u{5}."),
+    ("AC voltage here: use AC V?", "\u{f}epe\u{c}e\u{2}\u{2}oe U: AC V?"),
+    ("AUTO starts on mV: AUTO+ is safer", "AUTO c mV: AUTO+ \u{11}e\u{e}o\u{6}ac\u{2}ee"),
+    ("AUTO+ recommended: never steps to mV", "\u{41b}y\u{15}\u{16}e AUTO+: \u{11}e\u{e} \u{6}epexo\u{7}a \u{2}a mV"),
     ("Accuracy", "To\u{15}\u{2}oc\u{3}\u{8}"),
     ("Again", "E\u{1e}\u{451} pa\u{e}"),
     ("Alerts", "\u{f}pe\u{7}y\u{6}p."),
     ("Analog power", "A\u{2}a\u{5}o\u{13}. \u{6}\u{1}\u{3}."),
-    ("Arm", "B\u{e}\u{c}ec\u{3}\u{1}"),
-    ("Auto", "A\u{c}\u{3}o"),
-    ("Auto (per view)", "A\u{c}\u{3}o (\u{44d}\u{4}pa\u{2})"),
-    ("Auto Hold", "A\u{c}\u{3}oy\u{7}ep\u{17}a\u{2}\u{1}e"),
-    ("Autorange", "A\u{c}\u{3}o\u{7}\u{1}a\u{6}a\u{e}o\u{2}"),
+    ("Arm", "B\u{e}\u{b}ec\u{3}\u{1}"),
+    ("Auto", "A\u{b}\u{3}o"),
+    ("Auto (per view)", "A\u{b}\u{3}o (\u{44d}\u{4}pa\u{2})"),
+    ("Auto Hold", "A\u{b}\u{3}oy\u{7}ep\u{17}a\u{2}\u{1}e"),
+    ("Autorange", "A\u{b}\u{3}o\u{7}\u{1}a\u{6}a\u{e}o\u{2}"),
     ("Back", "Ha\u{e}a\u{7}"),
-    ("Backlight", "\u{f}o\u{7}c\u{c}e\u{3}\u{4}a"),
+    ("Backlight", "\u{f}o\u{7}c\u{b}e\u{3}\u{4}a"),
     ("Bargraph", "\u{428}\u{4}a\u{5}a"),
-    ("Bootloader", "\u{19}a\u{13}py\u{e}\u{15}\u{1}\u{4}"),
-    ("Both always", "O\u{10}a \u{c}ce\u{13}\u{7}a"),
+    ("Battery empty: off in 10 s", "\u{411}a\u{3}ape\u{10} \u{6}yc\u{3}a: \u{b}\u{12}\u{4}\u{5}. 10 c"),
+    ("Battery empty: off in 20 s", "\u{411}a\u{3}ape\u{10} \u{6}yc\u{3}a: \u{b}\u{12}\u{4}\u{5}. 20 c"),
+    ("Battery empty: off in 30 s", "\u{411}a\u{3}ape\u{10} \u{6}yc\u{3}a: \u{b}\u{12}\u{4}\u{5}. 30 c"),
+    ("Bootloader", "\u{18}a\u{13}py\u{e}\u{15}\u{1}\u{4}"),
+    ("Both always", "O\u{11}a \u{b}ce\u{13}\u{7}a"),
     ("Brightness:", "\u{42f}p\u{4}oc\u{3}\u{8}:"),
     ("Burden voltage", "\u{f}a\u{7}e\u{2}\u{1}e \u{2}a\u{6}p."),
-    ("CSV save failed", "O\u{16}\u{1}\u{10}\u{4}a CSV"),
-    ("Calibrate", "Ka\u{5}\u{1}\u{10}p."),
-    ("Calibration, files stay", "Ka\u{5}\u{1}\u{10}p. \u{1} \u{444}a\u{14}\u{5}\u{11} \u{1b}e\u{5}\u{11}"),
-    ("Cancel", "O\u{3}\u{b}e\u{2}a"),
-    ("Cannot delete", "He\u{5}\u{8}\u{e}\u{12} y\u{7}a\u{5}\u{1}\u{3}\u{8}"),
+    ("CSV save failed", "O\u{16}\u{1}\u{11}\u{4}a CSV"),
+    ("Calibrate", "Ka\u{5}\u{1}\u{11}p."),
+    ("Calibration, files stay", "Ka\u{5}\u{1}\u{11}p. \u{1} \u{444}a\u{14}\u{5}\u{12} \u{1b}e\u{5}\u{12}"),
+    ("Cancel", "O\u{3}\u{c}e\u{2}a"),
+    ("Cannot delete", "He\u{5}\u{8}\u{e}\u{10} y\u{7}a\u{5}\u{1}\u{3}\u{8}"),
     ("Capacitance Settings", "Hac\u{3}po\u{14}\u{4}a C"),
-    ("Change", "\u{1d}\u{e}\u{b}e\u{2}e\u{2}\u{1}e"),
-    ("Check leads", "\u{f}po\u{c}ep\u{8}\u{3}e \u{1e}y\u{6}\u{11}"),
+    ("Change", "\u{1d}\u{e}\u{c}e\u{2}e\u{2}\u{1}e"),
+    ("Check leads", "\u{f}po\u{b}ep\u{8}\u{3}e \u{1e}y\u{6}\u{12}"),
     ("Clear", "O\u{15}\u{1}c\u{3}\u{1}\u{3}\u{8}"),
-    ("Clear limits", "C\u{2}\u{12}\u{3}\u{8} \u{6}pe\u{7}e\u{5}\u{11}"),
-    ("Color", "\u{426}\u{c}e\u{3}"),
-    ("Corners", "\u{18}\u{13}\u{5}\u{11}"),
-    ("Coupling", "C\u{c}\u{12}\u{e}\u{8}"),
+    ("Clear limits", "C\u{2}\u{10}\u{3}\u{8} \u{6}pe\u{7}e\u{5}\u{12}"),
+    ("Color", "\u{426}\u{b}e\u{3}"),
+    ("Corners", "\u{19}\u{13}\u{5}\u{12}"),
+    ("Coupling", "C\u{b}\u{10}\u{e}\u{8}"),
     ("Current Settings", "Hac\u{3}po\u{14}\u{4}a I"),
-    ("Current in A jack: check leads", "To\u{4} \u{c} A: \u{6}po\u{c}ep\u{8}\u{3}e \u{1e}y\u{6}\u{11}"),
-    ("Current too high: reduce it", "To\u{4} \u{c}e\u{5}\u{1}\u{4}: y\u{b}e\u{2}\u{8}\u{16}\u{1}\u{3}e"),
-    ("DC voltage here: use DC V?", "\u{f}oc\u{3}o\u{12}\u{2}\u{2}oe U: DC V?"),
+    ("Current in A jack: check leads", "To\u{4} \u{b} A: \u{6}po\u{b}ep\u{8}\u{3}e \u{1e}y\u{6}\u{12}"),
+    ("Current too high: reduce it", "To\u{4} \u{b}e\u{5}\u{1}\u{4}: y\u{c}e\u{2}\u{8}\u{16}\u{1}\u{3}e"),
+    ("DC voltage here: use DC V?", "\u{f}oc\u{3}o\u{10}\u{2}\u{2}oe U: DC V?"),
     ("DMM rate", "C\u{4}opoc\u{3}\u{8}"),
-    ("DMM row", "\u{428}\u{4}a\u{5}a/\u{1}c\u{3}op\u{1}\u{12}"),
+    ("DMM row", "\u{428}\u{4}a\u{5}a/\u{1}c\u{3}op\u{1}\u{10}"),
     ("Danger alarm", "C\u{1}\u{13}\u{2}. o\u{6}ac\u{2}oc\u{3}\u{1}"),
     ("Decode", "\u{1c}e\u{4}o\u{7}ep"),
-    ("Default", "\u{18}\u{b}o\u{5}\u{15}."),
-    ("Delete", "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8}"),
-    ("Delete failed", "O\u{16}\u{1}\u{10}\u{4}a y\u{7}a\u{5}e\u{2}\u{1}\u{12}"),
-    ("Delete screenshot?", "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8} c\u{2}\u{1}\u{b}o\u{4}?"),
-    ("Delete selected", "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{c}\u{11}\u{10}p."),
-    ("Delete selected?", "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{c}\u{11}\u{10}pa\u{2}\u{2}\u{11}e?"),
-    ("Delete this log?", "\u{18}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}?"),
-    ("Deleting", "\u{18}\u{7}a\u{5}e\u{2}\u{1}e"),
-    ("Device info", "O \u{6}p\u{1}\u{10}ope"),
-    ("Dim screen", "\u{19}a\u{3}e\u{b}\u{2}e\u{2}\u{1}e"),
-    ("Discharging...", "Pa\u{e}p\u{12}\u{7}..."),
-    ("Disk busy", "\u{1c}\u{1}c\u{4} \u{e}a\u{2}\u{12}\u{3}"),
-    ("Disk busy, try again", "\u{1c}\u{1}c\u{4} \u{e}a\u{2}\u{12}\u{3}, \u{6}o\u{c}\u{3}op\u{1}\u{3}e"),
+    ("Default", "\u{19}\u{c}o\u{5}\u{15}."),
+    ("Delete", "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8}"),
+    ("Delete failed", "O\u{16}\u{1}\u{11}\u{4}a y\u{7}a\u{5}e\u{2}\u{1}\u{10}"),
+    ("Delete screenshot?", "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8} c\u{2}\u{1}\u{c}o\u{4}?"),
+    ("Delete selected", "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{b}\u{12}\u{11}p."),
+    ("Delete selected?", "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{b}\u{12}\u{11}pa\u{2}\u{2}\u{12}e?"),
+    ("Delete this log?", "\u{19}\u{7}a\u{5}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}?"),
+    ("Deleting", "\u{19}\u{7}a\u{5}e\u{2}\u{1}e"),
+    ("Device info", "O \u{6}p\u{1}\u{11}ope"),
+    ("Dim screen", "\u{18}a\u{3}e\u{c}\u{2}e\u{2}\u{1}e"),
+    ("Discharging...", "Pa\u{e}p\u{10}\u{7}..."),
+    ("Disk busy", "\u{1c}\u{1}c\u{4} \u{e}a\u{2}\u{10}\u{3}"),
+    ("Disk busy, try again", "\u{1c}\u{1}c\u{4} \u{e}a\u{2}\u{10}\u{3}, \u{6}o\u{b}\u{3}op\u{1}\u{3}e"),
     ("Disk full", "\u{1c}\u{1}c\u{4} \u{6}o\u{5}o\u{2}"),
-    ("Disk read error", "O\u{16}\u{1}\u{10}\u{4}a \u{15}\u{3}e\u{2}\u{1}\u{12} \u{7}\u{1}c\u{4}a"),
+    ("Disk read error", "O\u{16}\u{1}\u{11}\u{4}a \u{15}\u{3}e\u{2}\u{1}\u{10} \u{7}\u{1}c\u{4}a"),
     ("Display", "\u{42d}\u{4}pa\u{2}"),
-    ("Duration", "Bpe\u{b}\u{12}"),
-    ("Duty", "\u{19}a\u{6}o\u{5}\u{2}."),
+    ("Duration", "Bpe\u{c}\u{10}"),
+    ("Duty", "\u{18}a\u{6}o\u{5}\u{2}."),
     ("Edge", "\u{424}po\u{2}\u{3}"),
     ("Edge:", "\u{424}po\u{2}\u{3}:"),
     ("Empty file", "\u{f}yc\u{3}o\u{14} \u{444}a\u{14}\u{5}"),
@@ -312,100 +320,101 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("FFT Unit", "E\u{7}. FFT"),
     ("Fail beep", "C\u{1}\u{13}\u{2}. \u{6}pe\u{7}e\u{5}a"),
     ("Falling", "C\u{6}a\u{7}"),
-    ("Fast", "\u{411}\u{11}c\u{3}po"),
+    ("Fast", "\u{411}\u{12}c\u{3}po"),
     ("File not found", "\u{424}a\u{14}\u{5} \u{2}e \u{2}a\u{14}\u{7}e\u{2}"),
-    ("Files changed", "\u{424}a\u{14}\u{5}\u{11} \u{1}\u{e}\u{b}e\u{2}\u{1}\u{5}\u{1}c\u{8}"),
+    ("Files changed", "\u{424}a\u{14}\u{5}\u{12} \u{1}\u{e}\u{c}e\u{2}\u{1}\u{5}\u{1}c\u{8}"),
     ("Files live", "To\u{5}\u{8}\u{4}o \u{15}\u{3}e\u{2}\u{1}e"),
     ("Files live (replug)", "\u{427}\u{3}e\u{2}\u{1}e (\u{6}epe\u{6}o\u{7}\u{4}\u{5}.)"),
-    ("Free", "C\u{c}o\u{10}o\u{7}\u{2}o"),
+    ("Free", "C\u{b}o\u{11}o\u{7}\u{2}o"),
     ("Freq", "\u{427}ac\u{3}."),
     ("Frequency", "\u{427}ac\u{3}o\u{3}a"),
     ("Fuse OK", "\u{f}pe\u{7}oxp. \u{1b}e\u{5}"),
     ("Fuse check", "Tec\u{3} \u{6}pe\u{7}oxp."),
     ("Fuse open", "\u{f}pe\u{7}oxp. c\u{13}ope\u{5}"),
-    ("Gallery", "\u{1a}a\u{5}epe\u{12}"),
-    ("Gallery: screenshots and logs", "\u{1a}a\u{5}epe\u{12}: c\u{2}\u{1}\u{b}\u{4}\u{1} \u{1} \u{e}a\u{6}\u{1}c\u{1}"),
-    ("Generator is off", "\u{1a}e\u{2}epa\u{3}op \u{c}\u{11}\u{4}\u{5}."),
+    ("Gallery", "\u{1a}a\u{5}epe\u{10}"),
+    ("Gallery: screenshots and logs", "\u{1a}a\u{5}epe\u{10}: c\u{2}\u{1}\u{c}\u{4}\u{1} \u{1} \u{e}a\u{6}\u{1}c\u{1}"),
+    ("Generator is off", "\u{1a}e\u{2}epa\u{3}op \u{b}\u{12}\u{4}\u{5}."),
     ("Grid intensity:", "\u{42f}p\u{4}oc\u{3}\u{8} ce\u{3}\u{4}\u{1}:"),
-    ("Halves (stock)", "\u{f}o\u{5}o\u{c}\u{1}\u{2}\u{11} (\u{16}\u{3}a\u{3}\u{2}.)"),
+    ("Halves (stock)", "\u{f}o\u{5}o\u{b}\u{1}\u{2}\u{12} (\u{16}\u{3}a\u{3}\u{2}.)"),
     ("Hardware", "\u{f}\u{5}a\u{3}a"),
-    ("Help", "C\u{6}pa\u{c}\u{4}a"),
-    ("History", "\u{1d}c\u{3}op\u{1}\u{12}"),
-    ("Hold & Limits", "\u{18}\u{7}ep\u{17}a\u{2}\u{1}e, \u{6}pe\u{7}e\u{5}\u{11}"),
+    ("Help", "C\u{6}pa\u{b}\u{4}a"),
+    ("History", "\u{1d}c\u{3}op\u{1}\u{10}"),
+    ("Hold & Limits", "\u{19}\u{7}ep\u{17}a\u{2}\u{1}e, \u{6}pe\u{7}e\u{5}\u{12}"),
     ("Inrush", "\u{f}yc\u{4}. \u{3}o\u{4}"),
-    ("Inrush Current", "\u{f}yc\u{4}o\u{c}o\u{14} \u{3}o\u{4}"),
-    ("Install it now?", "\u{18}c\u{3}a\u{2}o\u{c}\u{1}\u{3}\u{8}?"),
-    ("Installing firmware...", "\u{18}c\u{3}a\u{2}o\u{c}\u{4}a \u{6}po\u{16}\u{1}\u{c}\u{4}\u{1}..."),
-    ("Interval", "\u{1d}\u{2}\u{3}ep\u{c}a\u{5}"),
+    ("Inrush Current", "\u{f}yc\u{4}o\u{b}o\u{14} \u{3}o\u{4}"),
+    ("Install it now?", "\u{19}c\u{3}a\u{2}o\u{b}\u{1}\u{3}\u{8}?"),
+    ("Installing firmware...", "\u{19}c\u{3}a\u{2}o\u{b}\u{4}a \u{6}po\u{16}\u{1}\u{b}\u{4}\u{1}..."),
+    ("Interval", "\u{1d}\u{2}\u{3}ep\u{b}a\u{5}"),
     ("Jack alerts", "\u{f}pe\u{7}y\u{6}p. \u{13}\u{2}\u{451}\u{e}\u{7}"),
-    ("Key/alert volume", "\u{1a}po\u{b}\u{4}oc\u{3}\u{8}"),
-    ("Lead from V/ohm jack to A", "\u{429}y\u{6} \u{1}\u{e} \u{13}\u{2}e\u{e}\u{7}a V/\u{3a9} \u{c} A"),
-    ("Limits", "\u{1f}\u{1}\u{b}\u{1}\u{3}\u{11}"),
-    ("Loading...", "\u{19}a\u{13}py\u{e}\u{4}a..."),
+    ("Key/alert volume", "\u{1a}po\u{c}\u{4}oc\u{3}\u{8}"),
+    ("Lead from V/ohm jack to A", "\u{429}y\u{6} \u{1}\u{e} \u{13}\u{2}e\u{e}\u{7}a V/\u{3a9} \u{b} A"),
+    ("Limits", "\u{41b}\u{1}\u{c}\u{1}\u{3}\u{12}"),
+    ("Loading...", "\u{18}a\u{13}py\u{e}\u{4}a..."),
     ("Log", "\u{416}yp\u{2}a\u{5}"),
-    ("Log failed", "O\u{16}\u{1}\u{10}\u{4}a \u{e}a\u{6}\u{1}c\u{1}"),
-    ("Loud", "\u{1a}po\u{b}\u{4}o"),
+    ("Log failed", "O\u{16}\u{1}\u{11}\u{4}a \u{e}a\u{6}\u{1}c\u{1}"),
+    ("Loud", "\u{1a}po\u{c}\u{4}o"),
+    ("Low battery! Please charge", "\u{18}ap\u{10}\u{7}\u{1}\u{3}e \u{11}a\u{3}ape\u{1f}!"),
     ("Lower", "H\u{1}\u{17}\u{2}\u{1}\u{14}"),
     ("Lower = reading", "H\u{1}\u{e} = \u{6}o\u{4}a\u{e}."),
     ("Lower limit", "H\u{1}\u{17}\u{2}\u{1}\u{14} \u{6}pe\u{7}e\u{5}"),
-    ("Main menu", "\u{1a}\u{5}a\u{c}\u{2}oe \u{b}e\u{2}\u{44e}"),
+    ("Main menu", "\u{1a}\u{5}a\u{b}\u{2}oe \u{c}e\u{2}\u{1f}"),
     ("Manual", "Py\u{15}\u{2}o\u{14}"),
-    ("Measure", "\u{1d}\u{e}\u{b}epe\u{2}\u{1}\u{12}"),
-    ("Measuring ...", "\u{1d}\u{e}\u{b}epe\u{2}\u{1}e..."),
-    ("Mode", "Pe\u{17}\u{1}\u{b}"),
-    ("Mode Remember", "\u{19}a\u{6}o\u{b}\u{2}\u{1}\u{3}\u{8} pe\u{17}\u{1}\u{b}"),
-    ("Mode:", "Pe\u{17}\u{1}\u{b}:"),
+    ("Measure", "\u{1d}\u{e}\u{c}epe\u{2}\u{1}\u{10}"),
+    ("Measuring ...", "\u{1d}\u{e}\u{c}epe\u{2}\u{1}e..."),
+    ("Mode", "Pe\u{17}\u{1}\u{c}"),
+    ("Mode Remember", "\u{18}a\u{6}o\u{c}\u{2}\u{1}\u{3}\u{8} pe\u{17}\u{1}\u{c}"),
+    ("Mode:", "Pe\u{17}\u{1}\u{c}:"),
     ("Model", "Mo\u{7}e\u{5}\u{8}"),
-    ("Multimeter", "My\u{5}\u{8}\u{3}\u{1}\u{b}e\u{3}p"),
-    ("Negative ohm", "O\u{3}p\u{1}\u{1b}. O\u{b}"),
+    ("Multimeter", "My\u{5}\u{8}\u{3}\u{1}\u{c}e\u{3}p"),
+    ("Negative ohm", "O\u{3}p\u{1}\u{1b}. O\u{c}"),
     ("Never", "H\u{1}\u{4}o\u{13}\u{7}a"),
     ("Next >", "C\u{5}e\u{7} >"),
     ("No", "He\u{3}"),
-    ("No data", "He\u{3} \u{7}a\u{2}\u{2}\u{11}x"),
+    ("No data", "He\u{3} \u{7}a\u{2}\u{2}\u{12}x"),
     ("No disk", "He\u{3} \u{7}\u{1}c\u{4}a"),
-    ("No ohm reading", "He\u{3} \u{6}o\u{4}a\u{e}a\u{2}\u{1}\u{12} \u{3a9}"),
-    ("No screenshots or logs", "He\u{3} c\u{2}\u{1}\u{b}\u{4}o\u{c} \u{1} \u{e}a\u{6}\u{1}ce\u{14}"),
-    ("Normal", "Hop\u{b}."),
-    ("OFF", "B\u{42b}K\u{1f}"),
-    ("OFF (stock)", "B\u{42b}K\u{1f} (\u{16}\u{3}a\u{3}\u{2}.)"),
+    ("No ohm reading", "He\u{3} \u{6}o\u{4}a\u{e}a\u{2}\u{1}\u{10} \u{3a9}"),
+    ("No screenshots or logs", "He\u{3} c\u{2}\u{1}\u{c}\u{4}o\u{b} \u{1} \u{e}a\u{6}\u{1}ce\u{14}"),
+    ("Normal", "Hop\u{c}."),
+    ("OFF", "B\u{42b}K\u{41b}"),
+    ("OFF (stock)", "B\u{42b}K\u{41b} (\u{16}\u{3}a\u{3}\u{2}.)"),
     ("OK", "OK"),
     ("OL: no path from V to A", "OL: \u{2}e\u{3} \u{1b}e\u{6}\u{1} o\u{3} V \u{4} A"),
-    ("ON", "BK\u{1f}"),
-    ("Off", "B\u{11}\u{4}\u{5}"),
-    ("Off (stock)", "B\u{11}\u{4}\u{5} (\u{16}\u{3}a\u{3}\u{2}.)"),
-    ("Offset", "C\u{b}e\u{1e}e\u{2}\u{1}e"),
+    ("ON", "BK\u{41b}"),
+    ("Off", "B\u{12}\u{4}\u{5}"),
+    ("Off (stock)", "B\u{12}\u{4}\u{5} (\u{16}\u{3}a\u{3}\u{2}.)"),
+    ("Offset", "C\u{c}e\u{1e}e\u{2}\u{1}e"),
     ("On", "B\u{4}\u{5}"),
-    ("On change", "\u{f}p\u{1} \u{1}\u{e}\u{b}e\u{2}e\u{2}\u{1}\u{1}"),
-    ("One lead V/ohm to A only", "To\u{5}\u{8}\u{4}o o\u{7}\u{1}\u{2} \u{1e}y\u{6}: V/\u{3a9} \u{c} A"),
+    ("On change", "\u{f}p\u{1} \u{1}\u{e}\u{c}e\u{2}e\u{2}\u{1}\u{1}"),
+    ("One lead V/ohm to A only", "To\u{5}\u{8}\u{4}o o\u{7}\u{1}\u{2} \u{1e}y\u{6}: V/\u{3a9} \u{b} A"),
     ("Oscilloscope", "Oc\u{1b}\u{1}\u{5}\u{5}o\u{13}pa\u{444}"),
     ("Other", "\u{f}po\u{15}ee"),
     ("Overload: 10 A shunt selected", "\u{f}epe\u{13}py\u{e}\u{4}a: \u{16}y\u{2}\u{3} 10 A"),
-    ("PC can edit", "\u{f}K \u{b}o\u{17}e\u{3} \u{b}e\u{2}\u{12}\u{3}\u{8}"),
-    ("PC can edit (replug)", "\u{19}a\u{6}\u{1}c\u{8} (\u{6}epe\u{6}o\u{7}\u{4}\u{5}.)"),
-    ("Persist:", "\u{f}oc\u{5}ec\u{c}e\u{15}e\u{2}\u{1}e:"),
+    ("PC can edit", "\u{f}K \u{c}o\u{17}e\u{3} \u{c}e\u{2}\u{10}\u{3}\u{8}"),
+    ("PC can edit (replug)", "\u{18}a\u{6}\u{1}c\u{8} (\u{6}epe\u{6}o\u{7}\u{4}\u{5}.)"),
+    ("Persist:", "\u{f}oc\u{5}ec\u{b}e\u{15}e\u{2}\u{1}e:"),
     ("Power", "\u{f}\u{1}\u{3}a\u{2}\u{1}e"),
     ("Power Settings", "Hac\u{3}po\u{14}\u{4}a P"),
-    ("Power off", "B\u{11}\u{4}\u{5}\u{44e}\u{15}\u{1}\u{3}\u{8}"),
-    ("Power off?", "B\u{11}\u{4}\u{5}\u{44e}\u{15}\u{1}\u{3}\u{8}?"),
-    ("Press effect", "\u{42d}\u{444}\u{444}. \u{2}a\u{17}a\u{3}\u{1}\u{12}"),
+    ("Power off", "B\u{12}\u{4}\u{5}\u{1f}\u{15}\u{1}\u{3}\u{8}"),
+    ("Power off?", "B\u{12}\u{4}\u{5}\u{1f}\u{15}\u{1}\u{3}\u{8}?"),
+    ("Press effect", "\u{42d}\u{444}\u{444}. \u{2}a\u{17}a\u{3}\u{1}\u{10}"),
     ("Probe", "\u{429}y\u{6}"),
-    ("Pulse", "\u{1d}\u{b}\u{6}."),
+    ("Pulse", "\u{1d}\u{c}\u{6}."),
     ("Ramp", "\u{f}\u{1}\u{5}a"),
     ("Range", "\u{1c}\u{1}a\u{6}a\u{e}o\u{2}"),
-    ("Read error", "O\u{16}\u{1}\u{10}\u{4}a \u{15}\u{3}e\u{2}\u{1}\u{12}"),
-    ("Record", "\u{19}a\u{6}\u{1}c\u{8}"),
-    ("Recording", "\u{19}a\u{6}\u{1}c\u{8} \u{1}\u{7}\u{451}\u{3}"),
-    ("Recording CSV", "\u{19}a\u{6}\u{1}c\u{8} CSV"),
-    ("Replace: 10 A ceramic fuse", "\u{19}a\u{b}e\u{2}a: \u{4}epa\u{b}. 10 A"),
-    ("Reset", "C\u{10}poc"),
-    ("Reset Wh", "C\u{10}poc Wh"),
-    ("Reset settings", "C\u{10}poc \u{2}ac\u{3}poe\u{4}"),
-    ("Reset settings?", "C\u{10}poc\u{1}\u{3}\u{8} \u{2}ac\u{3}po\u{14}\u{4}\u{1}?"),
+    ("Read error", "O\u{16}\u{1}\u{11}\u{4}a \u{15}\u{3}e\u{2}\u{1}\u{10}"),
+    ("Record", "\u{18}a\u{6}\u{1}c\u{8}"),
+    ("Recording", "\u{18}a\u{6}\u{1}c\u{8} \u{1}\u{7}\u{451}\u{3}"),
+    ("Recording CSV", "\u{18}a\u{6}\u{1}c\u{8} CSV"),
+    ("Replace: 10 A ceramic fuse", "\u{18}a\u{c}e\u{2}a: \u{4}epa\u{c}. 10 A"),
+    ("Reset", "C\u{11}poc"),
+    ("Reset Wh", "C\u{11}poc Wh"),
+    ("Reset settings", "C\u{11}poc \u{2}ac\u{3}poe\u{4}"),
+    ("Reset settings?", "C\u{11}poc\u{1}\u{3}\u{8} \u{2}ac\u{3}po\u{14}\u{4}\u{1}?"),
     ("Resistor Settings", "Hac\u{3}po\u{14}\u{4}a R"),
     ("Rising", "Poc\u{3}"),
     ("Roll:", "\u{f}po\u{4}py\u{3}\u{4}a:"),
     ("SN", "Cep. \u{2116}"),
-    ("Sampling", "C\u{10}op \u{7}a\u{2}\u{2}\u{11}x"),
+    ("Sampling", "C\u{11}op \u{7}a\u{2}\u{2}\u{12}x"),
     ("Save", "Coxp."),
     ("Save CSV", "CSV"),
     ("Save CSV OK", "CSV coxpa\u{2}\u{451}\u{2}"),
@@ -413,58 +422,59 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Saving ...", "Coxpa\u{2}e\u{2}\u{1}e..."),
     ("Saving CSV...", "Coxpa\u{2}e\u{2}\u{1}e CSV..."),
     ("Scope", "Oc\u{1b}\u{1}\u{5}\u{5}."),
-    ("Screenshot", "C\u{2}\u{1}\u{b}o\u{4}"),
-    ("Screenshot failed", "O\u{16}\u{1}\u{10}\u{4}a c\u{2}\u{1}\u{b}\u{4}a"),
-    ("Select", "B\u{11}\u{10}pa\u{3}\u{8}"),
-    ("Selection cleared", "B\u{11}\u{10}op c\u{10}po\u{16}e\u{2}"),
+    ("Screenshot", "C\u{2}\u{1}\u{c}o\u{4}"),
+    ("Screenshot failed", "O\u{16}\u{1}\u{11}\u{4}a c\u{2}\u{1}\u{c}\u{4}a"),
+    ("Select", "B\u{12}\u{11}pa\u{3}\u{8}"),
+    ("Selection cleared", "B\u{12}\u{11}op c\u{11}po\u{16}e\u{2}"),
     ("Settings", "Hac\u{3}po\u{14}\u{4}\u{1}"),
-    ("Shutdown", "B\u{11}\u{4}\u{5}\u{44e}\u{15}e\u{2}\u{1}e"),
+    ("Shutdown", "B\u{12}\u{4}\u{5}\u{1f}\u{15}e\u{2}\u{1}e"),
     ("Signal", "\u{1a}e\u{2}epa\u{3}op"),
     ("Sine", "C\u{1}\u{2}yc"),
     ("Single", "O\u{7}\u{2}o\u{4}p."),
-    ("Smoothing", "C\u{13}\u{5}a\u{17}\u{1}\u{c}a\u{2}\u{1}e"),
-    ("Software", "\u{f}po\u{16}\u{1}\u{c}\u{4}a"),
+    ("Smoothing", "C\u{13}\u{5}a\u{17}\u{1}\u{b}a\u{2}\u{1}e"),
+    ("Software", "\u{f}po\u{16}\u{1}\u{b}\u{4}a"),
     ("Some skipped", "\u{427}ac\u{3}\u{8} \u{6}po\u{6}y\u{1e}e\u{2}a"),
     ("Source:", "\u{1d}c\u{3}o\u{15}\u{2}\u{1}\u{4}:"),
-    ("Square", "\u{f}p\u{12}\u{b}oy\u{13}."),
+    ("Square", "\u{f}p\u{10}\u{c}oy\u{13}."),
     ("Start", "C\u{3}ap\u{3}"),
     ("Start page", "C\u{3}ap\u{3}. \u{44d}\u{4}pa\u{2}"),
     ("Start recording", "Ha\u{15}a\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}"),
-    ("Stop recording", "Oc\u{3}a\u{2}o\u{c}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}"),
-    ("Stop the recording", "Oc\u{3}a\u{2}o\u{c}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}"),
+    ("Stop recording", "Oc\u{3}a\u{2}o\u{b}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}"),
+    ("Stop the recording", "Oc\u{3}a\u{2}o\u{b}\u{1}\u{3}\u{8} \u{e}a\u{6}\u{1}c\u{8}"),
     ("Stop the recording first", "C\u{2}a\u{15}a\u{5}a c\u{3}o\u{6} \u{e}a\u{6}\u{1}c\u{1}"),
     ("Stop the scope first", "C\u{2}a\u{15}a\u{5}a c\u{3}o\u{6}"),
-    ("Stopped", "Oc\u{3}a\u{2}o\u{c}\u{5}e\u{2}o"),
-    ("Swipe", "C\u{b}ax\u{1}\u{c}a\u{2}\u{1}e"),
-    ("Tap step", "\u{428}a\u{13} \u{4}aca\u{2}\u{1}\u{12}"),
-    ("Temp unit", "E\u{7}. \u{3}e\u{b}\u{6}."),
-    ("Temperature Settings", "Hac\u{3}po\u{14}\u{4}a \u{3}e\u{b}\u{6}."),
+    ("Stopped", "Oc\u{3}a\u{2}o\u{b}\u{5}e\u{2}o"),
+    ("Swipe", "C\u{c}ax\u{1}\u{b}a\u{2}\u{1}e"),
+    ("Tap step", "\u{428}a\u{13} \u{4}aca\u{2}\u{1}\u{10}"),
+    ("Temp unit", "E\u{7}. \u{3}e\u{c}\u{6}."),
+    ("Temperature Settings", "Hac\u{3}po\u{14}\u{4}a \u{3}e\u{c}\u{6}."),
     ("Threshold:", "\u{f}opo\u{13}:"),
     ("Top bar", "Bepx \u{44d}\u{4}pa\u{2}a"),
-    ("Touch calibration", "Ka\u{5}\u{1}\u{10}po\u{c}\u{4}a ce\u{2}copa"),
+    ("Touch calibration", "Ka\u{5}\u{1}\u{11}po\u{b}\u{4}a ce\u{2}copa"),
     ("Touch test", "Tec\u{3} ce\u{2}copa"),
     ("Triangle", "Tpey\u{13}."),
     ("Trigger", "Tp\u{1}\u{13}\u{13}ep"),
-    ("Try again", "\u{f}o\u{c}\u{3}op\u{1}\u{3}e"),
+    ("Try again", "\u{f}o\u{b}\u{3}op\u{1}\u{3}e"),
     ("Type:", "T\u{1}\u{6}:"),
     ("USB disk", "USB-\u{7}\u{1}c\u{4}"),
-    ("Until stopped", "\u{1c}o oc\u{3}a\u{2}o\u{c}\u{4}\u{1}"),
+    ("Unstable: unplug USB?", "Hec\u{3}a\u{11}\u{1}\u{5}\u{8}\u{2}o: o\u{3}\u{4}\u{5}\u{1f}\u{15}\u{1}\u{3}e USB?"),
+    ("Until stopped", "\u{1c}o oc\u{3}a\u{2}o\u{b}\u{4}\u{1}"),
     ("Upper", "Bepx\u{2}\u{1}\u{14}"),
     ("Upper = reading", "Bepx = \u{6}o\u{4}a\u{e}."),
     ("Upper limit", "Bepx\u{2}\u{1}\u{14} \u{6}pe\u{7}e\u{5}"),
-    ("Vendor", "\u{f}po\u{1}\u{e}\u{c}o\u{7}\u{1}\u{3}e\u{5}\u{8}"),
+    ("Vendor", "\u{f}po\u{1}\u{e}\u{b}o\u{7}\u{1}\u{3}e\u{5}\u{8}"),
     ("Voltage Settings", "Hac\u{3}po\u{14}\u{4}a U"),
-    ("Voltage on V jack, no current", "Ha\u{6}p\u{12}\u{17}e\u{2}\u{1}e \u{2}a V, \u{3}o\u{4}a \u{2}e\u{3}"),
-    ("Voltage on circuit - power off", "C\u{2}\u{1}\u{b}\u{1}\u{3}e \u{2}a\u{6}p\u{12}\u{17}e\u{2}\u{1}e c \u{1b}e\u{6}\u{1}"),
-    ("Volume", "\u{1a}po\u{b}\u{4}oc\u{3}\u{8}"),
-    ("Wave", "\u{424}op\u{b}a"),
+    ("Voltage on V jack, no current", "Ha\u{6}p\u{10}\u{17}e\u{2}\u{1}e \u{2}a V, \u{3}o\u{4}a \u{2}e\u{3}"),
+    ("Voltage on circuit - power off", "C\u{2}\u{1}\u{c}\u{1}\u{3}e \u{2}a\u{6}p\u{10}\u{17}e\u{2}\u{1}e c \u{1b}e\u{6}\u{1}"),
+    ("Volume", "\u{1a}po\u{c}\u{4}oc\u{3}\u{8}"),
+    ("Wave", "\u{424}op\u{c}a"),
     ("Width:", "\u{428}\u{1}p\u{1}\u{2}a:"),
     ("Window", "O\u{4}\u{2}o"),
-    ("Wiring", "Cxe\u{b}a"),
+    ("Wiring", "Cxe\u{c}a"),
     ("Yes", "\u{1c}a"),
     ("Zero", "Ho\u{5}\u{8}"),
-    ("expect ~48 \u{3a9}", "o\u{17}\u{1}\u{7}ae\u{3}c\u{12} ~48 \u{3a9}"),
-    ("nothing else connected", "\u{10}o\u{5}\u{8}\u{16}e \u{2}\u{1}\u{15}e\u{13}o \u{2}e \u{6}o\u{7}\u{4}\u{5}."),
+    ("expect ~48 \u{3a9}", "o\u{17}\u{1}\u{7}ae\u{3}c\u{10} ~48 \u{3a9}"),
+    ("nothing else connected", "\u{11}o\u{5}\u{8}\u{16}e \u{2}\u{1}\u{15}e\u{13}o \u{2}e \u{6}o\u{7}\u{4}\u{5}."),
 ];
 #[cfg(lang_log)]
 pub const MIN_LINE: u16 = 12;

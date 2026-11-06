@@ -3061,14 +3061,22 @@ fn main() {
         dialog::toast(t, *ok);
         let (x, y, w2, h2) = dialog::TOAST;
         ck.check(&format!("toast/{t}"), &[("screen", Bx::new(0, 0, 480, 320)), ("toast", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
-        if k == 0 {
-            save(&out, "t01-toast-disk-in-use");
-        }
-        if k == 11 {
-            save(&out, "t03-toast-ajack");
-        }
-        if k == 8 {
-            save(&out, "t02-toast-resolution");
+        // (By text: the indices moved when toasts were added.)
+        let name = if k == 0 {
+            "t01-toast-disk-in-use"
+        } else if *t == rate_widest {
+            "t02-toast-resolution"
+        } else if *t == sentinel::Alert::AJack.toast() {
+            "t03-toast-ajack"
+        } else if *t == dialog::LOW_BATTERY {
+            "t04-toast-low-battery"
+        } else if *t == dialog::low_battery_off(30) {
+            "t05-toast-battery-empty"
+        } else {
+            ""
+        };
+        if !name.is_empty() {
+            save(&out, name);
         }
     }
 
