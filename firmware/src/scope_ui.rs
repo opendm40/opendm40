@@ -3079,6 +3079,10 @@ pub const MF_STEP: [(i16, i16); 3] = [(MF_C2, 36), (MF_C2 + 40, MF_C2_W - 80), (
 const MC_P: i16 = (MF_IW - 2) / 7;
 const MC_W: i16 = MC_P - 2;
 const MC_X: i16 = MF_IX + (MF_IW - (7 * MC_P - 2)) / 2;
+/// Clear and Default: right of the four chosen cells, across the grid's
+/// last three columns (wider than a cell, for the longer translations).
+const MC_BTN_X: i16 = MC_X + 4 * MC_P;
+const MC_BTN_W: i16 = (3 * MC_P - 4) / 2;
 /// The display sliders (stock 140 px, value int(130 * v)) and their values.
 const SL_X: i16 = MF_C2;
 const SL_W: i16 = 140;
@@ -3329,9 +3333,9 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 let r = rect(MC_X + MC_P * k as i16, 176, MC_W, 30);
                 rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[v.meas[k] as usize % 20], C_YELLOW);
             }
-            // Clear and Default under the grid's last two columns.
-            rbox_text(rect(MC_X + MC_P * 5, 176, MC_W, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, crate::tr!("Clear"), C_WHITE);
-            rbox_text(rect(MC_X + MC_P * 6, 176, MC_W, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, crate::tr!("Default"), C_WHITE);
+            // Clear and Default under the grid's last three columns.
+            rbox_text(rect(MC_BTN_X, 176, MC_BTN_W, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, crate::tr!("Clear"), C_WHITE);
+            rbox_text(rect(MC_BTN_X + MC_BTN_W + 2, 176, MC_BTN_W, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, crate::tr!("Default"), C_WHITE);
         }
         1 => {
             fill_c(rect(MF_IX, 61, MF_IW, 100), pc, C_POP_BG);
@@ -3502,17 +3506,20 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
     match tab {
         0 => {
             // Each grid cell owns the gaps around it (pitch MC_P x 35);
-            // Clear and Default sit under columns 5 and 6.
+            // Clear and Default (MC_BTN_X) under columns 4..6.
             let c = ((x - (MC_X - 1)) / MC_P).clamp(0, 6);
             if y < 171 {
                 let i = ((y - 64) / 35).clamp(0, 2) * 7 + c;
                 return if i < 20 { MfHit::Cell(i as u8) } else { MfHit::Inside };
             }
-            match c {
-                5 => MfHit::Clear,
-                6 => MfHit::Default,
-                k if k < v.meas_n.min(4) as i16 => MfHit::SelCell(k as u8),
-                _ => MfHit::Inside,
+            if x >= MC_BTN_X + MC_BTN_W + 1 {
+                MfHit::Default
+            } else if x >= MC_BTN_X - 1 {
+                MfHit::Clear
+            } else if c < v.meas_n.min(4) as i16 {
+                MfHit::SelCell(c as u8)
+            } else {
+                MfHit::Inside
             }
         }
         1 => {
