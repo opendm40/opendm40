@@ -29,8 +29,8 @@ pub const OFF_MS: [u64; 15] = [
 ];
 const H: u64 = 3_600_000;
 pub const OFF_TXT: [&str; 15] = [
-    "10 min", "30 min", "1 hour", "Never", "1 min", "5 min", "2 hours", "3 hours", "4 hours", "5 hours", "6 hours", "7 hours",
-    "8 hours", "9 hours", "10 hours",
+    crate::tr!("10 min"), crate::tr!("30 min"), crate::tr!("1 hour"), crate::tr!("Never"), crate::tr!("1 min"), crate::tr!("5 min"), crate::tr!("2 hours"), crate::tr!("3 hours"), crate::tr!("4 hours"), crate::tr!("5 hours"), crate::tr!("6 hours"), crate::tr!("7 hours"),
+    crate::tr!("8 hours"), crate::tr!("9 hours"), crate::tr!("10 hours"),
 ];
 /// The default code (30 min).
 pub const OFF_DEFAULT: usize = 1;

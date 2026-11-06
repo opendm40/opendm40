@@ -2,7 +2,7 @@
 """opendm40 scope: the coded record ring (firmware/src/cring.rs) at the slow
 timebases, in the emulator, for one input signal per run.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/ringtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --signal sine|noise|mixed
 
   sine   1 kHz 1 Vpp (the model has no ADC noise: it codes small)

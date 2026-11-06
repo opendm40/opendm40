@@ -12,5 +12,5 @@ trap 'rm -rf "$B"' EXIT
 # same string as tools/fw-version.sh (the install file name).
 # DBG:OHM6 parses only with its feature (Cargo.toml dbg-ohm6): the parser test has it.
 CARGO_PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../Cargo.toml | head -1) \
-    rustc --edition 2021 -O -A warnings --cfg 'feature="dbg-ohm6"' main.rs -o "$B/t"
+    rustc --edition 2021 -O -A warnings --cfg 'feature="dbg-ohm6"' --cfg 'feature="dbg-dev"' main.rs -o "$B/t"
 FW_VERSION=$(../fw-version.sh) "$B/t"

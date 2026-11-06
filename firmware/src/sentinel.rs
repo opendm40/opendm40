@@ -127,14 +127,14 @@ impl Alert {
     pub fn toast(self) -> &'static str {
         match self {
             Alert::None => "",
-            Alert::Overload => "Overload: 10 A shunt selected",
-            Alert::AJack => "Current in A jack: check leads",
-            Alert::AProt => "A jack current: 10 A shunt on",
-            Alert::VJack => "Voltage on V jack, no current",
-            Alert::Live => "Voltage on circuit - power off",
-            Alert::Dc => "DC voltage here: use DC V?",
-            Alert::Ac => "AC voltage here: use AC V?",
-            Alert::Fuse => "0 A for 60 s: check the fuse?",
+            Alert::Overload => crate::tr!("Overload: 10 A shunt selected"),
+            Alert::AJack => crate::tr!("Current in A jack: check leads"),
+            Alert::AProt => crate::tr!("A jack current: 10 A shunt on"),
+            Alert::VJack => crate::tr!("Voltage on V jack, no current"),
+            Alert::Live => crate::tr!("Voltage on circuit - power off"),
+            Alert::Dc => crate::tr!("DC voltage here: use DC V?"),
+            Alert::Ac => crate::tr!("AC voltage here: use AC V?"),
+            Alert::Fuse => crate::tr!("0 A for 60 s: check the fuse?"),
             // (the latch's toast came with its red phase)
             Alert::Ovl10A => "",
         }

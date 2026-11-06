@@ -346,6 +346,20 @@ fn view(img: &mut Img, name: &str) -> &'static mut gallery::Gallery {
     g
 }
 
+// Selection: the nav row's Select and Delete selected.
+const NAV: u16 = 300;
+const SEL_BTN: u16 = 140;
+const SEL_DEL: u16 = 290;
+
+fn sel_on(g: &mut gallery::Gallery, img: &mut Img) {
+    tap(g, SEL_BTN, NAV);
+    run(g, img);
+}
+
+fn tap_tile(g: &mut gallery::Gallery, i: usize) {
+    tap(g, [10u16, 166, 322][i % 3] + 74, [46u16, 168][i / 3] + 50);
+}
+
 // ------------------------------------------------------------------ check (as tools/ui-render)
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -700,6 +714,74 @@ fn ui(out: &str, data: &str, imgs: &str) -> bool {
         }
     }
 
+    // Selection: ticks, confirm, progress, result (the images stay on disk).
+    for n in ["e7", "e99"] {
+        let mut img = load(n);
+        let g = open(&mut img);
+        sel_on(g, &mut img);
+        scene(&mut ck, &format!("select-empty-{n}"), n == "e99");
+        for i in [0, 2, 4] {
+            tap_tile(g, i);
+        }
+        run(g, &mut img);
+        scene(&mut ck, &format!("select-ticks-{n}"), true);
+        msc::HOST_WRITING.store(true, Relaxed);
+        for _ in 0..3 {
+            g.poll_on(&mut img);
+        }
+        scene(&mut ck, &format!("select-busy-{n}"), false);
+        msc::HOST_WRITING.store(false, Relaxed);
+        run(g, &mut img);
+        tap(g, SEL_DEL, NAV);
+        run(g, &mut img);
+        save(out, &format!("select-confirm-{n}")); // over the grid, as on the meter
+        reset_screen();
+        g.draw(); // a full redraw with the box up: no viewer behind it
+        scene(&mut ck, &format!("select-confirm-redraw-{n}"), false);
+        tap(g, 300, 200);
+        g.poll_on(&mut img);
+        reset_screen();
+        g.draw();
+        scene(&mut ck, &format!("select-deleting-{n}"), n == "e99");
+        g.test_info("Selection cleared", "Files changed");
+        reset_screen();
+        g.draw();
+        scene(&mut ck, "select-info", false);
+    }
+    for why in ["Files changed", "Delete failed", "Disk read error", "Some skipped"] {
+        let mut img = load("e7");
+        let g = open(&mut img);
+        g.test_sel_done(why);
+        reset_screen();
+        g.draw();
+        scene(&mut ck, &format!("select-done-{why}"), why == "Files changed");
+    }
+
+    for (msg, (n, scene)) in &ck.seen {
+        println!("{n:6} x  {msg}   [first: {scene}]");
+    }
+    println!("cases {}, violations {}", ck.cases, ck.violations);
+    ck.violations == 0
+}
+
+// ------------------------------------------------------------------ manual
+
+/// The manual's gallery pictures (manual.sh): the grid of `img` and the
+/// same page in select mode with three ticks; zero violations.
+fn manual(out: &str, img: &str) -> bool {
+    let mut ck = Checker { cases: 0, violations: 0, seen: Default::default() };
+    let reg = regions();
+    let mut img = Img::load(img);
+    let g = open(&mut img);
+    ck.check("gallery", &reg);
+    save(out, "gallery");
+    sel_on(g, &mut img);
+    for i in [1, 2, 4] {
+        tap_tile(g, i);
+    }
+    run(g, &mut img);
+    ck.check("gallery-select", &reg);
+    save(out, "gallery-select");
     for (msg, (n, scene)) in &ck.seen {
         println!("{n:6} x  {msg}   [first: {scene}]");
     }
@@ -921,6 +1003,17 @@ fn recording(img: &mut Img, t: &mut dyn FnMut(&str, bool)) {
     run(g, img);
     t("Delete of the recording: Stop the recording", g.test_info_cur().0 == Some("Stop the recording"));
     t("the recording is still listed", g.test_state().0 == n);
+    // No tick on it, in the grid.
+    let g = open(img);
+    let r = r.unwrap_or(0) as usize;
+    for _ in 0..r / 6 {
+        g.touch(Gesture::SwipeLeft);
+    }
+    run(g, img);
+    sel_on(g, img);
+    tap_tile(g, r % 6);
+    run(g, img);
+    t("the recording cannot be ticked", g.test_sel() == (true, 0, None));
     csvlog::stop();
     for _ in 0..50 {
         now += 200;
@@ -928,6 +1021,208 @@ fn recording(img: &mut Img, t: &mut dyn FnMut(&str, bool)) {
     }
     t("recording stopped", !csvlog::active());
     t("its file deleted after the stop", name.is_some_and(|nm| csvlog::delete_on(img, &nm).is_ok()));
+}
+
+/// Multi-select on a disk of ~99 files (fsck by run.sh after).
+fn select(imgp: &str) -> bool {
+    let mut ok = true;
+    let mut t = |what: &str, good: bool| {
+        println!("{}: {what}", if good { "ok" } else { "FAIL" });
+        ok &= good;
+    };
+    let mut img = Img::load(imgp);
+    let img = &mut img;
+    let newest_first = |img: &Img| {
+        let mut v = dir_order(img);
+        v.reverse();
+        v
+    };
+
+    // The mode: Select toggles, a tile tap ticks and does not open it.
+    let g = open(img);
+    tap_tile(g, 0);
+    run(g, img);
+    t("without Select a tile opens the viewer", g.test_mode() == "view");
+    let g = open(img);
+    sel_on(g, img);
+    t("Select enters the mode", g.test_sel() == (true, 0, None));
+    tap_tile(g, 1);
+    run(g, img);
+    t("a tap ticks, stays on the grid", g.test_mode() == "grid" && g.test_sel().1 == 1);
+    tap_tile(g, 1);
+    run(g, img);
+    t("a second tap unticks", g.test_sel().1 == 0);
+    tap(g, SEL_DEL, NAV);
+    run(g, img);
+    t("nothing ticked: no confirmation", g.test_mode() == "grid");
+    tap_tile(g, 1);
+    run(g, img);
+    sel_on(g, img);
+    t("Select again leaves, the ticks go", g.test_sel() == (false, 0, None));
+    sel_on(g, img);
+    tap_tile(g, 1);
+    run(g, img);
+    t("MENU leaves the mode, not the gallery", g.back() == gallery::Out::Stay && g.test_sel() == (false, 0, None));
+    sel_on(g, img);
+    t("title bar leaves the mode, not the gallery", tap(g, 60, 20) == gallery::Out::Stay && !g.test_sel().0);
+
+    // Ticks across pages; the same tile on another page is another file.
+    let before = newest_first(img);
+    sel_on(g, img);
+    let mut want = vec![];
+    for (page, tile) in [(0usize, 0usize), (0, 5), (1, 0), (1, 3), (2, 2), (4, 1), (8, 4), (15, 0), (16, 2)] {
+        while g.test_state().1 < page as u32 {
+            g.touch(Gesture::SwipeLeft);
+            run(g, img);
+        }
+        tap_tile(g, tile);
+        run(g, img);
+        want.push(before[page * 6 + tile].clone());
+    }
+    t("ticks add up across pages", g.test_sel().1 == 9);
+    // A tap while the page is still the old one's tiles does nothing.
+    g.touch(Gesture::SwipeRight);
+    tap_tile(g, 4);
+    t("no tick before the new page is read", g.test_sel().1 == 9);
+    run(g, img);
+    for _ in 0..16 {
+        g.touch(Gesture::SwipeRight);
+        run(g, img);
+    }
+    t("back on page 1: ticks kept", g.test_state().1 == 0 && g.test_sel().1 == 9);
+
+    // Cancel and MENU: the grid, ticks kept, nothing gone.
+    tap(g, SEL_DEL, NAV);
+    run(g, img);
+    t("Delete selected: a confirmation", g.test_mode() == "dialog");
+    let r0 = img.reads;
+    for _ in 0..20 {
+        g.poll_on(img);
+    }
+    t("no disk work behind the box", img.reads == r0);
+    tap(g, 170, 200);
+    run(g, img);
+    t("Cancel: the grid, not the viewer", g.test_mode() == "grid" && g.test_sel() == (true, 9, None));
+    t("Cancel: thumbnails come back", g.test_state().3 == 6);
+    tap(g, SEL_DEL, NAV);
+    run(g, img);
+    g.back();
+    run(g, img);
+    t("MENU in the box: the grid", g.test_mode() == "grid" && g.test_sel().1 == 9);
+    t("nothing deleted so far", newest_first(img) == before);
+
+    // A thumbnail in progress stops when the box comes up.
+    g.touch(Gesture::SwipeLeft);
+    for _ in 0..8 {
+        g.poll_on(img);
+    }
+    t("a thumbnail is in progress", !g.idle());
+    tap(g, SEL_DEL, NAV);
+    g.poll_on(img);
+    let r0 = img.reads;
+    for _ in 0..50 {
+        g.poll_on(img);
+    }
+    t("its decode stopped under the box", img.reads == r0);
+
+    // Delete: one file per poll, exactly the ticked ones.
+    tap(g, 300, 200);
+    t("MENU ignored once it runs", g.back() == gallery::Out::Stay && g.test_mode() == "dialog");
+    let mut polls = 0;
+    let mut most = 0;
+    let mut have = before.len();
+    while g.test_mode() == "dialog" {
+        g.poll_on(img);
+        polls += 1;
+        let n = dir_order(img).len();
+        most = most.max(have - n);
+        have = n;
+        assert!(polls < 1000);
+    }
+    t("one file per poll", most == 1 && polls >= 9);
+    let after = newest_first(img);
+    let expect: Vec<String> = before.iter().filter(|n| !want.contains(n)).cloned().collect();
+    t("exactly the ticked files went", after == expect);
+    run(g, img);
+    t("then the grid, the mode left", g.test_mode() == "grid" && g.test_sel() == (false, 0, None));
+    t("count updated", g.test_state().0 as usize == after.len());
+
+    // A file vanishes (host) with ticks up: the ticks go, nothing is deleted.
+    let g = open(img);
+    sel_on(g, img);
+    tap_tile(g, 0);
+    tap_tile(g, 1);
+    run(g, img);
+    let list = newest_first(img);
+    let gone = crate::csvlog::parse_name(list[3].as_bytes()).unwrap();
+    t("other file deleted by the host", csvlog::delete_on(img, &gone).is_ok());
+    msc::HOST_WRITING.store(true, Relaxed);
+    g.poll_on(img);
+    msc::HOST_WRITING.store(false, Relaxed);
+    run(g, img);
+    t("listing changed: ticks cleared, told", g.test_sel() == (true, 0, Some("Selection cleared")));
+    t("no ticked file deleted", newest_first(img).len() == list.len() - 1);
+    tap(g, 240, 200);
+    run(g, img);
+    t("OK: the grid", g.test_mode() == "grid");
+
+    // The same while the confirmation is up (no busy seen): stops before
+    // the first file. The same count, another name at the same place.
+    tap_tile(g, 0);
+    tap_tile(g, 1);
+    run(g, img);
+    tap(g, SEL_DEL, NAV);
+    run(g, img);
+    let list = newest_first(img);
+    let (a, b) = (fat83(&list[0]), fat83("S999.BMP"));
+    let at = img.d.windows(11).position(|w| w == &a[..]).unwrap();
+    img.d[at..at + 11].copy_from_slice(&b);
+    tap(g, 300, 200);
+    while g.test_mode() == "dialog" && g.test_sel().2.is_none() {
+        g.poll_on(img);
+    }
+    t("renamed under the box: stopped", g.test_sel() == (false, 0, Some("Files changed")));
+    t("nothing deleted", dir_order(img).len() == list.len());
+    tap(g, 240, 200);
+    run(g, img);
+    t("OK: the grid", g.test_mode() == "grid");
+    std::fs::write(imgp, &img.d).unwrap();
+    ok
+}
+
+fn fat83(n: &str) -> [u8; 11] {
+    let mut o = [b' '; 11];
+    let (b, e) = n.split_once('.').unwrap();
+    o[..b.len()].copy_from_slice(b.as_bytes());
+    o[8..8 + e.len()].copy_from_slice(e.as_bytes());
+    o
+}
+
+/// The root holds S100.BMP and so does SHOTS/ (run.sh): the root's tile is
+/// ticked, csvlog would delete the other one: skipped, both stay.
+fn select_dup(imgp: &str) -> bool {
+    let mut img = Img::load(imgp);
+    let img = &mut img;
+    let v = dir_order(img);
+    let g = open(img);
+    sel_on(g, img);
+    let r = v.len() - 1; // the root's file: the oldest
+    assert_eq!(v[0], "S100.BMP");
+    for _ in 0..r / 6 {
+        g.touch(Gesture::SwipeLeft);
+        run(g, img);
+    }
+    tap_tile(g, r % 6);
+    run(g, img);
+    tap(g, SEL_DEL, NAV);
+    run(g, img);
+    tap(g, 300, 200);
+    while g.test_sel().2.is_none() {
+        g.poll_on(img);
+    }
+    let ok = g.test_sel().2 == Some("Some skipped") && dir_order(img) == v;
+    println!("{}: a name in two directories: not deleted", if ok { "ok" } else { "FAIL" });
+    ok
 }
 
 fn csvlog_busy(t: &mut dyn FnMut(&str, bool)) {
@@ -993,10 +1288,13 @@ fn main() {
     let a: Vec<String> = std::env::args().collect();
     let ok = match a[1].as_str() {
         "ui" => ui(&a[2], &a[3], &a[4]),
+        "manual" => manual(&a[2], &a[3]),
         "decode" => decode(&a[2], &a[3]),
         "lock" => lock(&a[2], &a[3]),
+        "select" => select(&a[2]),
+        "select-dup" => select_dup(&a[2]),
         "dlg" => dlg(&a[2], &a[3]),
-        _ => panic!("ui | decode | lock | dlg"),
+        _ => panic!("ui | manual | decode | lock | select | select-dup | dlg"),
     };
     std::process::exit(if ok { 0 } else { 1 });
 }

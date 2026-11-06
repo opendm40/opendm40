@@ -3,7 +3,7 @@
 `rails`; field report 2026-10-26: grey screen on opening the scope, and on the
 DM40A the meter switched itself off).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/railstest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Run 1: SYST:RAIL BOTH, wait for the settings file save (DBG:BOOT? SAVE,OK);

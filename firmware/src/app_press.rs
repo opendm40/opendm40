@@ -154,7 +154,7 @@ impl App {
     /// to it (ui::set_row_only), no full repaint.
     fn press_draw_direct(&mut self, t: ui::RowPress) {
         match self.view {
-            View::Menu => ui::menu_item(t.row as usize, ui::view_name(self.combo), t.on),
+            View::Menu => ui::menu_item(t.row as usize, ui::view_label(self.combo), t.on),
             View::Gen => ui::gen_press(&self.gen, t.row as usize, t.on),
             View::Range if self.dmm.pw.on => ui::pw::settings_press(&self.dmm.pw_state(), t.row, t.on),
             View::Range => {

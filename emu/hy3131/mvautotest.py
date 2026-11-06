@@ -3,7 +3,7 @@
 2 and 4): AUTO -> AUTO+ on 60 mV leaves mV at once, and AC V AUTO
 (mV-first) leaves 600 mV under a large square that the mV input clamps.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/hy3131/mvautotest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P]
 
 Model options (HY3131.cs): `mvclamp:1.212` clips the jack on the mV path

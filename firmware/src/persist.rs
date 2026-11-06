@@ -64,6 +64,10 @@ const V7_WORDS: usize = 58;
 /// (0 = 1 %, the default, 1 = 0.1 %, 2 = 5 %; app.rs swap01). Older
 /// records read 0 there = the defaults: no version change.
 pub const W_REC: usize = 58;
+/// p[W_REC] bit 31: this record asks for the defaults at the next boot
+/// (Settings > Other > Reset settings; App::new, `reset_record`). In the
+/// record, so a power cut before the restart still resets.
+pub const REC_RESET: u32 = 1 << 31;
 const V6_WORDS: usize = 52;
 /// First word of the power-meter block (app_power::PW_WORDS words).
 pub const W_POWER: usize = 48;
@@ -117,6 +121,47 @@ pub fn words_of(version: u32) -> Option<usize> {
         2 => V2_WORDS,
         _ => return None,
     })
+}
+
+/// Words that are calibration, not settings (owner, PR #282: the
+/// thermocouple offsets and NTC values reset): the power meter's shunt
+/// values and V gains (W_POWER + 1..=5), its AC zeros (W_POWER + 7..=9) and
+/// DC zeros (W_POWER_ZD), the touch calibration (W_TOUCH_CAL). pw_words w[6]
+/// is half of each: below.
+const fn is_cal(i: usize) -> bool {
+    matches!(i, 49..=53 | 55..=57 | 59..=61 | 64..=69)
+}
+const _: () = assert!(W_POWER == 48 && W_POWER_ZD == 59 && W_TOUCH_CAL == 64);
+
+/// The record after Reset settings, in place: `old` is the record that asked
+/// for it, `defaults` a fresh App's words; the calibration stays, the function
+/// is DC V.
+#[inline(never)]
+pub fn reset_record(old: &mut [u32; WORDS], defaults: impl Fn(usize) -> u32) {
+    const ZERO_BITS: u32 = 0x1_FFFF; // pw_words w[6]: zy, zero_ok
+    let (mut i, z) = (0, old[W_POWER + 6]);
+    while i < WORDS {
+        if !is_cal(i) {
+            old[i] = defaults(i);
+        }
+        i += 1;
+    }
+    old[2] = old[2] & !0xFF | 1;
+    old[W_REC] &= !REC_RESET;
+    old[W_POWER + 6] = old[W_POWER + 6] & !ZERO_BITS | z & ZERO_BITS;
+}
+
+/// Mark the backup SRAM record as asking for the defaults (REC_RESET).
+#[inline(never)]
+pub fn request_reset() {
+    let mut w = [0u32; WORDS];
+    let mut i = 0;
+    while i < WORDS {
+        w[i] = word(i);
+        i += 1;
+    }
+    w[W_REC] |= REC_RESET;
+    save(&w);
 }
 
 /// CRC-32 (IEEE, as calbackup::crc32) of the words' little-endian bytes.

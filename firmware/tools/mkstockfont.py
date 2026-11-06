@@ -406,7 +406,6 @@ def main():
         # the font-object address the stock page uses.
         ('SC_C', 0x08054828, load_class_c),                                  # status letters, "H"
         ('SC_F12', 0x0804F24C, lambda: load_merged(0x0805471C, 0x0804F24C)),  # 12 px texts
-        ('SC_F20', 0x08054148, lambda: load(0x08054148)),                     # panel buttons
         ('SC_PROBE', 0x08054FC0, lambda: load(0x08054FC0)),                   # coupling / probe glyph
         ('SC_EDGE', 0x08055014, lambda: load(0x08055014)),                    # trigger edge
         ('SC_MARK', 0x08065558, lambda: load(0x08065558)),                    # 12x12 markers

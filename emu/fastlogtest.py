@@ -3,7 +3,7 @@
 emulator, with the W25Q128 model's busy timing on (page program / erase
 times, virtual time): the sustainable rate into the flash per rung.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/fastlogtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Per flash profile (--profiles: typ = tPP 0.4 ms, tSE 45 ms, tBE64 150 ms;

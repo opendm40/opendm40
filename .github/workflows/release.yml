@@ -39,12 +39,14 @@ jobs:
       # No cache: the release image is built from a clean target dir.
       - name: build.sh --locked
         run: firmware/build.sh --locked
+      - name: Localized images (tools/build-langs.sh)
+        run: firmware/tools/build-langs.sh --locked
       - name: Image and SHA256SUMS
         working-directory: firmware
         run: |
           name=dm40_opendm40_$TAG.bin
           test -f "$name"
-          sha256sum "$name" | tee SHA256SUMS
+          sha256sum "$name" "dm40_opendm40_$TAG"-??.bin | tee SHA256SUMS
       - name: Release notes
         # The previous v* tag named explicitly: never the pr-builds prerelease
         # (pr-build.yml).
@@ -60,4 +62,4 @@ jobs:
           case $TAG in *-pre*|*-rc*) pre=--prerelease ;; esac
           gh release create "$TAG" --verify-tag $pre \
               --title "opendm40 $TAG" --notes-file notes.md \
-              "firmware/dm40_opendm40_$TAG.bin" firmware/SHA256SUMS
+              firmware/dm40_opendm40_"$TAG"*.bin firmware/SHA256SUMS

@@ -21,7 +21,7 @@
 pub const EDGE: u8 = 0;
 pub const PULSE: u8 = 1;
 pub const RUNT: u8 = 2;
-pub const TYPE_NAMES: [&str; 3] = ["Edge", "Pulse", "Runt"];
+pub const TYPE_NAMES: [&str; 3] = [crate::tr!("Edge"), crate::tr!("Pulse"), crate::tr!("Runt")];
 /// Pulse-width conditions (Settings::pcond).
 pub const GT: u8 = 0;
 pub const LT: u8 = 1;
