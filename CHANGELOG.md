@@ -16,6 +16,7 @@ section named after the tag as the release notes; how to cut a release:
 - **Scope:** MF > Measure can measure the DMM channel (a CH1 / CH2 cell); CUR Y shows a second Y2-1 at the CH2 V/div.
 - **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
 - **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
+- **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
 - DMM: 2 px more between the big digits and the bargraph.
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
