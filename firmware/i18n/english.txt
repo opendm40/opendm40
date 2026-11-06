@@ -1,0 +1,598 @@
+# UI strings that stay English on purpose (units, signal names, diagnostics, rare errors).
+  Bad 
+  max 
+ (AD2, isolated jacks)
+ (n/a here)
+ (software),
+ A now
+ A rms, lost 
+ A, peak 
+ A; t0 at t_s 
+ KB
+ MB
+ S/s\r\n# trigger: 1 ms mean |I| above the idle peak + 
+ V cal
+ \u{3a9}, expect ~48
+ baud
+ bits per pixel, compression 
+ factory
+ file
+ files
+ free
+ mA
+ nA
+ of 
+ pt
+ pts
+ px
+ req=
+ row
+ rows
+ s average
+ selected
+ stored
+ to 
+ uA
+ zoom
+ } else if r.main.v.is_nan() { b
+ } else { b
+) && num(buf, &mut at, e.late_ms as f32, 0) && put(buf, &mut at, b
+) } else { (crate::dmm::format(&mut t, ms as f32 / 1000.0, 2), b
++Duty
++Pul
++Wid
+, +1 digit in 
+, 60000 counts
+, VA only
+, coupling 
+, idle 
+, inrush capture, AD2, AC A row 10 A (10 mohm, OP1 x1, DC-coupled), nominal 
+, lost 
+, max 
+, mode 
+, opendm40 
+, range 
+, sample rate 
+, scope record (no real-time clock)\r\n
+, tap 
+, triggered\r\n
+, untriggered\r\n
+, zero: not set
+, zero: set
+,DALI,
+,ERR,
+,MB,
+,OK,
+,UART,
+-- (DC/AC V or A only)
+-- (disk busy)
+-- (no disk)
+-Duty
+-Pul
+-Wid
+/div
+/div, 
+0.01dB
+0.02dB
+0.05dB
+0.1dB
+0.28 mA ON
+0.2dB
+0.5dB
+0.90 mA
+100 nA
+100dB
+100mdB
+100ms
+100ms/div
+100ns
+100us
+10dB
+10mdB
+10ms
+10ns
+10us
+1200 bit/s
+1dB
+1ms
+1us
+2 fingers down
+200mdB
+200ms
+200ns
+200us
+20dB
+20mdB
+20ms
+20ns
+20us
+2dB
+2ms
+2nd level:
+2us
+3 fingers down
+4-20mA
+500mdB
+500ms
+500ns
+500us
+50dB
+50mdB
+50ms
+50ns
+50us
+5dB
+5ms
+5us
+60 000uF
+6000uF
+600M\u{3a9} experimental
+600mA
+600mV
+600nF
+600uA
+600uF
+60mA
+60mV
+60nF
+60uF
+6mA
+6uF
+: gain 
+: hold V steady (8 s)
+; Irms(100 ms) 
+@load
+A mA uA
+A-HOLD
+A-JACK
+A-JACK only
+A-PROT
+ABORT
+ABS
+AC
+AC 
+AC A
+AC V
+AC coupling (AC V row)
+AC mA
+AC mV
+AC present: use AC+DC
+AC uA
+AC+DC
+AC+DC: total; P = Pac + Vdc x Idc, rms of both
+AC/DC
+AC: AC parts only (DC removed); P, PF, S, Q, f
+AC?
+AD1PK_PB1
+AD1PK_SENSE
+AD2PK_PB1
+AJACK
+APROT
+AUTO
+AUTO+
+AUTO: DC (no AC signal)
+AUTO: no signal found
+AVG
+Aborted
+Alientek
+Armed: 
+Arming ...
+At load
+Auto 
+Auto power-off in 
+AutoAC
+AutoDC
+Avg 
+BEEP
+BIG
+BMP with 
+BUSY
+Band
+Battery empty: off in 10 s
+Battery empty: off in 20 s
+Battery empty: off in 30 s
+Baud:
+Bd 
+Before: mean 
+Beta
+Beta  
+Bit rate too high for 1.25 MS/s
+Bit rate:
+Blackman
+Board temp
+Burden
+CAP
+CH1
+CH2 (DMM):
+CH2: DMM in V or A
+CH2: needs AC A
+CH2: no AD2 row here
+CH2: not in AC+DC/AUTO
+CH2: not in the Wave view
+CH2: not in this build
+CH2: recording runs
+CLEAR
+CMP_PB1
+CMP_SENSE
+COM
+COM carries the load current; P > 0: I into A
+CONT
+CRC:
+CUR
+CUR X
+CUR Y
+Cal 
+Cal: none (stock)
+Cancelled: press Arm
+Cancels in 3 s
+Captured
+Captured, not saved: 
+Captured: saving ...
+Change view
+Cycl
+DALI
+DATA LOGGING
+DC
+DC 
+DC A
+DC V
+DC coupling (DC V row)
+DC mV
+DC-coupled AC row
+DC: P = Vdc x Idc; no f, PF, S, Q
+DC?
+DIODE
+DM40
+DM40?
+DM40A
+DM40B
+DM40C
+DMM
+DMM + Scope
+Data out of range
+Data stale
+Decode log
+Decode log: DMM stream on
+Decode log: MCX input only
+Decode log: inrush page open
+Decode log: no DALI
+Decode log: scope record in use
+Deleted 
+Device
+Disk full: log ended
+EXC
+EXP  I 
+English
+Exit: power key, hold 2 s
+FAIL,
+FAIL,NONE
+FAST
+FE:
+FFT
+FILE
+FLAT
+FREQ
+FUSE
+FUSE?
+Fast log cancelled
+Fast log failed
+Fast: DC/AC V or A only
+Files: 
+Firmware received
+Firmware upload
+Fit error: mean 
+Fixed rate in this function
+Flat-top
+Format:
+Frames 
+Frames:
+GEN
+GEN trace:
+Gain vs DC V / AC V, 8 s
+Gestures
+Good fit: Save applies it
+HI
+HIGH
+HOLD
+HV
+Hamming
+Hanning
+Help 
+Highest V/div
+Hold; run / stop
+Hz
+Hz/Div
+I ranging...
+I>LIM 
+I>LIM!
+IDLE
+INF
+INV
+Illegal parameter value
+Inrush: no AD2 row
+Inrush: no stream in this build
+Inrush: not in the power meter
+Inrush: not saved
+Inrush: recording runs
+Inrush: saved
+Inrush: scope record in use
+Inrush: still saving
+Inverted
+Ipp
+Irms 100 ms
+Keep holding to exit
+Keypad
+Keys
+LIVE
+LIVE?
+LO
+LOAD
+LOGS/
+LOUD
+LOW
+Leads open, nothing in A
+Leave and open the gallery again to retry
+Lost:
+Low battery! Please charge
+Lowest V/div
+MANU
+MANUAL
+MATH
+MAX
+MCX
+MED
+MENU
+METHOD
+MF
+MHz
+MIN
+Mass storage busy
+Max 
+Max 10 A; above 
+Max zoom
+Measuring the bit rate
+Menu / back
+Min 
+Move that marker
+Moved: tap again
+NONE
+NOTREACTIVE
+NTC user
+NTC100K3950
+NTC100k B3950
+NTC10K3435
+NTC10K3950
+NTC10k B3435
+NTC10k B3950
+NTCUSER
+Needs the P + PF method
+No AC: DC is more precise
+No frames yet
+No reading to log
+No record to save
+Noise
+Not a DM40 update file
+Not while logging
+OFF: V, P at the jacks
+OHM
+OK,
+OL
+ON (A, mA, uA)
+ON: the load sees V - I*R
+OPEN
+OVERLOAD
+OVLD
+Off 
+OhmEXP
+Overflow
+PASS
+PAUSE
+PE:
+PF
+POW 
+POWER
+PT100
+PT1000
+Page 
+Parameter not allowed
+Peak
+Point 
+Polarity:
+Power key twice
+Power meter: wiring
+Press Arm, then switch the load on
+PriScr
+Protocol:
+Pulse width 
+RANGE
+REC
+REC 
+REL
+REQ
+ROLL
+RSP
+RUN
+Range / menu
+Rate too low for 
+Raw 
+Raw: touch a target
+Re-plug USB to apply
+Reading the disk
+Reading the log
+Record on / off
+Rectangular
+Reset energy?
+Runt, 2nd level 
+S/s, samples 
+SCOPE
+SETUP
+SHORT
+SIGNAL
+SLOW
+SMALL
+SOURCE
+STOP
+Sample rate too low
+Saved LOGS/
+Saving CSV, wait
+Saving a screenshot
+Saving the CSV log
+Scale
+Scope: drag marker
+Scope: drag up/down
+Scope: side drag
+Selected item
+Settings conflict
+Settings conflict: Wave view
+Settings conflict: inrush page
+Settings conflict; RES: PF 1 optimum is flat, use REACtive (C or L load, PF ~0)
+Settings conflict; phase cal needs CONF:POW with AC or AC+DC coupling (P + PF method)
+Stale 
+Steady V, 10-70 % of range
+Swipe down (DMM)
+Swipe down with 3 fingers to save a screenshot
+Swipe left / right
+TC K
+TCK
+TEMP
+Takes about 12 s
+Tap 
+Tap -
+Tap the value to type it
+Tap the value to type it (TC: on the CJ)
+Tap the yellow cross
+Tap: next page
+Taps differ: tap again
+The SPI flash disk is missing or not FAT16
+Time/div
+Too far from the cross
+Touch calibration reset
+Touch calibration saved
+Touch lock
+Triangular
+Trigger position
+Triggered: recording 2 s ...
+UART
+UART,
+UNSTABLE
+USB host is writing
+Undefined header
+Unit: \u{2103}
+Unit: \u{2109}
+Unstable: unplug USB?
+Unsupported
+Unsupported format
+V cal
+V cal 
+V cal of this V range
+V cal: < 10 % of 
+V cal: V not steady
+V cal: off > 10 %
+V cal: too high for 
+V calibration...
+V gain 
+V-JACK
+V-JACK?
+V/div
+VA
+VAh
+VJACK
+VOLUME
+Vamp
+Vavg
+Vb
+Vbas
+Vchg
+Vcrm
+Vdis
+Vmax
+Vmin
+Vp-p
+Vpp
+Vrms
+Vtop
+WAIT
+Waiting for a signal (no swing)
+Wave: AC A row (DC-coupled)
+Wave: V or A function
+Wave: data logger running
+Wave: no AD2 row here
+Wave: not in AC+DC/AUTO
+Wave: recording runs
+Wh
+Wh, VAh and the time
+Xf
+Zero stored
+Zero the power meter
+Zero: leads open (12 s)
+Zero: signal present
+Zeroing: leads open
+ad2-isr
+auto
+blue
+brown
+corrected
+dB
+dBV
+dec-log
+dialog
+disk error
+disk full
+down
+drag orange T
+edge, CH2 scale
+edge, computed
+falling
+format
+fr
+gold
+green
+grid
+it
+kHz
+kV
+kVA
+kVAh
+kW
+kWh
+list_page {title}: values vs rows
+logic level
+mA
+mHz
+mV
+mVA
+mW
+mWh
+max 10 MHz
+max 50 kHz
+ms
+mute
+mvar
+nF
+no disk
+no limit
+none
+ns
+opendm40
+orange
+persist layout (app.rs): slots 0..8 at p[20..38], the power slot at W_LIM_W
+pink
+probe 
+purple
+raw
+red
+rising
+ru
+scope CSV sized for the record
+settings: one value per setting
+shunt
+source DMM 
+t_s,raw,value_A,lost_before\r\n
+uA
+uF
+uV
+us
+var
+view
+yellow
+zh

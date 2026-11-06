@@ -190,7 +190,7 @@ impl App {
         let mut st = self.scope.s;
         if !on && st.tsrc == scope::TSRC_CH2 {
             st.tsrc = scope::TSRC_CH1;
-            self.toast(now, "Trigger source: CH1", false);
+            self.toast(now, crate::tr!("Trigger source: CH1"), false);
         }
         self.scope_set(st, now);
         self.update_rails(clk);

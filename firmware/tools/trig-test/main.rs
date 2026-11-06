@@ -3,6 +3,14 @@
 //! layout (src/hwtrig.rs pre_for / post_for / post_rec). Needs no hardware.
 //!   tools/trig-test/run.sh
 #[allow(dead_code)]
+// src/lang.rs `tr!` as in the English image (stockfont.rs, which has it, is not here).
+#[macro_export]
+macro_rules! tr {
+    ($s:literal) => {
+        $s
+    };
+}
+
 #[path = "../../src/pack10.rs"]
 mod pack10;
 #[path = "../../src/trigsoft.rs"]

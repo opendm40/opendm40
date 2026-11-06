@@ -4,7 +4,7 @@
 generated CSV over the two paths, interleaved, must give the bytes of
 firmware/tools/dlog.py of its DLG.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/csvsharetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 One run (one USB/IP connection, USBTMC and MSC in turn):

@@ -278,6 +278,10 @@ pub fn rgb(c: u16) -> [u8; 3] {
 
 /// Write the frame buffer as a binary PPM (scaled by `k`, nearest).
 pub fn save_ppm(path: &str, k: usize) {
+    // UIR_NOSAVE (tools/lang-render): the rules only, no pictures.
+    if std::env::var_os("UIR_NOSAVE").is_some() {
+        return;
+    }
     let e = emu();
     let mut out = format!("P6 {} {} 255\n", W * k, H * k).into_bytes();
     for y in 0..H * k {

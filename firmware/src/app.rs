@@ -62,8 +62,8 @@ const TIM13_CCR1: u32 = 0x4000_1C34;
 /// Offered stock options: dim 5/10/30 min/never, shutdown 10/30/60 min/never.
 const DIM_MS: [u64; 4] = [300_000, 600_000, 1_800_000, 0];
 const OFF_MS: [u64; 4] = [600_000, 1_800_000, 3_600_000, 0];
-const DIM_TXT: [&str; 4] = ["5 min", "10 min", "30 min", "Never"];
-const OFF_TXT: [&str; 4] = ["10 min", "30 min", "1 hour", "Never"];
+const DIM_TXT: [&str; 4] = [crate::tr!("5 min"), crate::tr!("10 min"), crate::tr!("30 min"), crate::tr!("Never")];
+const OFF_TXT: [&str; 4] = [crate::tr!("10 min"), crate::tr!("30 min"), crate::tr!("1 hour"), crate::tr!("Never")];
 /// Wake gate (stock FUN_08020248, stock/re/stock-ui-notes/interaction.md D.3):
 /// after an idle dim the first touch / side key only restores the backlight,
 /// and input is ignored for this long from it. opendm40 also drops the rest of
@@ -98,6 +98,9 @@ const BUZZER_ARR_LO: u32 = 14000;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
+/// DMM page trend chart: two taps on the plot within this time are a double
+/// tap (bargraph <-> history row).
+const CHART_DOUBLE_MS: u64 = 400;
 /// The beeper indicator stays this long after the beeper's condition last
 /// held (`App::beep_ind`): its shortest on-time, and a contact that
 /// chatters faster reads as one indication.
@@ -116,9 +119,9 @@ fn alert_mask_name(b: &mut [u8; 16], m: u8) -> &str {
     use crate::sentinel::{M_AJACK, M_JACK};
     let m = m & M_JACK;
     match m {
-        M_JACK => "ON",
+        M_JACK => crate::tr!("ON"),
         M_AJACK => "A-JACK only",
-        0 => "OFF",
+        0 => crate::tr!("OFF"),
         _ => {
             let t = b"Mask ";
             b[..5].copy_from_slice(t);
@@ -390,6 +393,9 @@ pub struct App {
     chart: [f32; ui::CHART_W as usize],
     chart_n: usize,
     chart_rate: u8,
+    /// The time of the last tap on the trend chart's plot, for a double tap
+    /// (`CHART_DOUBLE_MS`); 0 = none.
+    chart_tap: u64,
     chart_next: u64,
     chart_unit: &'static str,
     chart_dec: u8,
@@ -590,20 +596,84 @@ pub fn finish_disk_writes(now: u64) {
 }
 
 impl App {
+    /// Reset settings (Settings > Other): the confirm, unless a recording or
+    /// a host's logger session runs (toast). In region B: the feature variants
+    /// (acdc-meth, memprobe) have no room in C for it.
+    #[inline(never)]
+    fn reset_ask(&mut self, now: u64) {
+        if !self.reset_refused(now) {
+            self.overlay = Some(crate::dialog::Overlay::SettingsReset { until: now + crate::dialog::ENERGY_MS });
+            self.redraw = true;
+            crate::dialog::settings_reset();
+            self.beep(now, 50);
+        }
+    }
+
+    /// A tap on that confirm. Yes: the disk writers done, the record asking
+    /// for the defaults into the backup SRAM and the settings file (App::new,
+    /// persist::reset_record), then the restart, as DBG:RESET (main.rs).
+    #[inline(never)]
+    fn reset_answer(&mut self, x: u16, y: u16, now: u64, clk: &mut Clock) {
+        match crate::dialog::power_off_hit(x, y) {
+            Some(true) => {
+                self.overlay_close();
+                if self.reset_refused(now) {
+                    return;
+                }
+                finish_disk_writes(now);
+                self.persist_now();
+                crate::persist::request_reset();
+                crate::setfile::flush();
+                self.quiesce_for_reset(clk);
+                unsafe { w32(0xE000_ED0C, 0x05FA_0004) };
+                loop {}
+            }
+            Some(false) => self.overlay_close(),
+            None => {}
+        }
+    }
+
+    /// No reset during a recording or a host's logger session (toast).
+    #[inline(never)]
+    fn reset_refused(&mut self, now: u64) -> bool {
+        let busy = self.session_runs() || self.logger_busy;
+        if busy {
+            self.toast(now, crate::tr!("Stop the recording first"), false);
+        }
+        busy
+    }
+
+    /// At boot, a record asking for the defaults: this fresh App's words
+    /// with the old calibration (persist::reset_record). `persist_now` puts
+    /// the fresh words in the backup SRAM; a power cut now finds the request
+    /// in the settings file, so it resets again.
+    #[inline(never)]
+    fn reset_apply(&self, rec: &mut crate::persist::Record) {
+        self.persist_now();
+        crate::persist::reset_record(&mut rec.words, crate::persist::word);
+    }
+
     /// Before a reset (main.rs `reset_at`: DBG:RESET, DBG:UPDATE, an
-    /// install from the disk): backlight, generator output and scope
-    /// acquisition off, then 20 ms for the supply to settle. A reset releases
-    /// the power-hold pins (PE2 / PC4) until the ROM drives them again; a
-    /// DBG:UPDATE right after a scope Save CSV sometimes ended in a power
-    /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
-    /// loader never ran; why the load matters is inferred).
+    /// install from the disk; Reset settings): backlight, generator output
+    /// and scope acquisition off, the SPI flash idle, and the rails as on the
+    /// DMM page: PE2 on, PC4 off (`Scope::rails`), then 150 ms for the DMM
+    /// supply to come up. A reset releases the power-hold pins (PE2 / PC4)
+    /// until the ROM drives both high again. With PE2 off (the scope and
+    /// generator pages, SYST:RAIL AUTO) Reset settings lost the power in 4 of
+    /// 5 tries (device 2026-11-06, on USB: 3 restarts with POR, once the
+    /// meter stayed off; 1 SW), from the DMM page it restarted with SW.
+    /// That the DMM supply starting from off inside the reset is the cause
+    /// is inferred.
+    #[inline(always)] // main.rs and the cold reset_answer
     pub fn quiesce_for_reset(&mut self, clk: &mut Clock) {
         backlight(0);
         let mut g = self.gen.s;
         g.on = false;
         self.gen.apply(g);
         self.scope.stop_hw();
-        clk.delay_ms(20);
+        let _ = crate::spiflash::wait_idle(3000);
+        self.scope.rails(true, false, clk);
+        clk.delay_ms(150);
     }
 }
 
@@ -748,6 +818,7 @@ impl App {
             chart: [0.0; ui::CHART_W as usize],
             chart_n: 0,
             chart_rate: ui::TREND_DEFAULT,
+            chart_tap: 0,
             chart_next: 0,
             chart_unit: "",
             chart_dec: 0,
@@ -787,9 +858,15 @@ impl App {
         // 2026-10-25): DC V and the measurement settings at their defaults;
         // only a reset (the backup SRAM) continues them, or Mode Remember ON
         // (restore).
-        if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
+        if let Some(mut rec) = crate::setfile::pick(crate::persist::load()) {
             let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
-            a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
+            // Reset settings: the defaults, except the calibration. As a
+            // continued session, for the power meter's values.
+            let reset = rec.words[crate::persist::W_REC] & crate::persist::REC_RESET != 0;
+            if reset {
+                a.reset_apply(&mut rec);
+            }
+            a.restore(&rec, reset || from_bkp && crate::persist::same_session(), clk);
         }
         backlight(a.backlight);
         let g = a.gen.s;
@@ -909,6 +986,7 @@ impl App {
         self.dmm_view.label = self.t_label();
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
+        ui::set_btn_mem(self.dmm.sub_mem());
         // The power meter's AC+DC parts layout (doc 3.17): this page only.
         ui::set_pw_parts(self.view == View::Dmm && self.pw_parts_want());
         // The range pages' Record button: red while recording.
@@ -959,7 +1037,7 @@ impl App {
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
             View::Decode => self.log_page(),
-            View::Menu => ui::main_menu(ui::view_name(self.combo)),
+            View::Menu => ui::main_menu(ui::view_label(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {
                 self.with_temp_page(None);
                 self.temp_info_tick(true);
@@ -974,7 +1052,7 @@ impl App {
                 // UF-21: AUTO+ (never steps down to mV) is the recommended V
                 // autorange; warn while the mV-first AUTO is in use.
                 let note = (b == Button::Volt).then(|| {
-                    if self.dmm.mv_auto_warn() { (dmm::MV_AUTO_WARN, true) } else { ("AUTO+ recommended: never steps to mV", false) }
+                    if self.dmm.mv_auto_warn() { (dmm::MV_AUTO_WARN, true) } else { (crate::tr!("AUTO+ recommended: never steps to mV"), false) }
                 });
                 let sub = if b == Button::Ohm { self.dmm.ohm_var() } else { self.dmm.sub() };
                 ui::range_page(b, sel, sub, note);
@@ -1017,23 +1095,23 @@ impl App {
                 vals[ui::S_SHUTDOWN as usize] = OFF_TXT[self.off_idx];
                 vals[ui::S_BACKLIGHT as usize] = core::str::from_utf8(&b0[..n0]).unwrap_or("");
                 vals[ui::S_VOLUME as usize] = core::str::from_utf8(&b1[..n1]).unwrap_or("");
-                vals[ui::S_BT as usize] = if self.bt_on { "ON" } else { "OFF" };
-                vals[ui::S_START as usize] = ui::view_name(START[self.start_page]);
-                vals[ui::S_RAILS as usize] = if self.rails_both { "Both always" } else { "Auto (per view)" };
+                vals[ui::S_BT as usize] = if self.bt_on { crate::tr!("ON") } else { crate::tr!("OFF") };
+                vals[ui::S_START as usize] = ui::view_label(START[self.start_page]);
+                vals[ui::S_RAILS as usize] = if self.rails_both { crate::tr!("Both always") } else { crate::tr!("Auto (per view)") };
                 vals[ui::S_RATE as usize] = core::str::from_utf8(&vb[..n]).unwrap_or("");
                 vals[ui::S_SMOOTH as usize] = crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize];
-                vals[ui::S_DMM_ROW as usize] = if self.dmm_view.bar_on { "Bargraph" } else { "History" };
+                vals[ui::S_DMM_ROW as usize] = if self.dmm_view.bar_on { crate::tr!("Bargraph") } else { crate::tr!("History") };
                 vals[ui::S_TEMP_UNIT as usize] = if self.dmm.temp_f() { "\u{2109} (Fahrenheit)" } else { "\u{2103} (Celsius)" };
-                vals[ui::S_SWIPE as usize] = if self.sp.swipes { "Top bar" } else { "Off (stock)" };
-                vals[ui::S_PRESS as usize] = if self.sp.press_fx { "ON" } else { "OFF (stock)" };
+                vals[ui::S_SWIPE as usize] = if self.sp.swipes { crate::tr!("Top bar") } else { crate::tr!("Off (stock)") };
+                vals[ui::S_PRESS as usize] = if self.sp.press_fx { crate::tr!("ON") } else { crate::tr!("OFF (stock)") };
                 vals[ui::S_TAP_STEP as usize] = crate::scope_ui::TAP_NAMES[self.sp.tap_mode.min(2) as usize];
                 vals[ui::S_JACK as usize] = alert_mask_name(&mut ab, self.dmm.alert_mask());
                 vals[ui::S_ALARM as usize] = crate::danger::NAMES[self.alarm_mode.min(2) as usize];
                 vals[ui::S_USB as usize] = ui::usb_disk_name(self.usb_ro_drawn.0, self.usb_ro_drawn.1);
-                vals[ui::S_BURDEN as usize] = if self.dmm.burden_show { "ON (A, mA, uA)" } else { "OFF (stock)" };
-                vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { "ON" } else { "OFF" };
-                vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" };
-                vals[ui::S_REMEMBER as usize] = if self.mode_remember { "ON" } else { "OFF" };
+                vals[ui::S_BURDEN as usize] = if self.dmm.burden_show { "ON (A, mA, uA)" } else { crate::tr!("OFF (stock)") };
+                vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { crate::tr!("ON") } else { crate::tr!("OFF") };
+                vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { crate::tr!("ON") } else { crate::tr!("OFF (stock)") };
+                vals[ui::S_REMEMBER as usize] = if self.mode_remember { crate::tr!("ON") } else { crate::tr!("OFF") };
                 ui::settings(self.set_tab, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
@@ -1082,12 +1160,12 @@ impl App {
                 }
                 let mcu = if tn > 0 { core::str::from_utf8(&tb[..tn]).unwrap_or("--") } else { "--" };
                 let lines = [
-                    ("Vendor", "Alientek"),
-                    ("Model", model_name),
-                    ("SN", sn),
-                    ("Bootloader", bl),
-                    ("Software", fw),
-                    ("Hardware", hw),
+                    (crate::tr!("Vendor"), "Alientek"),
+                    (crate::tr!("Model"), model_name),
+                    (crate::tr!("SN"), sn),
+                    (crate::tr!("Bootloader"), bl),
+                    (crate::tr!("Software"), fw),
+                    (crate::tr!("Hardware"), hw),
                     ("Board temp", mcu),
                 ];
                 ui::device_page(&lines);
@@ -1134,6 +1212,7 @@ impl App {
             usb: self.usb_host,
             bars: self.power.shown_bars(self.strip_alt),
             charging: self.power.on_charger(),
+            bat_low: self.power.low.low(),
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),
@@ -1147,6 +1226,7 @@ impl App {
         if self.band_until == 0 {
             self.pw_btn_glyph();
             ui::set_cpl_auto(self.dmm.cpl_auto());
+            ui::set_btn_mem(self.dmm.sub_mem());
             ui::func_band(self.dmm.button(), self.dmm.shown_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
         }
         self.band_until = now + BAND_MS;
@@ -1243,11 +1323,9 @@ impl App {
             // AC+DC). Else the wiring dialog until it was confirmed once (owner: no
             // nagging; MF > Power Settings > Wiring shows it again).
             if !self.dmm.pw.on && !self.dmm.pw.wired {
-                // From the combined view's band too: the dialog over the
-                // DMM page (Cancel leaves the DMM page shown).
-                if self.view != View::Dmm {
-                    self.show(View::Dmm, clk);
-                }
+                // On the DMM page or over the combined view (its band): the
+                // page stays below the dialog (no page draws while it is up,
+                // `tick`), and closing it repaints the page.
                 self.pw_open_entry(clk.now_ms());
                 return;
             }
@@ -1307,7 +1385,7 @@ impl App {
         let (mut hb, mut lb) = ([0u8; 32], [0u8; 32]);
         let hn = fmt(&mut hb, l.hi);
         let ln = fmt(&mut lb, l.lo);
-        let onoff = |b: bool| if b { "ON" } else { "OFF" };
+        let onoff = |b: bool| if b { crate::tr!("ON") } else { crate::tr!("OFF") };
         let vals: [&str; 9] = [
             onoff(self.meter.ahold),
             onoff(l.on),
@@ -1499,11 +1577,11 @@ impl App {
                 t[10] = b'0' + (n / 100 % 10) as u8;
                 t[11] = b'0' + (n / 10 % 10) as u8;
                 t[12] = b'0' + (n % 10) as u8;
-                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+                (core::str::from_utf8(&t).unwrap_or(crate::tr!("Saved")), true)
             }
             (State::Done, None) => ("Fast log cancelled", true),
-            (State::Full, None) => ("Disk full", false),
-            (State::NoDisk, _) => ("No disk", false),
+            (State::Full, None) => (crate::tr!("Disk full"), false),
+            (State::NoDisk, _) => (crate::tr!("No disk"), false),
             _ => ("Fast log failed", false),
         };
         self.toast(now, txt, ok);
@@ -1739,10 +1817,20 @@ impl App {
             self.persist_now();
             power_off();
         }
+        // The battery is empty (lowbat.rs): as the others, power_off closes
+        // a recording and writes the settings file.
+        if self.power.low.cut_due() {
+            backlight(0);
+            self.persist_now();
+            power_off();
+        }
         // Not while a screenshot reads the panel (its toast would land in the
         // rows not read yet; screenshot.rs "Frozen image").
         if !crate::screenshot::frozen() {
             self.off_warn(now, idle);
+            if self.power.low.cut_warning() && !crate::hy3131::streaming() {
+                self.low_battery_off(now);
+            }
         }
         // RUN held in a DMM view: AutoHold on/off. The key-down already
         // toggled HOLD; set_ahold releases it again. AUTO held: the default
@@ -1890,6 +1978,12 @@ impl App {
         if self.toast_later_n != 0 {
             self.toast_later_show(now);
             return;
+        }
+        if self.power.low.due() && !crate::hy3131::streaming() {
+            self.low_battery(now);
+            if self.overlay.is_some() {
+                return;
+            }
         }
         if self.shot_req && now >= self.repaint_at + SHOT_SETTLE_MS {
             self.shot_req = false;
@@ -2126,19 +2220,19 @@ impl App {
 
     fn kp_labels(&self) -> (&'static str, &'static str) {
         match self.kp_target {
-            0 => ("Frequency", match self.kp_mult {
+            0 => (crate::tr!("Frequency"), match self.kp_mult {
                 b'M' => "MHz",
                 b'K' => "kHz",
                 _ => "Hz",
             }),
             1 => ("Vpp", "V"),
-            2 => ("Duty", "%"),
-            5 => ("Offset", "V"),
-            KP_T_OFFS => ("Offset", "\u{2103}"),
+            2 => (crate::tr!("Duty"), "%"),
+            5 => (crate::tr!("Offset"), "V"),
+            KP_T_OFFS => (crate::tr!("Offset"), "\u{2103}"),
             KP_NTC_R25 => ("R25", "k"),
             KP_NTC_BETA => ("Beta", "K"),
-            3 => ("Upper", kp_unit_text(self.kp_unit)),
-            _ => ("Lower", kp_unit_text(self.kp_unit)),
+            3 => (crate::tr!("Upper"), kp_unit_text(self.kp_unit)),
+            _ => (crate::tr!("Lower"), kp_unit_text(self.kp_unit)),
         }
     }
 
@@ -2219,6 +2313,8 @@ impl App {
             | (self.bt_on as u32) << 12
             | (crate::scpi::idn_emul() as u32 & 1) << 14
             | (self.dmm.sub_mem() as u32) << 16;
+        // Bit 22: reserved (was the UI language switch of the 0.5.0 development
+        // builds; a localized image now shows only its language).
         // (p[0] bit 13 was the old "both rails" flag, default 1: retired so
         // units upgraded from it start in the new Auto default.) Bit 14: SCPI
         // *IDN? emulation (SYST:IDN:EMUL 34401A; never used before, 0 = OFF).
@@ -2457,6 +2553,14 @@ impl App {
             *c = *w as i32;
         }
         app_touchtest::tc_restore(tc);
+        // The probe factor: a preference (the probe stays on the jack),
+        // kept also without Mode Remember.
+        let pr = f32::from_bits(p[8]);
+        if scope::PROBES.contains(&pr) {
+            let mut sc = self.scope.s;
+            sc.probe = pr;
+            self.scope.apply(sc, 0);
+        }
         // The scope's acquisition, trigger, math and measurements: as the
         // multimeter, kept after a power-off with Mode Remember ON.
         if !cont {
@@ -3028,7 +3132,7 @@ impl App {
                         crate::vwrite::answer(yes);
                         self.overlay_close();
                         if yes {
-                            self.toast(now, "Installing firmware...", true);
+                            self.toast(now, crate::tr!("Installing firmware..."), true);
                         }
                     }
                 }
@@ -3047,6 +3151,7 @@ impl App {
                     Some(false) => self.overlay_close(),
                     None => {}
                 },
+                (crate::dialog::Overlay::SettingsReset { .. }, Gesture::Tap(p)) => self.reset_answer(p.x, p.y, now, clk),
                 (crate::dialog::Overlay::FuseCheck { stage, .. }, Gesture::Tap(p)) => match (stage, crate::dialog::fuse_hit(p.x, p.y)) {
                     // Start / Again.
                     (0, Some(true)) | (2, Some(false)) => {
@@ -3079,7 +3184,7 @@ impl App {
                     self.func_changed();
                     self.overlay_close();
                 }
-                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. } | crate::dialog::Overlay::PowJob { .. }, Gesture::KeyDown(_)) => {
+                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. } | crate::dialog::Overlay::SettingsReset { .. } | crate::dialog::Overlay::PowJob { .. }, Gesture::KeyDown(_)) => {
                     self.overlay_close()
                 }
                 _ => {}
@@ -3287,12 +3392,51 @@ impl App {
     /// watch a bus). Dimming still applies. USB power holds it off through `idle` (`tick`,
     /// autooff.rs).
     fn off_held(&self) -> bool {
-        self.off_ms() == 0
-            || self.meter.stats.rec
+        self.off_ms() == 0 || self.session_runs()
+    }
+
+    /// A recording or another session the user left running.
+    fn session_runs(&self) -> bool {
+        self.meter.stats.rec
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
             || self.scope.log_on()
+    }
+
+    /// The countdown before the power-off on an empty battery: a toast at
+    /// 30, 20 and 10 s and a beep at the key / alert volume, also during a
+    /// recording (it goes on under the toast); not over a stream's page (the
+    /// caller: .cold, link-native.x). A dimmed screen lights up, as for the
+    /// idle power-off's warning.
+    #[inline(never)]
+    fn low_battery_off(&mut self, now: u64) {
+        let Some(secs) = self.power.low.take_cut_warn() else { return };
+        if self.dimmed {
+            backlight(self.backlight);
+        }
+        self.beep(now, 200);
+        let txt = crate::dialog::low_battery_off(secs);
+        if !self.toast_defer(txt, false) {
+            self.toast_draw(now, txt, false);
+        }
+    }
+
+    /// The low-battery warning (lowbat.rs), as the stock's 3 s popup, once
+    /// per level at the key / alert volume. It waits while a recording or a
+    /// stream runs, whose page must stay up; the red symbol shows meanwhile.
+    /// Not an input: the idle timers go on, and a dimmed screen stays dimmed
+    /// (a low battery is no reason for more backlight). .cold (link-native.x);
+    /// the caller checks for a stream.
+    #[inline(never)]
+    fn low_battery(&mut self, now: u64) {
+        if self.toast_hold || self.session_runs() || crate::screenshot::frozen() || crate::dialog::log_panel_shown() {
+            return;
+        }
+        self.power.low.shown();
+        self.toast_draw(now, crate::dialog::LOW_BATTERY, false);
+        self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::LOW_BATTERY_MS });
+        self.beep(now, 150);
     }
 
     fn off_warn(&mut self, now: u64, idle: u64) {
@@ -3536,7 +3680,7 @@ impl App {
             self.beep(now, 60);
         } else if self.rec_start(now) {
             self.beep(now, 60);
-            self.toast(now, "Recording CSV", true);
+            self.toast(now, crate::tr!("Recording CSV"), true);
         } else {
             self.beep(now, 300);
             self.toast(now, "No reading to log", false);
@@ -3552,11 +3696,11 @@ impl App {
                 t[9] = b'0' + (n / 100 % 10) as u8;
                 t[10] = b'0' + (n / 10 % 10) as u8;
                 t[11] = b'0' + (n % 10) as u8;
-                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+                (core::str::from_utf8(&t).unwrap_or(crate::tr!("Saved")), true)
             }
             (State::Full, _) => ("Disk full: log ended", false),
-            (State::NoDisk, _) => ("No disk", false),
-            _ => ("Log failed", false),
+            (State::NoDisk, _) => (crate::tr!("No disk"), false),
+            _ => (crate::tr!("Log failed"), false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -3571,12 +3715,12 @@ impl App {
                 t[7] = b'0' + (n / 100 % 10) as u8;
                 t[8] = b'0' + (n / 10 % 10) as u8;
                 t[9] = b'0' + (n % 10) as u8;
-                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+                (core::str::from_utf8(&t).unwrap_or(crate::tr!("Saved")), true)
             }
-            Shot::NoDisk => ("No disk", false),
-            Shot::Full => ("Disk full", false),
-            Shot::Error => ("Screenshot failed", false),
-            Shot::Busy => ("Disk busy", false),
+            Shot::NoDisk => (crate::tr!("No disk"), false),
+            Shot::Full => (crate::tr!("Disk full"), false),
+            Shot::Error => (crate::tr!("Screenshot failed"), false),
+            Shot::Busy => (crate::tr!("Disk busy"), false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -3948,6 +4092,20 @@ impl App {
                     self.chart_rate = ui::trend_next(self.chart_rate);
                     self.chart_n = 0;
                     self.chart_dirty = true;
+                } else if x < ui::CHART_X + ui::CHART_W && ui::chart_rows().contains(&y) {
+                    // The plot (a single tap does nothing there): a double
+                    // tap switches the bargraph <-> the history row, as
+                    // Settings > Display > DMM row (not with the power
+                    // meter, which has its own row).
+                    if self.chart_tap != 0 && now.saturating_sub(self.chart_tap) <= CHART_DOUBLE_MS {
+                        self.chart_tap = 0;
+                        if !self.dmm.pw.on {
+                            self.dmm_view.bar_on = !self.dmm_view.bar_on;
+                            self.redraw = true;
+                        }
+                    } else {
+                        self.chart_tap = now.max(1);
+                    }
                 } else if let Some(i) = ui::button_hit(x, y) {
                     self.press_func(clk, i);
                 }
@@ -4071,12 +4229,12 @@ impl App {
                         // A running recording keeps its settings.
                         if crate::csvlog::active() {
                             self.beep(now, 300);
-                            self.toast(now, "Stop the recording first", false);
+                            self.toast(now, crate::tr!("Stop the recording first"), false);
                             return;
                         }
                         if crate::fastlog::active() {
                             self.beep(now, 300);
-                            self.toast(now, "Stop the recording first", false);
+                            self.toast(now, crate::tr!("Stop the recording first"), false);
                             return;
                         }
                         let (_, mut di) = crate::csvlog::next();
@@ -4218,6 +4376,10 @@ impl App {
                         self.tt_open(clk);
                         return;
                     }
+                    ui::S_RESET => {
+                        self.reset_ask(clk.now_ms());
+                        return;
+                    }
                     ui::S_ACC => {
                         // Accuracy label (doc dmm-accuracy.md): from the
                         // next reading on.
@@ -4301,6 +4463,7 @@ impl App {
             Some(
                 crate::dialog::Overlay::PowerEntry { .. }
                     | crate::dialog::Overlay::EnergyReset { .. }
+                    | crate::dialog::Overlay::SettingsReset { .. }
                     | crate::dialog::Overlay::PowJob { .. }
                     | crate::dialog::Overlay::FuseCheck { stage: 0 | 2, .. }
             )
@@ -4707,6 +4870,7 @@ impl App {
     /// channels' tuning replies): region C (link-native.x), out of
     /// `scpi_dmm`'s frame.
     #[inline(never)]
+    #[cfg(feature = "dbg-dev")]
     fn dbg_gen(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
         match cmd {
@@ -4996,14 +5160,17 @@ impl App {
                 out.put_bytes(if self.meter.smoothing() == Smooth::High { b"SLOW" } else { b"FAST" });
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(Some(m)) => {
                 scope_page::set_pinch_mode(m);
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(None) => {
                 crate::put_u32(out, scope_page::pinch_mode() as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgReadout => {
                 // Emulator tests (ohmhunt, autowaittest, switchtest): what
                 // the DMM readout draws now, whatever the view.
@@ -5051,6 +5218,7 @@ impl App {
                 crate::put_u32(out, self.chart_rate as u32 * 160);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgGest => {
                 // n;target,axis,delta,ms;... oldest first.
                 crate::put_u32(out, self.gest_n as u32);
@@ -5119,10 +5287,12 @@ impl App {
                 out.put_u32(self.dmm.alert_mask() as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(Some(v)) => {
                 self.dmm.set_sent_variant(clk, v);
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(None) => {
                 out.put_u32(crate::sentinel::variant() as u32);
                 true
@@ -5145,6 +5315,7 @@ impl App {
                 out.put_u32(self.volume as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgAlarm => {
                 let a = &self.alarm;
                 for (i, v) in [a.sounding() as u32, a.silenced() as u32, a.events, self.alarm_mode as u32].into_iter().enumerate() {
@@ -5177,15 +5348,19 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(Some(ms)) => {
                 self.dmm.precond_ms = ms;
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(None) => {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             c @ (C::DbgGenLag(_) | C::DbgGenStat | C::DbgCh2Lag(_)) => self.dbg_gen(c, out),
+            #[cfg(feature = "dbg-dev")]
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);
@@ -5206,43 +5381,8 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
-            #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
-            C::DbgAm(op, k, v) => {
+            C::DbgAm(op, k) => {
                 match op {
-                    // METH / STAT / ZERO / R0 (the parser makes no 0..6
-                    // without the feature `acdc-meth`).
-                    #[cfg(feature = "acdc-meth")]
-                    0 => self.dmm.am_set_meth(clk, k),
-                    #[cfg(feature = "acdc-meth")]
-                    1 => out.put_bytes(&[b'A' + self.dmm.am.meth]),
-                    #[cfg(feature = "acdc-meth")]
-                    2 => {
-                        for (i, x) in self.dmm.am_stat().iter().enumerate() {
-                            if i > 0 {
-                                out.put_bytes(b",");
-                            }
-                            if matches!(i, 0..=3 | 6..=8 | 16 | 18) {
-                                out.put_u32(*x as u32);
-                            } else {
-                                out.put_f32(*x);
-                            }
-                        }
-                    }
-                    #[cfg(feature = "acdc-meth")]
-                    3 => self.dmm.am_set_zero(k, v),
-                    #[cfg(feature = "acdc-meth")]
-                    4 => {
-                        let (ok, fixed, c) = self.dmm.am_zero();
-                        out.put_u32(ok as u32);
-                        out.put_bytes(b",");
-                        out.put_u32(fixed as u32);
-                        for (i, x) in c.iter().enumerate() {
-                            out.put_bytes(if i == 0 { b";" } else { b"," });
-                            out.put_f32(*x);
-                        }
-                    }
-                    #[cfg(feature = "acdc-meth")]
-                    5 => self.dmm.am.r0 = k,
                     7 => self.dmm.set_range(clk, Some(k)),
                     // DBG:ACDC:TRACE (the parser makes no 8 / 9 without the
                     // feature `acdc-trace`).
@@ -5254,11 +5394,9 @@ impl App {
                     }
                     #[cfg(feature = "acdc-trace")]
                     9 => self.dmm.tr.arm(k),
-                    #[cfg(feature = "acdc-meth")]
-                    6 => out.put_u32(self.dmm.am.r0 as u32),
                     _ => {}
                 }
-                matches!(op, 1 | 2 | 4 | 6 | 8)
+                op == 8
             }
             #[cfg(feature = "dbg-acdc")]
             C::DbgAcdc => {
@@ -5539,6 +5677,7 @@ impl App {
             }
             // Comparator trigger (hwtrig.rs, ../docs/history/hwtrig-integration.md H8);
             // a scope command: the scope rail is on for it (calibration).
+            #[cfg(feature = "dbg-dev")]
             C::DbgHwTrig(op, on) => {
                 let hw = &mut self.scope.hw;
                 let put_i = |out: &mut crate::scpi::Scpi, v: i64| {

@@ -3,6 +3,16 @@
 Build, tests and CI: [firmware/README.md](firmware/README.md). Contribution
 rules: [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Developer image for tests
+
+`./build.sh` builds the release image, without the developer `DBG:` commands
+(`DBG:READout?`, `DBG:IDLE`, `DBG:FLASH?`, ...; Cargo feature `dbg-dev`).
+Device checks and emulator tests need the developer image:
+`tools/reload.sh` and `emu/run.py` build it; elsewhere `./build.sh --dev`.
+For `reload.sh --image FILE` pass a `--dev` build
+(`dm40_opendm40_v<version>-dev.bin`), and leave the meter on a developer
+image after a release-image check.
+
 ## Docs in three languages
 
 The README and the user manual exist in English, Russian and Chinese:
