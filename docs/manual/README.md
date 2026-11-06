@@ -667,9 +667,11 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   has 3 decimals; from 6 mF it is in µF (4700 µF).
 - From 600 µF the meter first discharges the capacitor (**Discharging... 0.85 V**
   with the voltage on it, **>1.2 V** above that), then updates
-  every 0.25 s; the value is grey until the ramp has run both ways.
+  every 0.2 s; the value is grey until the ramp has run both ways.
 
   ![Discharging before 600 µF and up](img/dmm-cap-dis.png)
+- Mains ripple too strong to measure (e.g. a laptop charger on the USB
+  cable): dashes and **Unstable: unplug USB?**.
 - Open leads end on the 60 nF range; a short shows **0L**.
 
 
