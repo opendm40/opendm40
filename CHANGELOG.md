@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
 - DMM: 2 px more between the big digits and the bargraph.
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.

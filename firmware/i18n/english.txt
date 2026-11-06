@@ -202,6 +202,7 @@ CAP
 CH1
 CH2 (DMM):
 CH2: DMM in V or A
+CH2: data logger running
 CH2: needs AC A
 CH2: no AD2 row here
 CH2: not in AC+DC/AUTO

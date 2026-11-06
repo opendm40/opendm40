@@ -2320,6 +2320,7 @@ impl App {
             gen_trace: self.scope.gen_trace,
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(),
+            ch2_func: self.ch2_func_idx(),
         }
     }
 
@@ -2665,6 +2666,7 @@ impl App {
             su::MfHit::Ch2Step(up) => {
                 self.ch2_step(up, now);
             }
+            su::MfHit::Ch2Func(amps) => self.ch2_func(clk, amps),
             su::MfHit::GenTrace(on) => self.gen_trace_set(on, now),
             su::MfHit::PCond(c) => {
                 st.pcond = c.min(2);
