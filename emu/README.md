@@ -59,7 +59,7 @@ meter's serial.
 
 ```sh
 emu/get-renode.sh                                     # once
-(cd firmware && ./build.sh)                           # build opendm40
+(cd firmware && ./build.sh --dev)                     # build opendm40 (developer image)
 APP=firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 emu/run.py fwrs --app $APP --dmm dcv:1.234 --run-for 4 --shot emu/out/fwrs.png
 emu/run.py fwrs --app $APP --fast --usbip 0.01 --run-for 600 &    # USB/IP on TCP 3240
@@ -219,7 +219,6 @@ recorded.
 | [`beeptest.py`](hy3131/beeptest.py) | continuity / diode beeper (R20 bit 2) off at key/alert volume 0 %, on at 50 %, also after a volume change in continuity | | 64761 |
 | [`couptest.py`](hy3131/couptest.py) | AUTO coupling (AC/DC) of V and A | | 3391 |
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
-| [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
 | [`capdowntest.py`](hy3131/capdowntest.py) | capacitance AUTO: a small capacitor after a large one, open leads and a short (also the device's no-ramp case, AD1 forced) end on their own range; large capacitors keep theirs | | 47750 |
 | [`captimetest.py`](hy3131/captimetest.py) | capacitance AUTO timing from DC V: time to the first grey and the first final value (1 nF .. 1 mF, absorption, open leads, a resistor) | | 47760 |
 | [`freqtest.py`](hy3131/freqtest.py) | frequency: the first readings after entering the function | | 55100 |

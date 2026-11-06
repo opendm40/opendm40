@@ -2,6 +2,14 @@
 // UF-21): the modules are compiled for the host with their register-level
 // dependencies; the tests only call pure logic (no MMIO is touched).
 #![allow(dead_code, unused_imports, clippy::all)]
+// src/lang.rs `tr!` as in the English image (stockfont.rs, which has it, is not here).
+#[macro_export]
+macro_rules! tr {
+    ($s:literal) => {
+        $s
+    };
+}
+
 #[path = "../../src/pack10.rs"]
 mod pack10;
 #[path = "../../src/mmio.rs"]
@@ -20,6 +28,9 @@ mod danger;
 // FR-05 FAST: the unchopped AD1 offset (pure).
 #[path = "../../src/fastvos.rs"]
 mod fastvos;
+// The battery level on a charger (pure).
+#[path = "../../src/battlevel.rs"]
+mod battlevel;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/meter.rs"]
@@ -30,13 +41,9 @@ mod meter;
 mod fastenc;
 #[path = "../../src/logger.rs"]
 mod logger;
-// logger.rs `start` / `dc_prepare` (the DC rows' AD2 row), dmm.rs acdcm.rs
-// (AC+DC method C): chip access only.
+// logger.rs `start` / `dc_prepare` (the DC rows' AD2 row): chip access only.
 mod ad2exp {
     pub fn dc_enter(_mode: u8, _r: u8, _r26: u8, _measure: bool) {}
-    pub fn dcv_row(_r: u8, _r26: u8, _opt: u8, _op1chop: u8, _ad2: bool) -> [u8; crate::hy3131::CFG_LEN] {
-        [0; crate::hy3131::CFG_LEN]
-    }
 }
 // The wave view's streaming trigger (logger.rs `wave`).
 #[path = "../../src/trigsoft.rs"]
