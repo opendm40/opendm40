@@ -23,6 +23,9 @@ macro_rules! tr {
     ("Back") => { "Retour" };
     ("Backlight") => { "R\u{1}tro\u{1}clairage" };
     ("Bargraph") => { "Barre" };
+    ("Battery empty: off in 10 s") => { "Batterie : arr\u{2}t dans 10 s" };
+    ("Battery empty: off in 20 s") => { "Batterie : arr\u{2}t dans 20 s" };
+    ("Battery empty: off in 30 s") => { "Batterie : arr\u{2}t dans 30 s" };
     ("Both always") => { "Toujours les deux" };
     ("Brightness:") => { "Luminosit\u{1} :" };
     ("Burden voltage") => { "Chute tension" };
@@ -104,6 +107,7 @@ macro_rules! tr {
     ("Loading...") => { "Chargement..." };
     ("Log failed") => { "Erreur log" };
     ("Loud") => { "Fort" };
+    ("Low battery! Please charge") => { "Batterie faible ! Rechargez" };
     ("Lower") => { "Bas" };
     ("Lower = reading") => { "Bas = mesure" };
     ("Lower limit") => { "Limite basse" };
@@ -198,6 +202,7 @@ macro_rules! tr {
     ("Try again") => { "R\u{1}essayer" };
     ("Type:") => { "Type :" };
     ("USB disk") => { "Disque USB" };
+    ("Unstable: unplug USB?") => { "Instable : d\u{1}brancher l'USB ?" };
     ("Until stopped") => { "Jusqu'\u{5} l'arr\u{2}t" };
     ("Upper") => { "Haut" };
     ("Upper = reading") => { "Haut = mesure" };
@@ -241,6 +246,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Back", "Retour"),
     ("Backlight", "R\u{1}tro\u{1}clairage"),
     ("Bargraph", "Barre"),
+    ("Battery empty: off in 10 s", "Batterie : arr\u{2}t dans 10 s"),
+    ("Battery empty: off in 20 s", "Batterie : arr\u{2}t dans 20 s"),
+    ("Battery empty: off in 30 s", "Batterie : arr\u{2}t dans 30 s"),
     ("Both always", "Toujours les deux"),
     ("Brightness:", "Luminosit\u{1} :"),
     ("Burden voltage", "Chute tension"),
@@ -322,6 +330,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Loading...", "Chargement..."),
     ("Log failed", "Erreur log"),
     ("Loud", "Fort"),
+    ("Low battery! Please charge", "Batterie faible ! Rechargez"),
     ("Lower", "Bas"),
     ("Lower = reading", "Bas = mesure"),
     ("Lower limit", "Limite basse"),
@@ -416,6 +425,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Try again", "R\u{1}essayer"),
     ("Type:", "Type :"),
     ("USB disk", "Disque USB"),
+    ("Unstable: unplug USB?", "Instable : d\u{1}brancher l'USB ?"),
     ("Until stopped", "Jusqu'\u{5} l'arr\u{2}t"),
     ("Upper", "Haut"),
     ("Upper = reading", "Haut = mesure"),
