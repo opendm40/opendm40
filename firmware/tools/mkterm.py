@@ -9,9 +9,10 @@ cells, the stock Omega), so under its own name: the OFL reserves the name
 "Terminus Font".
 
 Fonts (FACE): TEXT22 (menus, settings) ter-u22b, HIST (history values)
-ter-u20b, F14 (small labels), SC_F12 and SC_F16 (scope texts) ter-u12b; each
-BDF at its native size, never scaled. Every other font stays stock (ASCII26,
-the big and 4 bpp fonts, the icons).
+ter-u20b, SC_F16 (the scope menus and popups) ter-u16b, F14 (small labels)
+and SC_F12 (the scope bars and cells) ter-u12b; each BDF at its native
+size, never scaled. Every other font stays stock (ASCII26, the big and 4 bpp
+fonts, the icons).
 
 * Placement: the glyph's ink box on the stock baseline, raised or lowered
   (`bdf_base`) so the ascenders and descenders fit the line box. Digits share
@@ -42,13 +43,14 @@ DIR = os.environ.get('DM40_TERM_DIR') or os.path.join(FW, 'target', 'terminus-fo
 # tools/fetch-terminus.sh).
 FILES = {
     'ter-u12b.bdf': 'd633cae5e16c8eccaf2af9233b81c8ceb7ecbca5685fadf8e7dc5472e483308d',
+    'ter-u16b.bdf': '8f825f6666970196e7c8da3ff2dcb10b44cf5b8f094e867ec9b6f5f2429b909b',
     'ter-u20b.bdf': 'c3ee3c76111ebdc473679b85eef6677642986d3b1be0ca145c70a9e3f212bd90',
     'ter-u22b.bdf': 'fe4de45b798e7c068ac078ee42780dfc66fd03c90d5a4a490b2b1ae455d2b4f7',
 }
 # Font -> BDF file. TEXT22: 24 px has the stock cap height (15) but its 12 px
 # cells overflow the menus; 22 px (cap 14, 11 px cells) fits.
 FACE = {'TEXT22': 'ter-u22b.bdf', 'HIST': 'ter-u20b.bdf', 'F14': 'ter-u12b.bdf',
-        'SC_F12': 'ter-u12b.bdf', 'SC_F16': 'ter-u12b.bdf'}
+        'SC_F12': 'ter-u12b.bdf', 'SC_F16': 'ter-u16b.bdf'}
 # Fonts in the stock fixed cells (tight boxes): no glyph wider than its cell.
 CELL = ('HIST', 'F14')
 OHM = 0x3A9

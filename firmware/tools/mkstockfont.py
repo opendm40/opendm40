@@ -87,9 +87,9 @@ ONLY = {'G_08059428': ' '}
 # same as `base` (the bitmap `rows` lower in its line box than in the
 # base's) is not emitted: stockfont.rs looks it up in the base
 # (font_base) and gives it this font's box. The rest stay its own entries.
-# SC_F12 / SC_F16 / F14 are all DM40 Term ter-u12b; F14's narrow cells
+# SC_F12 and F14 are both DM40 Term ter-u12b; F14's narrow cells
 # (punctuation, I, j) and the space differ.
-SHARE = {'SC_F12': ('F14', -1, 0x80), 'SC_F16': ('SC_F12', 2, 0x80)}
+SHARE = {'SC_F12': ('F14', -1, 0x80)}
 
 
 # Codes from here up (CJK, full-width punctuation) are dropped: opendm40 draws

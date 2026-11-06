@@ -33,7 +33,8 @@ It has its own name because we changed glyphs: the OFL reserves the name
 | TEXT22 | menus, settings, the generator page | `ter-u22b` |
 | HIST | the DMM history row | `ter-u20b` |
 | F14 | small labels, MAX / AVG / MIN | `ter-u12b` |
-| SC_F12, SC_F16 | the scope page's texts | `ter-u12b`, mostly F14's glyphs (section 2) |
+| SC_F16 | the scope menus, popups and right panel | `ter-u16b` (the stock 8 px pitch) |
+| SC_F12 | the scope bars, measurement cells, decode log | `ter-u12b`, mostly F14's glyphs (section 2) |
 
 ASCII26 (dialogs), the big digits and units (F78, UNIT, LETTERS, F21,
 K_FONT) and the icons stay stock.
@@ -45,8 +46,8 @@ descenders fit the line box; digits share one advance; in the fixed-cell
 fonts F14 and HIST a glyph wider than its stock cell stays stock (HIST: M).
 Our changes:
 
-* at 12 px (F14, scope) the 0 without Terminus's slash, one column narrower
-  than the O; TEXT22 and HIST keep Terminus's 0;
+* at 12 px (F14, SC_F12) the 0 without Terminus's slash, one column
+  narrower than the O; the larger fonts keep Terminus's 0;
 * the stock Ω (Terminus's is narrow: "600Ω" read "6000"), its feet on the
   digits' baseline;
 * ℃ / ℉: Terminus's ring and C / F, the ring on the caps' top row.
@@ -85,12 +86,12 @@ What can be dropped or packed without changing a pixel:
   2.5-5x (F78 5.1x).
 * **Duplicates** across the stock fonts: 5 glyphs, ~0.4 KB after
   compression, not worth an indirection per glyph.
-* **Shared glyphs.** F14, SC_F12 and SC_F16 are all DM40 Term `ter-u12b`.
+* **Shared glyphs.** F14 and SC_F12 are both DM40 Term `ter-u12b`.
   SC_F12 stores 19 of its 96 glyphs (the space, 0x7F and the ones F14 has
   in narrower stock cells: punctuation, I, j) and takes the others below
-  0x80 from F14; SC_F16 stores 1 and takes the others from SC_F12 (`SHARE`
-  in `mkstockfont.py`, `font_base` in `stockfont.rs`), placed in its own
-  line box with the same fields as before: -2.4 KB of region B.
+  0x80 from F14 (`SHARE` in `mkstockfont.py`, `font_base` in
+  `stockfont.rs`), placed in its own line box with the same fields as
+  before: -1.2 KB of region B.
 
 ## 2a. Glyphs of our own
 

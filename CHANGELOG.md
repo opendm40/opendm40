@@ -7,7 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
-- **Text font:** menus, settings, labels, the history row and the scope texts in DM40 Term (based on Terminus Font), with a plain narrow 0 in the small texts and the stock Ω; the big readings, units and dialogs stay stock.
+- **Text font:** menus, settings, labels, the history row and the scope texts in DM40 Term (based on Terminus Font), the scope menus and popups at the stock letter width, a plain narrow 0 in the small texts and the stock Ω; the big readings, units and dialogs stay stock.
 
 - **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
 
