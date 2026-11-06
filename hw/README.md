@@ -353,7 +353,7 @@ scope and generator ground (*inferred*).
   [`docs/bt-protocol.md`](../docs/bt-protocol.md)) and BLE ([`firmware/src/bt.rs`](../firmware/src/bt.rs)).
 - Firmware in the chip: a Jieli SDK application built as "KT6368A-BLE", variant "BLE03",
   version `VER2.1-20240615` (its start text); it matches the SDK's `spp_and_le` example
-  (*inferred* from the strings). It has 23 `AT+` commands, of which the meter
+  (*inferred* from the strings). It has 25 `AT+` commands, of which the meter
   uses `AT+SBN`, `AT+CBN`, `AT+SLED`, `AT+RESET`; the public KT6368A manual describes a different
   command set. Chip key, flash layout and the full command table: `stock/re/docs/bt-module-ac6328a.md`.
 - UART4: TX PA0, RX PA1 (AF8), 115200 8N1, no RTS/CTS ([`bt.rs`](../firmware/src/bt.rs)). On the
