@@ -93,6 +93,9 @@ mod msc {
         fn media_change_immediate(&self) -> bool {
             false
         }
+        fn media_change_now(&self, _tur: bool) -> bool {
+            true
+        }
         fn product(&self) -> &'static [u8; 16] {
             b"DM40 disk       "
         }
@@ -504,6 +507,10 @@ impl msc::BlockDevice for SpiDev {
 ///   V n          dump the volume (sparse) to <spi.img>.vol<n>
 ///   Q            -> u16 length + text: DBG:VDISK:WR? and STAT? fields
 ///   G + 11 bytes a delete on the meter (csvlog::delete_on, 8.3 SPI name)
+///   J            the meter wrote new files: the SPI image reloaded from
+///                <spi.img>.in (made by the test from a saved copy), the
+///                volume due a refresh (dlog stale)
+///   E            the host ejects (START STOP UNIT, LoEj: vdisk::on_eject)
 ///   X            exit
 fn vserve(a: &[String]) {
     use msc::BlockDevice;
@@ -594,8 +601,8 @@ fn vserve(a: &[String]) {
                 let (files, hw, left) = vdisk::stats();
                 let cutn = unsafe { (*devp).writes };
                 let t = format!(
-                    "ok={} refused={} busy={} last_refused={} deleted={} fw_ok={} fw_bad={} rec={rec} pairs={pairs} staged={st} frozen={fz} staging={stg} fw={fw} files={files} hw={hw} left_out={left} spi_writes={cutn} cut_dead={} now={now}",
-                    n.ok, n.refused, n.busy, n.last_refused, n.deleted, n.fw_ok, n.fw_bad, unsafe { (*devp).dead }
+                    "ok={} refused={} busy={} dropped={} last_refused={} deleted={} fw_ok={} fw_bad={} rec={rec} pairs={pairs} staged={st} frozen={fz} staging={stg} fw={fw} files={files} hw={hw} left_out={left} spi_writes={cutn} cut_dead={} now={now}",
+                    n.ok, n.refused, n.busy, n.dropped, n.last_refused, n.deleted, n.fw_ok, n.fw_bad, unsafe { (*devp).dead }
                 );
                 reply = (t.len() as u16).to_le_bytes().to_vec();
                 reply.extend_from_slice(t.as_bytes());
@@ -611,6 +618,11 @@ fn vserve(a: &[String]) {
                 reply = (t.len() as u16).to_le_bytes().to_vec();
                 reply.extend_from_slice(t.as_bytes());
             }
+            b'J' => {
+                *SPI.lock().unwrap() = fs::read(format!("{}.in", a[1])).unwrap();
+                dlog::set_stale();
+            }
+            b'E' => vdisk::on_eject(),
             b'X' => break,
             x => panic!("vserve: op {x}"),
         }
