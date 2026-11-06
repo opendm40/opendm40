@@ -1299,7 +1299,8 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
 pub fn cap_noise_label() {
     let b = CAP_DIS_RECT;
     lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-    sf::label(sf::F14, b, "Unstable: unplug USB?", DIM, BG, 1, 1);
+    // F14: English in Chinese (too small).
+    sf::label(sf::F14, b, crate::tr!("Unstable: unplug USB?"), DIM, BG, 1, 1);
 }
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
