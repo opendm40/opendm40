@@ -7,39 +7,49 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
-- **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
+The meter's screens in Chinese, Russian, Italian and French, a settings
+reset, multi-select delete in the gallery and a wider scope MF menu.
 
-- **Gallery: select several files and delete them together**
-  ([manual](docs/manual/README.md#the-gallery)).
-
-- Settings > Other > Reset settings: back to the defaults after a confirm; calibration, files and Bluetooth pairing stay.
-
-- **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
-- **Scope:** the MF menu spans the screen to the right edge, over the right panel, with wider columns; the panel is drawn again when it closes.
 ### New
 
+- **Localized images:** Chinese, Russian, Italian and French
+  (`dm40_opendm40_v<version>-zh.bin`, `-ru`, `-it`, `-fr`), each with its
+  screens in that language only; the default image stays English
+  ([manual](docs/manual/README.md#install)). The translations are
+  machine-written and not yet reviewed by native speakers (Chinese partly
+  uses the stock firmware's and
+  [OpenDM40-Chinese](https://github.com/xingyan4117-sketch/OpenDM40-Chinese)'s
+  wording).
+- **Settings > Other > Reset settings:** after **Yes** the meter restarts
+  with all settings at their defaults, in DC V; touch and power meter
+  calibration, files and Bluetooth pairing stay
+  ([manual](docs/manual/README.md#other-tab)).
+- **Gallery: delete several files at once:** **Select**, tap the tiles,
+  **Delete selected** ([manual](docs/manual/README.md#the-gallery)).
+- **Multimeter:** a double tap on the trend chart's plot switches the row
+  under the reading between the bargraph and the history
+  ([manual](docs/manual/README.md#the-bargraph-and-the-history-row)).
 - **Chinese README and user manual** (machine translation, not yet reviewed
   by a native speaker): [README.zh.md](README.zh.md),
   [docs/manual/README.zh.md](docs/manual/README.zh.md).
 
 ### Changed
 
-- **Scope: long DMM units** ("mWh") on the strip in the panel's
-  16 px font; the 20 px font is gone (2.3 KB of flash).
-
-### Changed
-
+- **Scope: the MF menu spans the screen to the right edge**, over the right
+  panel, with wider columns; the panel is drawn again when it closes
+  ([manual](docs/manual/README.md#the-scope-page)).
 - **Release images without the developer `DBG:` commands** (`DBG:IDLE`,
   `DBG:READout?`, `DBG:FLASH?`, `DBG:CAP...`, `DBG:VDISK...` and more,
   [list](docs/manual/scpi-reference.md#developer-image-only)): they answer
   "Undefined header"; ~15 KB more room for new features. `DBG:VIEW?`,
   `DBG:TAP`, `DBG:KEY`, `DBG:BOOT?` and the update commands stay.
+- **Scope: long DMM units** ("mWh") on the strip in the panel's 16 px font.
 
-### Tools
+### For developers
 
-- `firmware/build.sh --dev` builds the developer image with them;
-  [`firmware/tools/reload.sh`](firmware/tools/reload.sh) and the emulator
-  build it by default (`reload.sh --release` for the release image).
+- `firmware/build.sh --dev` builds the developer image with the `DBG:`
+  commands; [`firmware/tools/reload.sh`](firmware/tools/reload.sh) and the
+  emulator build it by default (`reload.sh --release` for the release image).
 
 ## v0.4.0 (2026-11-02)
 
