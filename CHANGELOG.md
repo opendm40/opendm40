@@ -16,6 +16,8 @@ section named after the tag as the release notes; how to cut a release:
   measures. When the ripple is too strong to measure, the meter shows
   dashes and "Unstable: unplug USB?". The ripple case is checked in the
   emulator only.
+- A firmware update or a restart from the scope or generator page could
+  turn the meter off; it now restarts as from the multimeter page.
 
 - **Multimeter:** the reading with the extra digit sits 4 px further right.
 - **Scope:** the trigger badge takes the new source's colour at once.
