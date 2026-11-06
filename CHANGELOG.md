@@ -43,7 +43,8 @@ reset, multi-select delete in the gallery and a wider scope MF menu.
   [list](docs/manual/scpi-reference.md#developer-image-only)): they answer
   "Undefined header"; ~15 KB more room for new features. `DBG:VIEW?`,
   `DBG:TAP`, `DBG:KEY`, `DBG:BOOT?` and the update commands stay.
-- **Scope: long DMM units** ("mWh") on the strip in the panel's 16 px font.
+- **Combined view: long units** ("mWh") in the meter strip in the 16 px
+  font of the scope panel ([manual](docs/manual/README.md#the-meter-strip)).
 
 ### For developers
 
