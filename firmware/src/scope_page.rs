@@ -2709,8 +2709,7 @@ impl App {
                 // says why. DMM with CH2 off: CH2 on (its own toast if it
                 // cannot be).
                 let t = t.min(scope::TSRC_CH2);
-                if t == scope::TSRC_CH2 && !self.ch2.on {
-                    self.ch2_set(clk, true);
+                if t == scope::TSRC_CH2 && !self.ch2.on && self.ch2_on_for_trig(clk) {
                     st = self.scope.s;
                 }
                 if t == scope::TSRC_GEN && !self.gen.s.on {

@@ -5529,12 +5529,8 @@ impl App {
                 out.put_bytes(if sc.ac { b"AC" } else { b"DC" });
                 Some(())
             }
-            C::TrigLevel(Some(v)) if sc.tsrc == scope::TSRC_CH2 && !self.scope.wave_on() => {
-                // Source DMM: the level on CH2's scale, as the badge (a
-                // row: the level is the T marker against the CH2 trace).
-                sc.trig_row = self.scope.ch2_level_row(v);
-                None
-            }
+            // Source DMM: the level on CH2's scale, as the badge.
+            C::TrigLevel(v) if sc.tsrc == scope::TSRC_CH2 && !self.scope.wave_on() => self.ch2_trig_level(&mut sc, v, out),
             C::TrigLevel(Some(v)) => {
                 // Volts at the probe tip, as TRIG:LEV? answers (probe
                 // applied), kept as given: the row was the one below the
@@ -5544,7 +5540,7 @@ impl App {
                 None
             }
             C::TrigLevel(None) => {
-                out.put_f32(if sc.tsrc == scope::TSRC_CH2 && !self.scope.wave_on() { self.scope.ch2_level() } else { self.scope.trig_volts() });
+                out.put_f32(self.scope.trig_volts());
                 Some(())
             }
             C::TrigSlope(Some(r)) => {
@@ -5573,14 +5569,14 @@ impl App {
                 // source stays.
                 let t = t.min(scope::TSRC_CH2);
                 if t == scope::TSRC_CH2 && !self.ch2.on {
-                    self.ch2_set(clk, true);
-                    sc = self.scope.s;
+                    if self.ch2_on_for_trig(clk) {
+                        sc = self.scope.s;
+                    } else {
+                        out.set_err("Settings conflict");
+                        return false;
+                    }
                 }
-                if t == scope::TSRC_CH2 && !self.ch2.on {
-                    out.set_err("Settings conflict");
-                } else {
-                    sc.tsrc = t;
-                }
+                sc.tsrc = t;
                 None
             }
             C::TrigSource(None) => {
