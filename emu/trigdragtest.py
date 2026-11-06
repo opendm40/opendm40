@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """opendm40 scope marker drags with a wobbling finger, in the emulator.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/trigdragtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port N]
 
 The scope page (MENU, the Oscilloscope tile) runs on a 1 kHz sine. Each

@@ -37,6 +37,7 @@ pub const C_ORANGE: Color = 0xfaa0; // STOP badge, TRIG button, Clear
 pub const C_MAGENTA: Color = 0xb833; // timebase badge
 pub const C_WHITE: Color = 0xffff;
 pub const C_GREEN: Color = 0x07e0; // battery bar while charging
+pub const C_RED: Color = 0xf800; // battery when low
 pub const C_DIS: Color = 0x7bef; // label button while its popup is open / pressed
 pub const C_POP_BG: Color = 0xd679; // popup page / selected tab
 pub const C_POP_TAB: Color = 0x5acb; // unselected tab / header
@@ -210,7 +211,7 @@ pub const TAP_OFF: u8 = 2;
 /// The default tap-step mode (the owner's corner zones). Persisted XOR this
 /// value, so a record without the field restores it.
 pub const TAP_DEFAULT: u8 = TAP_CORNERS;
-pub const TAP_NAMES: [&str; 3] = ["Halves (stock)", "Corners", "Off"];
+pub const TAP_NAMES: [&str; 3] = [crate::tr!("Halves (stock)"), crate::tr!("Corners"), crate::tr!("Off")];
 
 /// Persisted tap-step code (2 bits): the mode XOR TAP_DEFAULT, so a record
 /// written before the setting existed (0) restores the default.
@@ -266,6 +267,8 @@ pub struct Model {
     /// Battery level 0..5 (blinking while charging), on a charger (green).
     pub battery: u8,
     pub charging: bool,
+    /// Under a low-battery level (`lowbat.rs`): the symbol is red.
+    pub bat_low: bool,
     /// A USB host has the meter configured: the small USB symbol between
     /// the trigger badge and the battery (`usb_icon`).
     pub usb: bool,
@@ -406,6 +409,7 @@ impl Model {
         ycur: None,
         battery: 4,
         charging: false,
+        bat_low: false,
         usb: false,
         bt: false,
         roll: false,
@@ -909,16 +913,17 @@ fn icons_dx(m: &Model) -> i16 {
 /// 2.6 battery (outline + level clipped to (437,3,33,12)); `icons_dx` px
 /// further right with both link icons. Painted over both places.
 pub fn battery(m: &Model) {
-    battery_lv(m.battery, m.charging, icons_dx(m));
+    battery_lv(m.battery, m.charging, m.bat_low, icons_dx(m));
 }
 
 /// The battery of level 0..5, `dx` px right of its stock place.
-pub fn battery_lv(level: u8, charging: bool, dx: i16) {
+pub fn battery_lv(level: u8, charging: bool, low: bool, dx: i16) {
     let r = rect(435 + dx, 1, 40, 16);
     let o = Ink::icon(sf::SC_BATT, r, 0x22, 0);
     let l = if level > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + level.min(5) as u32, 0) } else { Ink::none() };
     let clip = rect(437 + dx, 3, 33, 12);
-    let lc = if charging { C_GREEN } else { C_WHITE };
+    let oc = if low && !charging { C_RED } else { C_WHITE };
+    let lc = if charging { C_GREEN } else { oc };
     paint(rect(435, 1, 43, 16), &[(K_ICON, C_BAR), (K_ICON, C_BAR)], |x, y| {
         if clip.has(x, y) {
             if let Some(g) = l.at(x, y) {
@@ -926,7 +931,7 @@ pub fn battery_lv(level: u8, charging: bool, dx: i16) {
             }
         }
         match o.at(x, y) {
-            Some(g) => (C_WHITE, tag(1, g)),
+            Some(g) => (oc, tag(1, g)),
             None => (C_BAR, 0),
         }
     });
@@ -1026,9 +1031,15 @@ fn short_scale(t: &str) -> &str {
 /// Panel target k (`panel_rect`): a block's title or magnifier button.
 /// Pressed (`Model::pressed`): the stock pressed grey.
 pub fn panel_part(m: &Model, k: usize) {
+    panel_part_in(m, k, PANEL);
+}
+
+/// `panel_part`, only its pixels inside `clip`.
+fn panel_part_in(m: &Model, k: usize, clip: Rect) {
     let r = panel_rect(k);
+    let pr = isect(r, clip);
     // A strip pass (lcd.rs "strip rendering") without its rows: no layout.
-    if !lcd::rows_hit(r.y, r.y + r.h - 1) {
+    if pr.w <= 0 || pr.h <= 0 || !lcd::rows_hit(pr.y, pr.y + pr.h - 1) {
         return;
     }
     let l = block_look(m, k / 3);
@@ -1042,7 +1053,7 @@ pub fn panel_part(m: &Model, k: usize) {
     if k % 3 != PART_TITLE {
         let plus = k % 3 == PART_IN;
         let mask = if plus { 0x4 } else { 0x8 };
-        paint(r, &[(K_SHAPE, C_BAR), (K_ICON, fill)], |x, y| {
+        paint(pr, &[(K_SHAPE, C_BAR), (K_ICON, fill)], |x, y| {
             if magnifier(r, plus, x, y) {
                 return (fg, tag(2, 0));
             }
@@ -1094,7 +1105,7 @@ pub fn panel_part(m: &Model, k: usize) {
         t1 = Ink::new(c.1, rect(r.x, r.y + small as i16, r.w, r.h), b.as_str(), 8, 0);
         t3 = Ink::none();
     }
-    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill), (K_ICON, fill)], |x, y| {
+    paint(pr, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill), (K_ICON, fill)], |x, y| {
         if let Some(g) = t1.at(x, y) {
             return (fg, tag(2, g));
         }
@@ -1167,9 +1178,23 @@ pub fn top_bar(m: &Model) {
     usb_icon(m);
 }
 
+/// The whole panel. The background first: the parts paint their own rects
+/// only, and the MF popup (over the panel) leaves its pixels in the gaps
+/// between them.
 pub fn panel(m: &Model) {
+    lcd::fill_rect(PANEL_X as u16, 20, (480 - PANEL_X) as u16, 281, C_BAR);
     for k in 0..NPANEL {
         panel_part(m, k);
+    }
+}
+
+/// The panel's rows y0..y1 (exclusive) only: what a shrinking MF popup
+/// uncovers, the box above them left alone.
+fn panel_rows(m: &Model, y0: i16, y1: i16) {
+    let band = rect(PANEL_X, y0, 480 - PANEL_X, y1 - y0);
+    fill_c(band, band, C_BAR);
+    for k in 0..NPANEL {
+        panel_part_in(m, k, band);
     }
 }
 
@@ -2515,7 +2540,7 @@ fn shown() -> &'static mut Shown {
 /// (its overlays too) and the frame, the rest of the page only where the
 /// model changed; `ch1` / `math`: their panel titles were drawn grey
 /// (panel_part outside `update`), so they are drawn again. The MF popup
-/// also covers the panel's left edge: the panel is drawn again.
+/// also covers the panel: the panel is drawn again.
 #[inline(never)] // region C (link-native.x)
 pub fn uncover(m: &Model, ch1: bool, math: bool) {
     if let Some(o) = shown().m.as_mut() {
@@ -2540,8 +2565,8 @@ pub fn regraph_rows(m: &Model, keep: Rect, y0: i16, y1: i16) {
     let g = graph();
     g.holes[H_POPUP] = Some(keep);
     g.holes[H_REST] = Some(rect(GX, y1, GW + 1, 320 - y1));
-    // The MF popup reaches into the panel.
-    panel(m);
+    // The MF popup covers the panel: its uncovered rows too.
+    panel_rows(m, y0, y1);
     g.invalidate();
     g.flush(m);
     // The rows under the hole still show the graph as it is (nothing
@@ -2593,7 +2618,7 @@ pub fn update(m: &Model) {
     if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.rec != m.rec) {
         record_bar(m);
     }
-    if d(ol.battery != m.battery || ol.charging != m.charging || icons_dx(&ol) != icons_dx(m)) {
+    if d(ol.battery != m.battery || ol.charging != m.charging || ol.bat_low != m.bat_low || icons_dx(&ol) != icons_dx(m)) {
         battery(m);
     }
     if d(ol.usb != m.usb || ol.bt != m.bt) {
@@ -2654,7 +2679,8 @@ pub fn update(m: &Model) {
     // The trigger badge after the graph: a level drag step repaints both
     // (the badge ~3.3 ms on the device model, emu --mips 110), the marker
     // under the finger first.
-    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
+    // (The source too: its colour.)
+    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps || ol.tsrc != m.tsrc) {
         trig_badge(m);
     }
     // A repainted graph (a popup closed: `uncover`) leaves its holes as
@@ -3019,15 +3045,37 @@ impl Arm {
 // math engine). Drawn by composition like the page; AA off.
 
 pub const MEAS_NAMES: [&str; 20] =
-    ["Freq", "+Duty", "-Duty", "+Wid", "-Wid", "+Pul", "-Pul", "X2-1", "Xf", "Cycl", "Vp-p", "Vrms", "Vmax", "Vmin", "Vtop", "Vbas", "Vamp", "Y2-1", "Vcrm", "Vavg"];
+    [crate::tr!("Freq"), "+Duty", "-Duty", "+Wid", "-Wid", "+Pul", "-Pul", "X2-1", "Xf", "Cycl", "Vp-p", "Vrms", "Vmax", "Vmin", "Vtop", "Vbas", "Vamp", "Y2-1", "Vcrm", "Vavg"];
 pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "10X", "20X", "50X", "100X", "200X", "500X", "1000X"];
 /// FFT windows (stock five, "Hanming" spelled Hamming, + flat-top; the same
 /// order as fft::WIN_NAMES).
 pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
 /// The MF popup's tabs (stock four, opendm40 Decode).
-pub const MF_TABS: [&str; 5] = ["Measure", "Display", "Trigger", "Settings", "Decode"];
-/// Tab pitch (stock four tabs: 101 px; five: 80).
-const MF_TAB_W: i16 = 80;
+pub const MF_TABS: [&str; 5] = [crate::tr!("Measure"), crate::tr!("Display"), crate::tr!("Trigger"), crate::tr!("Settings"), crate::tr!("Decode")];
+/// Tab pitch (stock four tabs in 401 px: 101; opendm40 five: 93).
+const MF_TAB_W: i16 = 93;
+/// The MF popup's box (opendm40, owner 2026-11-06): from x 13 as stock
+/// (the level markers at x 1..12 stay visible) over the right panel to
+/// x 478, the five tabs across it. While it is open nothing draws on the
+/// panel; it closes with the panel drawn again (`uncover`).
+pub const MF_X: i16 = 13;
+pub const MF_W: i16 = 5 * MF_TAB_W + 1;
+/// The page area's left edge and width (inside the 1 px frame).
+const MF_IX: i16 = MF_X + 1;
+const MF_IW: i16 = MF_W - 2;
+/// The page's right column (the left one at x 24 as stock) and its width,
+/// to 7 px before the frame.
+pub const MF_C2: i16 = MF_IX + MF_IW / 2 + 10;
+pub const MF_C2_W: i16 = MF_IX + MF_IW - 7 - MF_C2;
+/// A stepper in the right column: -, the value, + (x, width).
+pub const MF_STEP: [(i16, i16); 3] = [(MF_C2, 36), (MF_C2 + 40, MF_C2_W - 80), (MF_C2 + MF_C2_W - 36, 36)];
+/// The Measure tab's grid: 7 columns, cells MC_W wide every MC_P from MC_X.
+const MC_X: i16 = MF_IX + 2;
+const MC_P: i16 = (MF_IW - 2) / 7;
+const MC_W: i16 = MC_P - 2;
+/// The display sliders (stock 140 px, value int(130 * v)) and their values.
+const SL_X: i16 = MF_C2;
+const SL_W: i16 = 140;
 
 /// Values the popups show.
 #[derive(Clone, Copy)]
@@ -3220,7 +3268,7 @@ fn slider(r: Rect, clip: Rect, pos: i16) {
 
 /// Slider value (0..1) of a touch at x.
 pub fn slider_value(x: i16) -> f32 {
-    ((x - 214 - 5) as f32 / 130.0).clamp(0.0, 1.0)
+    ((x - SL_X - 5) as f32 / 130.0).clamp(0.0, 1.0)
 }
 
 /// MF popup page height per tab (box h = 40 + page).
@@ -3233,7 +3281,7 @@ const MF_PAGE_H: [i16; 5] = [150, 200, 175, 55, dec::PAGE_H];
 /// None: no hole (the timebase list).
 pub fn popup_box(p: Popup) -> Option<Rect> {
     match p {
-        Popup::Mf(t) => Some(rect(13, 20, 401, 40 + MF_PAGE_H[t.min(4) as usize])),
+        Popup::Mf(t) => Some(rect(MF_X, 20, MF_W, 40 + MF_PAGE_H[t.min(4) as usize])),
         Popup::Ch1(_) | Popup::Math(_) => Some(rect(SX, 20, 200, 281)),
         _ => None,
     }
@@ -3245,12 +3293,12 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
     let page_h = MF_PAGE_H[tab as usize];
     let hh = 40 + page_h;
     let screen = rect(0, 0, 480, 320);
-    fill_c(rect(13, 20, 401, hh), screen, C_FRAME);
-    let tclip = rect(14, 21, 399, hh - 1);
+    fill_c(rect(MF_X, 20, MF_W, hh), screen, C_FRAME);
+    let tclip = rect(MF_IX, 21, MF_IW, hh - 1);
     // The stock tab font when every label fits the narrower tabs.
     let font = if MF_TABS.iter().all(|t| sf::text_width(sf::SC_F22, t, 0) + 6 <= MF_TAB_W - 1) { sf::SC_F22 } else { sf::SC_F16 };
     for i in 0..5i16 {
-        let x = 14 + MF_TAB_W * i;
+        let x = MF_IX + MF_TAB_W * i;
         let r = rect(x, 21, MF_TAB_W - 1, 40);
         let sel = i == tab as i16;
         let ul = rect(x, 59, MF_TAB_W - 1, 2);
@@ -3264,39 +3312,40 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             (if sel && ul.has(x, y) { C_POP_TAB } else { bg }, tag(2, 0))
         });
     }
-    let pc = rect(14, 61, 399, page_h - 1);
+    let pc = rect(MF_IX, 61, MF_IW, page_h - 1);
     match tab {
         0 => {
-            fill_c(rect(15, 61, 398, 110), pc, C_POP_BG);
+            fill_c(rect(MF_IX + 1, 61, MF_IW - 1, 110), pc, C_POP_BG);
             for i in 0..20i16 {
-                let r = rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30);
+                let r = rect(MC_X + MC_P * (i % 7), 66 + 35 * (i / 7), MC_W, 30);
                 let c = if v.pressed_cell == Some(i as u8) { C_DIS } else { C_BAR };
                 rbox_text(r, pc, 8, c, C_POP_BG, sf::SC_F16, MEAS_NAMES[i as usize], C_WHITE);
             }
-            fill_c(rect(15, 171, 398, 40), pc, C_POP_BG);
+            fill_c(rect(MF_IX + 1, 171, MF_IW - 1, 40), pc, C_POP_BG);
             for k in 0..v.meas_n.min(4) as usize {
-                let r = rect(16 + 57 * k as i16, 176, 55, 30);
+                let r = rect(MC_X + MC_P * k as i16, 176, MC_W, 30);
                 rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[v.meas[k] as usize % 20], C_YELLOW);
             }
-            rbox_text(rect(281, 176, 60, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
-            rbox_text(rect(348, 176, 60, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, "Default", C_WHITE);
+            // Clear and Default under the grid's last two columns.
+            rbox_text(rect(MC_X + MC_P * 5, 176, MC_W, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, crate::tr!("Clear"), C_WHITE);
+            rbox_text(rect(MC_X + MC_P * 6, 176, MC_W, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, crate::tr!("Default"), C_WHITE);
         }
         1 => {
-            fill_c(rect(14, 61, 399, 100), pc, C_POP_BG);
-            for (r, t) in [(rect(24, 61, 189, 20), "Roll:"), (rect(24, 105, 189, 20), "Persist:"), (rect(214, 61, 189, 20), "Brightness:"), (rect(214, 105, 189, 20), "Grid intensity:")] {
+            fill_c(rect(MF_IX, 61, MF_IW, 100), pc, C_POP_BG);
+            for (r, t) in [(rect(24, 61, 189, 20), crate::tr!("Roll:")), (rect(24, 105, 189, 20), crate::tr!("Persist:")), (rect(MF_C2, 61, MF_C2_W, 20), crate::tr!("Brightness:")), (rect(MF_C2, 105, MF_C2_W, 20), crate::tr!("Grid intensity:"))] {
                 fill_text(r, pc, C_POP_BG, sf::SC_F16, r, t, C_FILL, 1, 0);
             }
-            option_list(rect(24, 81, 88, 24), pc, &["On", "Off"], 44, if v.roll { 0 } else { 1 });
-            option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF"], 44, v.persist as usize);
+            option_list(rect(24, 81, 88, 24), pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.roll { 0 } else { 1 });
+            option_list(rect(24, 125, 176, 24), pc, &[crate::tr!("OFF"), "MIN", "1S", "INF"], 44, v.persist as usize);
             mf_display_values(v);
             // opendm40: the computed generator trace.
-            fill_c(rect(14, 161, 399, 50), pc, C_POP_BG);
+            fill_c(rect(MF_IX, 161, MF_IW, 50), pc, C_POP_BG);
             fill_text(GT_LABEL, pc, C_POP_BG, sf::SC_F16, GT_LABEL, "GEN trace:", C_FILL, 1, 0);
-            option_list(GT_LIST, pc, &["On", "Off"], 44, if v.gen_trace { 0 } else { 1 });
+            option_list(GT_LIST, pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.gen_trace { 0 } else { 1 });
             // opendm40: the DMM as CH2 and its V/div.
-            fill_c(rect(14, 211, 399, 49), pc, C_POP_BG);
+            fill_c(rect(MF_IX, 211, MF_IW, 49), pc, C_POP_BG);
             fill_text(C2_LABEL, pc, C_POP_BG, sf::SC_F16, C2_LABEL, "CH2 (DMM):", C_FILL, 1, 0);
-            option_list(C2_LIST, pc, &["On", "Off"], 44, if v.ch2_on { 0 } else { 1 });
+            option_list(C2_LIST, pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.ch2_on { 0 } else { 1 });
             option_list(C2_UNIT, pc, &["V", "A"], 44, v.ch2_func as usize);
             if v.ch2_on {
                 rbox_text(C2_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
@@ -3305,18 +3354,18 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             }
         }
         2 => {
-            fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
-            fill_text(rect(24, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(24, 61, 189, 20), "Edge:", C_FILL, 1, 0);
-            fill_text(rect(214, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(214, 61, 189, 20), "Mode:", C_FILL, 1, 0);
-            option_list(rect(24, 81, 120, 24), pc, &["Rising", "Falling"], 60, if v.rising { 0 } else { 1 });
-            option_list(rect(214, 81, 180, 24), pc, &["Auto", "Normal", "Single"], 60, v.mode as usize);
+            fill_c(rect(MF_IX, 61, MF_IW, 55), pc, C_POP_BG);
+            fill_text(rect(24, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(24, 61, 189, 20), crate::tr!("Edge:"), C_FILL, 1, 0);
+            fill_text(TM_LABEL, pc, C_POP_BG, sf::SC_F16, TM_LABEL, crate::tr!("Mode:"), C_FILL, 1, 0);
+            option_list(rect(24, 81, 120, 24), pc, &[crate::tr!("Rising"), crate::tr!("Falling")], 60, if v.rising { 0 } else { 1 });
+            option_list(TM_LIST, pc, &[crate::tr!("Auto"), crate::tr!("Normal"), crate::tr!("Single")], 60, v.mode as usize);
             // opendm40 (UF-13): trigger type and its parameters.
-            fill_c(rect(14, 116, 399, 70), pc, C_POP_BG);
-            fill_text(TT_LABEL, pc, C_POP_BG, sf::SC_F16, TT_LABEL, "Type:", C_FILL, 1, 0);
+            fill_c(rect(MF_IX, 116, MF_IW, 70), pc, C_POP_BG);
+            fill_text(TT_LABEL, pc, C_POP_BG, sf::SC_F16, TT_LABEL, crate::tr!("Type:"), C_FILL, 1, 0);
             option_list(TT_LIST, pc, &crate::trigsoft::TYPE_NAMES, 60, v.ttype.min(2) as usize);
             match v.ttype {
                 crate::trigsoft::PULSE => {
-                    fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, "Width:", C_FILL, 1, 0);
+                    fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, crate::tr!("Width:"), C_FILL, 1, 0);
                     option_list(TP_COND, pc, &crate::trigsoft::COND_NAMES, 30, v.pcond.min(2) as usize);
                     rbox_text(TP_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
                     rbox_text(TP_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
@@ -3334,17 +3383,17 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 _ => {}
             }
             // opendm40: the trigger source (the generator computed, edge only).
-            fill_c(rect(14, 186, 399, 50), pc, C_POP_BG);
-            fill_text(TS_LABEL, pc, C_POP_BG, sf::SC_F16, TS_LABEL, "Source:", C_FILL, 1, 0);
+            fill_c(rect(MF_IX, 186, MF_IW, 50), pc, C_POP_BG);
+            fill_text(TS_LABEL, pc, C_POP_BG, sf::SC_F16, TS_LABEL, crate::tr!("Source:"), C_FILL, 1, 0);
             option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(1) as usize);
             if v.tsrc == crate::scope::TSRC_GEN {
                 fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0);
             }
         }
         3 => {
-            fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
+            fill_c(rect(MF_IX, 61, MF_IW, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
-            rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
+            rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, crate::tr!("Save CSV"), C_WHITE);
         }
         // opendm40: the protocol decoder (ui_decode.rs).
         _ => dec::page(&v.dec, pc),
@@ -3353,18 +3402,20 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
 
 /// Display tab: the two sliders and their values (repainted while dragged).
 // Trigger tab rows (opendm40, UF-13).
+pub const TM_LABEL: Rect = rect(MF_C2, 61, MF_C2_W, 20);
+pub const TM_LIST: Rect = rect(MF_C2, 81, 180, 24);
 pub const TT_LABEL: Rect = rect(24, 116, 180, 20);
 pub const TT_LIST: Rect = rect(24, 136, 180, 24);
-pub const TP_LABEL: Rect = rect(214, 116, 189, 20);
-pub const TP_COND: Rect = rect(214, 136, 92, 24);
-pub const TP_MINUS: Rect = rect(214, 164, 36, 18);
-pub const TP_VALUE: Rect = rect(254, 164, 104, 18);
-pub const TP_PLUS: Rect = rect(362, 164, 36, 18);
-pub const TR_HINT: Rect = rect(214, 164, 189, 18);
+pub const TP_LABEL: Rect = rect(MF_C2, 116, MF_C2_W, 20);
+pub const TP_COND: Rect = rect(MF_C2, 136, 92, 24);
+pub const TP_MINUS: Rect = rect(MF_STEP[0].0, 164, MF_STEP[0].1, 18);
+pub const TP_VALUE: Rect = rect(MF_STEP[1].0, 164, MF_STEP[1].1, 18);
+pub const TP_PLUS: Rect = rect(MF_STEP[2].0, 164, MF_STEP[2].1, 18);
+pub const TR_HINT: Rect = rect(MF_C2, 164, MF_C2_W, 18);
 // Trigger source row, Display tab GEN trace row (opendm40).
 pub const TS_LABEL: Rect = rect(24, 188, 180, 20);
 pub const TS_LIST: Rect = rect(24, 208, 120, 24);
-pub const TS_NOTE: Rect = rect(214, 208, 189, 24);
+pub const TS_NOTE: Rect = rect(MF_C2, 208, MF_C2_W, 24);
 pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
 pub const C2_LABEL: Rect = rect(24, 213, 180, 20);
@@ -3372,9 +3423,9 @@ pub const C2_LIST: Rect = rect(24, 233, 88, 24);
 /// MF > Display: CH2's unit V / A (the multimeter's function), right of
 /// its On / Off.
 pub const C2_UNIT: Rect = rect(120, 233, 88, 24);
-pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
-pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
-pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
+pub const C2_MINUS: Rect = rect(MF_STEP[0].0, 235, MF_STEP[0].1, 20);
+pub const C2_VALUE: Rect = rect(MF_STEP[1].0, 235, MF_STEP[1].1, 20);
+pub const C2_PLUS: Rect = rect(MF_STEP[2].0, 235, MF_STEP[2].1, 20);
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
 pub fn fmt_s125(out: &mut Buf, s: f32) {
     let (x, u) = if s >= 0.999 {
@@ -3391,13 +3442,13 @@ pub fn fmt_s125(out: &mut Buf, s: f32) {
 }
 
 pub fn mf_display_values(v: &PopVals) {
-    let pc = rect(14, 61, 399, MF_PAGE_H[1] - 1);
+    let pc = rect(MF_IX, 61, MF_IW, MF_PAGE_H[1] - 1);
     for (y, val) in [(81i16, v.bright), (125, v.grid)] {
-        slider(rect(214, y, 140, 24), pc, (130 * val.min(100) as i16) / 100);
+        slider(rect(SL_X, y, SL_W, 24), pc, (130 * val.min(100) as i16) / 100);
         let mut b = Buf::new();
         let mut t = [0u8; 16];
         b.push(crate::dmm::format(&mut t, val as f32, 0)).push("%");
-        let r = rect(364, y, 49, 24);
+        let r = rect(SL_X + SL_W + 10, y, MF_C2 + MF_C2_W - (SL_X + SL_W + 10), 24);
         fill_text(r, pc, C_POP_BG, sf::SC_F16, r, b.as_str(), C_FILL, 1, 0);
     }
 }
@@ -3443,28 +3494,27 @@ pub enum MfHit {
 pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
     let tab = tab.min(4);
     let hh = 40 + MF_PAGE_H[tab as usize];
-    if !rect(13, 20, 401, hh).has(x, y) {
+    if !rect(MF_X, 20, MF_W, hh).has(x, y) {
         return if y >= 20 + hh && x >= 10 { MfHit::Close } else { MfHit::Outside };
     }
     if y < 61 {
-        return MfHit::Tab(((x - 14) / MF_TAB_W).clamp(0, 4) as u8);
+        return MfHit::Tab(((x - MF_IX) / MF_TAB_W).clamp(0, 4) as u8);
     }
     let near = |r: Rect| rect(r.x - 1, r.y - 2, r.w + 2, r.h + 4).has(x, y);
     match tab {
         0 => {
-            // Each grid cell owns the gaps around it (pitch 57 x 35).
+            // Each grid cell owns the gaps around it (pitch MC_P x 35);
+            // Clear and Default sit under columns 5 and 6.
+            let c = ((x - (MC_X - 1)) / MC_P).clamp(0, 6);
             if y < 171 {
-                let (c, r) = (((x - 15) / 57).clamp(0, 6), ((y - 64) / 35).clamp(0, 2));
-                let i = r * 7 + c;
+                let i = ((y - 64) / 35).clamp(0, 2) * 7 + c;
                 return if i < 20 { MfHit::Cell(i as u8) } else { MfHit::Inside };
             }
-            let k = ((x - 15) / 57).max(0);
-            if x < 278 {
-                if k < v.meas_n.min(4) as i16 { MfHit::SelCell(k as u8) } else { MfHit::Inside }
-            } else if x < 345 {
-                MfHit::Clear
-            } else {
-                MfHit::Default
+            match c {
+                5 => MfHit::Clear,
+                6 => MfHit::Default,
+                k if k < v.meas_n.min(4) as i16 => MfHit::SelCell(k as u8),
+                _ => MfHit::Inside,
             }
         }
         1 => {
@@ -3472,9 +3522,9 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Roll(i == 0)
             } else if let Some(i) = option_hit(rect(24, 125, 176, 24), 4, 44, x, y) {
                 MfHit::Persist(i)
-            } else if rect(204, 75, 210, 36).has(x, y) {
+            } else if rect(SL_X - 10, 75, MF_IX + MF_IW - (SL_X - 10), 36).has(x, y) {
                 MfHit::Bright
-            } else if rect(204, 119, 210, 36).has(x, y) {
+            } else if rect(SL_X - 10, 119, MF_IX + MF_IW - (SL_X - 10), 36).has(x, y) {
                 MfHit::Grid
             } else if let Some(i) = option_hit(GT_LIST, 2, 44, x, y) {
                 MfHit::GenTrace(i == 0)
@@ -3493,7 +3543,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
         2 => {
             if let Some(i) = option_hit(rect(24, 81, 120, 24), 2, 60, x, y) {
                 MfHit::Rising(i == 0)
-            } else if let Some(i) = option_hit(rect(214, 81, 180, 24), 3, 60, x, y) {
+            } else if let Some(i) = option_hit(TM_LIST, 3, 60, x, y) {
                 MfHit::Mode(i)
             } else if let Some(i) = option_hit(TT_LIST, 3, 60, x, y) {
                 MfHit::TType(i)
@@ -3555,7 +3605,7 @@ fn side_popup(title: &str, tabs: &[&str], tab: u8) {
 
 pub fn draw_ch1(tab: u8, v: &PopVals) {
     let tab = tab.min(2);
-    side_popup("CH1", &["Coupling", "Probe", "Color"], tab);
+    side_popup("CH1", &[crate::tr!("Coupling"), crate::tr!("Probe"), crate::tr!("Color")], tab);
     let pc = rect(SX + 79, 50, 120, 250);
     match tab {
         0 => option_list(rect(SX + 94, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
@@ -3575,7 +3625,7 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
 /// from the current FFT span), Other (window, unit).
 pub fn draw_math(tab: u8, v: &PopVals) {
     let tab = tab.min(3);
-    side_popup("MATH", &["Mode", "Color", "Hz/Div", "Other"], tab);
+    side_popup("MATH", &[crate::tr!("Mode"), crate::tr!("Color"), "Hz/Div", crate::tr!("Other")], tab);
     let pc = rect(SX + 79, 50, 120, 250);
     match tab {
         // Stock: FFT selected unless the mode is ABS (also while math is off).
@@ -3587,10 +3637,10 @@ pub fn draw_math(tab: u8, v: &PopVals) {
         }
         _ => {
             let r = rect(SX + 79, 50, 120, 20);
-            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Window", C_BAR, 8, 0);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, crate::tr!("Window"), C_BAR, 8, 0);
             spinner(rect(SX + 84, 70, 110, 150), pc, &WINDOWS, v.fft_win.min(5) as usize, false);
             let r = rect(SX + 79, 224, 120, 24);
-            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "FFT Unit", C_BAR, 8, 0);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, crate::tr!("FFT Unit"), C_BAR, 8, 0);
             option_list(rect(SX + 94, 250, 90, 24), pc, &["dB", "Vrms"], 44, v.fft_vrms as usize);
         }
     }
@@ -3801,7 +3851,7 @@ pub fn tb_scroll(cur: u8, acc: i32) -> (u8, i32) {
 
 /// The "Sampling" box (RUN refused during AUTO-set).
 pub fn sampling() {
-    rbox_text(rect(190, 150, 100, 20), rect(0, 0, 480, 320), 8, C_PURPLE, C_FILL, sf::SC_F16, "Sampling", C_WHITE);
+    rbox_text(rect(190, 150, 100, 20), rect(0, 0, 480, 320), 8, C_PURPLE, C_FILL, sf::SC_F16, crate::tr!("Sampling"), C_WHITE);
 }
 
 // ------------------------------------------------------------------ meter strip
@@ -3904,9 +3954,9 @@ const ST_BADGE: Rect = rect(ST_COL_X, 46, ST_COL_W, 17);
 /// after the badge column.
 const ST_VALUE: Rect = rect(ST_COL_X + ST_COL_W + 3, 24, 108, 30);
 /// Unit: from x 196, as wide as its text (`st_unit`): SC_DIGITS up to
-/// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F20, the panel
-/// buttons' 20 px face (device check 92fb8fa: a 40 px box cut "mW" to "mV";
-/// "mWh" is 76 px in SC_DIGITS, 32 in SC_F20).
+/// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F16, the panel's
+/// 16 px face (device check 92fb8fa: a 40 px box cut "mW" to "mV"; "mWh"
+/// is 76 px in SC_DIGITS, 26 in SC_F16).
 const ST_UNIT_X: i16 = ST_VALUE.x + ST_VALUE.w + 4;
 const ST_UNIT_W: i16 = 59;
 const ST_UNIT_Y: i16 = 24;
@@ -3940,12 +3990,12 @@ pub fn st_sub(i: usize, gen: bool, x0: i16) -> Rect {
 }
 
 /// The unit's font, spacing and box: SC_DIGITS (LETTERS for a unit it
-/// lacks, deg C / F, uA) when it fits ST_UNIT_W, else SC_F20, else SC_F16,
+/// lacks, deg C / F, uA) when it fits ST_UNIT_W, else SC_F16,
 /// on the digits' baseline; the box is the text's width (>= 1).
 pub fn st_unit(unit: &str, letters: bool) -> (Font, Rect, u8) {
     let big = if letters { sf::LETTERS } else { sf::SC_DIGITS };
     let mut f = big;
-    for c in [big, sf::SC_F20, sf::SC_F16] {
+    for c in [big, sf::SC_F16] {
         f = c;
         if sf::has_all(c, unit) && sf::text_width(c, unit, 1) <= ST_UNIT_W {
             break;
