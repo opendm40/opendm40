@@ -91,7 +91,7 @@ What can be dropped or packed without changing a pixel:
   in narrower stock cells: punctuation, I, j) and takes the others below
   0x80 from F14 (`SHARE` in `mkstockfont.py`, `font_base` in
   `stockfont.rs`), placed in its own line box with the same fields as
-  before: -1.2 KB of region B.
+  before: -1.1 KB of region B.
 
 ## 2a. Glyphs of our own
 
