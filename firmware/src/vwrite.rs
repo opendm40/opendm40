@@ -651,6 +651,35 @@ fn dir_one(k: usize, s: u32, d: &[u8], g: &[u8]) -> R {
     Ok(changed)
 }
 
+/// One mode, after No: the declined file leaves the volume (its root
+/// entry with its long name, its chain), and the host is told to re-read
+/// it; otherwise it would show the file, reading zeros, until the eject.
+#[cfg_attr(target_os = "none", link_section = ".text.vwrite_cold")]
+fn drop_fw_entry() {
+    let w = w();
+    let (slot, start, _, _) = w.done;
+    let Some(k) = w.rec.iter().position(|r| r.slot != 0 && r.slot == slot && le16o(&r.e, 0x1A) == start) else { return };
+    w.rec[k] = REC0;
+    let mut i = slot as usize;
+    while i > ROOT_N + 1 {
+        i -= 1;
+        match w.rec.iter().position(|r| r.slot as usize == i && r.e[11] & 0x3F == 0x0F) {
+            Some(j) => w.rec[j] = REC0,
+            None => break,
+        }
+    }
+    let mut c = start as u32;
+    for _ in 0..NPAIR {
+        let Some(next) = pair(c) else { break };
+        set_pair(c, 0);
+        if next >= 0xFFF8 || next < 2 {
+            break;
+        }
+        c = next as u32;
+    }
+    vdisk::changed();
+}
+
 /// One mode: the host ejected the medium (vdisk::on_eject): the session
 /// ends (`release_all`), or, while a firmware file's check is still due
 /// (`cp` + eject at once), once `poll` has decided it, at most END_WAIT_MS.
@@ -1179,6 +1208,9 @@ pub fn poll(now: u64, blocked: bool) {
             *x = ST0; // its data is gone: reads zeros
         }
         w.fw = Fw::None;
+        if ONE {
+            drop_fw_entry();
+        }
         return;
     }
     // 3. A firmware file complete? (Once the data has settled; each

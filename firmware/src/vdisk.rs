@@ -778,6 +778,11 @@ pub fn on_eject() {
     }
 }
 
+/// The volume changed (vwrite.rs): the media-change UNIT ATTENTION is due.
+pub(crate) fn changed() {
+    CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
+}
+
 /// One mode: the host wrote a directory entry into slot `slot` of LOGS /
 /// SCOPE / SHOTS (`k`) where the meter has no file: the meter's next files
 /// go after it (vwrite.rs), so a host entry is never taken for a file of

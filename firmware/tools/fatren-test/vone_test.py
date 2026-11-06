@@ -301,9 +301,14 @@ for tag, order, allow_at in (('asc', 'asc', None), ('data-first', 'data-first', 
         fail('fw %s: %s' % (tag, st))
     if run('mcopy', '-n', '-i', v.dump(1), '::dm40fw.bin', '-') != open(FW1, 'rb').read():
         fail('fw %s: read back differs' % tag)
+    v.ua()
     v.answer(False)
     v.idle(1000)
     check_spi(v, ALL, 'fw %s declined' % tag)
+    vol = v.dump(2)
+    if 'DM40FW.BIN' in {k.upper() for k in ls(vol)} or not v.ua():
+        fail('fw %s: the declined file still shown / no media change' % tag)
+    fsck_clean(vol, 'fw %s declined volume' % tag)
     v.close()
     ok('firmware, %s order%s: checked, dialog; No -> DM40FW.BIN deleted' % (tag, ', Allow after write %d' % allow_at if allow_at else ''))
 
