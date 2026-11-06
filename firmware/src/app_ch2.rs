@@ -107,6 +107,7 @@ impl App {
     /// (mHz), its stamps counting from DWT `c0`.
     pub fn ch2_started(&mut self, fs: u32, real_mhz: u32, c0: u32) {
         let Some(a) = self.dmm.ad2_scale() else { return };
+        let was = (self.ch2.vdiv, self.scope_ch2_amps());
         if self.ch2.vdiv <= 0.0 || scope::wave_step_of(a.amps, self.ch2.vdiv).is_none() || self.scope_ch2_amps() != a.amps {
             self.ch2.vdiv = scope::wave_full_step(a.amps, a.item).map_or(a.full / 4.0, |i| scope::wave_steps(a.amps)[i].0);
         }
@@ -116,6 +117,11 @@ impl App {
         self.ch2.live = true;
         self.ch2.frozen = false;
         self.ch2.fs = fs;
+        if self.sp.popup == crate::scope_ui::Popup::Mf(1) && was != (self.ch2.vdiv, a.amps) {
+            // The Display tab open (a function change over SCPI / BT): its
+            // CH2 V/div again (the page with the popup, as a colour change).
+            self.redraw = true;
+        }
     }
 
     fn scope_ch2_amps(&self) -> bool {
@@ -259,9 +265,12 @@ impl App {
     }
 
     /// The CH2 V/div ("1.5V", "200mA"; the DMM block, the Display tab):
-    /// also while off, "--" before the first start and in the Wave view.
+    /// also while off, "--" before the first start, in the Wave view and
+    /// while the multimeter's V / A is not the last stream's unit (until
+    /// the stream starts on the new function; AC+DC: never).
     pub(super) fn ch2_label(&self) -> crate::scope_ui::Txt {
-        if self.ch2.vdiv > 0.0 && !self.scope.wave_on() {
+        let f = self.ch2_func_idx();
+        if self.ch2.vdiv > 0.0 && !self.scope.wave_on() && (f == 2 || (f == 1) == self.scope_ch2_amps()) {
             label(self.ch2.vdiv, self.scope_ch2_amps())
         } else {
             crate::scope_ui::Txt::new("--")
