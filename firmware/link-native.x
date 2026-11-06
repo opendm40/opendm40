@@ -139,9 +139,6 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
-        /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
-         * loop and asm are `.text.a2.*` (zero-wait region A2). */
-        *(.text.*8opendm408memprobe*);
         /* The decoder's frame log: a frame's waveform, drawn on a tap, the
          * top bar / counters, the page draw, the setup popup and the
          * view's touches (app_log.rs `.text.log_cold`; ui_log.rs's panel
@@ -382,17 +379,6 @@ SECTIONS
         *(.text.*8opendm403dmm*3Dmm14acdc_diag_text*);
         *(.text.*8opendm403dmm*3Dmm8reg_text*);
         *(.text.*8opendm403dmm*3Dmm12precondition*);
-        /* acdcm.rs: the AC+DC methods' entry / range-change / SCPI steps
-           (poll_am, the per-result path, stays in region B) */
-        *(.text.*8opendm403dmm2am*8am_enter*);
-        *(.text.*8opendm403dmm2am*11am_set_meth*);
-        *(.text.*8opendm403dmm2am*11am_set_zero*);
-        *(.text.*8opendm403dmm2am*7am_zero*);
-        *(.text.*8opendm403dmm2am*7am_stat*);
-        *(.text.*8opendm403dmm2am*7am_mode*);
-        *(.text.*8opendm403dmm2am*6am_row*);
-        *(.text.*8opendm403dmm2am*6am_ref*);
-        *(.text.*8opendm403dmm2am*11am_cal_step*);
         *(.text.*8opendm408sentinel*8Sentinel9diag_text*);
         /* The jack check (sentinel.rs JACK CHECK): only while PB1 hits in ohm /
          * continuity / the resistive temperature sensors (a fault), never
@@ -512,6 +498,10 @@ SECTIONS
         __cold_end = .;
     } > FLASH_C
 
+    /* Feature memprobe (DBG:PEEK? etc., debug builds only) is not claimed
+     * by .cold: its ~3 KB put region C under the 4 KiB floor (2026-11-06,
+     * C 7 KB free in the default build). Its timing loop and asm are
+     * `.text.a2.*` (zero-wait region A2). */
     .text ORIGIN(FLASH_B) :
     {
         __stext = .;
