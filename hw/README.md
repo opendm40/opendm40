@@ -95,7 +95,7 @@ The same as text:
   charger and the LN425272 1S 2000 mAh cell with protection PCB; system supply
   (regulators not identified); [GD32F427VGT6](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf) at 200 MHz from a
   25 MHz crystal, USBFS on PA11 / PA12; [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) 3.5" IPS 480 x 320 LCD on FSMC 16-bit, backlight PWM on PA6; touch
-  (Hynitron 0x5A, plus 4 touch keys) on I2C2; [W25Q128JV](datasheets/winbond-w25q128jv-revI.pdf) 16 MiB (USB disk) on SPI1; Jieli BP2A838 BT
+  (Hynitron 0x5A, plus 4 touch keys) on I2C2; [W25Q128JV](datasheets/winbond-w25q128jv-revI.pdf) 16 MiB (USB disk) on SPI1; Jieli AC6328A2 BT
   (24 MHz crystal, PCB antenna) on UART4; buzzer PWM on TIM14 PA7; debug
   header: UART PA2 / PA3, SWD PA13 / PA14; scope: CHA jack -> /50 relay PC13, AC/DC
   PE3, offset PC8 -> 4051 + op amp 8091 gain -> [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) 10-bit 50 MS/s on PB0..PB9, clocked by
@@ -141,7 +141,7 @@ scope, generator) shares one ground.
 | LCD controller | [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) (ID read 0x9488) | ID 0x9488 read by `board::init` ([`firmware/TODO.md`](../firmware/TODO.md) T1); stock init sequence `stock/re/analysis/lcd_buzzer_v2_6.h`. Not in the BOM |
 | LCD panel | 3.5" IPS, 480 x 320, active area 74 x 50 mm | review |
 | Touch | Hynitron CST-type controller at I2C 0x5A (chip type byte 0xA8) on this unit; the stock also supports a Goodix GT1158 at 0x14 | [`firmware/src/touch.rs`](../firmware/src/touch.rs); GT1158 path from the stock code only. Not in the BOM (the touch controller sits on the panel FPC) |
-| Bluetooth | Jieli AC6328A (AC632N family, SOP8, 2 Mbit flash; BOM marking BP2A838-20A2; datasheet: see [datasheets/README.md](datasheets/README.md)), 24 MHz crystal, PCB meander antenna | flash image of the chip (`stock/re/docs/bt-module-ac6328a.md`); 8-pin chip with the Jieli logo next to the antenna and the 24.000 MHz crystal in [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
+| Bluetooth | Jieli AC6328A2 (AC632N family, SOP8, 2 Mbit flash; marking BP2A838-28A2, the BOM writes "-20A2"; datasheet: see [datasheets/README.md](datasheets/README.md)), 24 MHz crystal, PCB meander antenna | flash image of the chip (`stock/re/docs/bt-module-ac6328a.md`); 8-pin chip with the Jieli logo next to the antenna and the 24.000 MHz crystal in [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
 | DMM front end | Hycon [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) | code (register protocol, `stock/re/analysis/hy3131_v2_6.h`); the chip itself is under the shield can (4.9152 MHz crystal and VDD/VSS silkscreen next to it in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg)) |
 | HY3131 crystal | 4.9152 MHz | photo and stock constant 4915.2 (`stock/re/analysis/hy3131_v2_6.h`) |
 | Voltage reference | [MAX6190](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf) (1.25 V, 5 ppm/°C) on HY3131 PB6 | BOM only for the part (placement: see [Unknowns](#unknowns)); the 1.25 V value matches the stock scaling ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7) |
@@ -347,7 +347,7 @@ scope and generator ground (*inferred*).
 
 ## Bluetooth
 
-- Chip: Jieli AC6328A, SOP8, AC632N family (BOM marking BP2A838-20A2; datasheet: see
+- Chip: Jieli AC6328A2, SOP8, AC632N family, 2 Mbit flash. The marking `BP2A838-28A2` ends in the tail of the part number ([chip markings](https://kagaimiq.github.io/jielie/chips/chip-marks.html)); the last digit is the flash size in Mbit (datasheet §5). The BOM writes "-20A2". Datasheet: see
   [datasheets/README.md](datasheets/README.md)), own 24 MHz crystal, PCB meander antenna at the board edge
   ([main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg)). Classic SPP (RFCOMM channel 1,
   [`docs/bt-protocol.md`](../docs/bt-protocol.md)) and BLE ([`firmware/src/bt.rs`](../firmware/src/bt.rs)).
