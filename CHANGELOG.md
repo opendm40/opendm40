@@ -8,6 +8,7 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 - **Combined view:** the meter strip's reading is orange, as on the multimeter page.
+- **Scope:** drag the DMM channel's 2 marker to move its trace.
 - **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
 
 - **Gallery: select several files and delete them together**
