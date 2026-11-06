@@ -9,6 +9,8 @@ section named after the tag as the release notes; how to cut a release:
 
 - DMM: 2 px more between the big digits and the bargraph.
 
+- Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
+
 - **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
 
 - **Gallery: select several files and delete them together**

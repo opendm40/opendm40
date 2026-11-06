@@ -3316,7 +3316,7 @@ pub fn set_opens(id: u8) -> bool {
 
 /// Rows with a -/+ stepper.
 pub fn set_is_stepper(id: u8) -> bool {
-    matches!(id, S_BACKLIGHT | S_VOLUME)
+    matches!(id, S_BACKLIGHT | S_VOLUME | S_SHUTDOWN)
 }
 
 /// The "USB disk" setting's value: the mode asked for, "(replug)" while the
@@ -3358,14 +3358,14 @@ fn row_only() -> Option<RowPress> {
 /// The box pressed item `t` of `view` covers (app_press.rs draws it pressed
 /// / released in one strip pass, nothing outside it); None: the view's
 /// items are drawn directly.
-pub fn press_rect(view: View, t: RowPress) -> Option<sf::Rect> {
+pub fn press_rect(view: View, t: RowPress, tab: u8) -> Option<sf::Rect> {
     let row = t.row as usize;
     let key = |r: sf::Rect, minus: i16, plus: i16, w: i16, m: i16| rect(if t.part < 0 { minus } else { plus }, r.y + m, w, r.h - 2 * m);
     Some(match view {
         View::Menu => menu_item_rect(row),
         View::Settings if t.row & 0x80 != 0 => st_tab(row & 0x7F),
         View::Settings if t.part == 0 => st_row(row),
-        View::Settings => key(st_row(row), ST_MINUS_X, ST_PLUS_X, ST_KEY_W, 4),
+        View::Settings => key(st_row(row), st_minus_x(settings_id(tab, row).unwrap_or(0)), ST_PLUS_X, ST_KEY_W, 4),
         View::Limits => set_row(row),
         View::Record if t.part == 0 => set_row(row),
         View::Record => key(set_row(row), REC_STEP_MINUS_X, STEP_PLUS_X, STEP_KEY_W, 3),
@@ -3441,6 +3441,11 @@ const ST_TXT_END: i16 = ST_ROW_X + ST_ROW_W - 6;
 const ST_KEY_W: i16 = 40;
 const ST_PLUS_X: i16 = ST_TXT_END - ST_KEY_W;
 const ST_MINUS_X: i16 = ST_PLUS_X - 4 - 56 - 4 - ST_KEY_W;
+/// The "-" key of a stepper row: Shutdown's value box is 90 px for "10 hours"
+/// (its short name leaves the room, "Key/alert volume" does not).
+const fn st_minus_x(id: u8) -> i16 {
+    if id == S_SHUTDOWN { ST_PLUS_X - 4 - 90 - 4 - ST_KEY_W } else { ST_MINUS_X }
+}
 /// Most rows a section can have (and most sections).
 pub const SET_ROWS_MAX: usize = 6;
 const _: () = {
@@ -3517,15 +3522,16 @@ fn st_stepper(i: usize, id: u8, val: &str, only: Option<RowPress>) {
     if only.is_some_and(|p| p.row as usize != i) {
         return;
     }
+    let minus = st_minus_x(id);
     let r = st_row(i);
     if only.is_none() {
         sf::rbox(r, 6, M_TILE, M_BG);
         let name = SET_NAMES[id as usize];
-        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, ST_MINUS_X - 4 - ST_TXT_X, r.h), name, STATUS_FG, M_TILE, 1, 0);
-        let vx = ST_MINUS_X + ST_KEY_W + 4;
+        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, minus - 4 - ST_TXT_X, r.h), name, STATUS_FG, M_TILE, 1, 0);
+        let vx = minus + ST_KEY_W + 4;
         sf::glyphs(sf::TEXT22, rect(vx, r.y, ST_PLUS_X - 4 - vx, r.h), val, M_ACCENT, M_TILE, 8, 0);
     }
-    for (d, x, t) in [(-1, ST_MINUS_X, "-"), (1, ST_PLUS_X, "+")] {
+    for (d, x, t) in [(-1, minus, "-"), (1, ST_PLUS_X, "+")] {
         let bg = match only {
             None => M_ACCENT,
             Some(p) if p.part == d => if p.on { KEY_PRESSED } else { M_ACCENT },
@@ -3570,7 +3576,7 @@ pub fn set_value_x(id: u8) -> i16 {
     if set_opens(id) {
         ST_SPLIT as i16
     } else if set_is_stepper(id) {
-        ST_MINUS_X - 6
+        st_minus_x(id) - 6
     } else {
         ST_TXT_X + sf::text_width(sf::TEXT22, SET_NAMES[id as usize], 0) + 6
     }
@@ -3581,10 +3587,10 @@ pub fn settings_id(tab: u8, row: usize) -> Option<u8> {
     SET_TABS.get(tab as usize)?.1.get(row).copied()
 }
 
-/// A tap at `x` on a stepper row: -1 (left of the value's centre: the
+/// A tap at `x` on the stepper row `id`: -1 (left of the value's centre: the
 /// "-" key) or +1.
-pub fn settings_step(x: u16) -> i8 {
-    if (x as i16) < (ST_MINUS_X + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
+pub fn settings_step(id: u8, x: u16) -> i8 {
+    if (x as i16) < (st_minus_x(id) + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
 }
 
 /// A settings-style page: title bar with "< Back", up to SET_ROWS rows of
