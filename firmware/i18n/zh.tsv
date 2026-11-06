@@ -247,3 +247,6 @@ Battery empty: off in 30 s	电池耗尽: 30 秒后关机	M
 Battery empty: off in 20 s	电池耗尽: 20 秒后关机	M
 Battery empty: off in 10 s	电池耗尽: 10 秒后关机	M
 Unstable: unplug USB?	Unstable: unplug USB?	E
+Type	类型	M
+Vol	电压	M
+Cur	电流	M

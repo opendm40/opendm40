@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
 - DMM: 2 px more between the big digits and the bargraph.
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.

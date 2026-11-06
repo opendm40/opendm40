@@ -1339,7 +1339,9 @@ in the left or right half of the graph steps), **Off**.
 - Tap the **CH1** title for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
-    readings, not the hardware.
+    readings, not the hardware. **Type**: **Vol**, or **Cur** for a current
+    probe or shunt: CH1's values are in A, and the probe factor means A per
+    volt at the input (×10 reads a 100 mV/A clamp). Kept over a restart.
   - **Color** of the trace.
 - Bandwidth: owners report flat to about 3 MHz.
 
@@ -1586,7 +1588,7 @@ While it is on, the edge trigger does not use the trigger hardware.
 The CSV starts with comment lines (timebase, V/div, probe, coupling,
 sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
-the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
+the probe tip (with CH1 type **Cur**: `time_s,amperes`). A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder

@@ -730,6 +730,31 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                 save(out, name);
             }
         }
+        // CH1 type Cur: the Probe tab's Type list, the unit on CH1's V/div,
+        // the taps on the Type list.
+        if !combined {
+            let mut pc = pv;
+            pc.cur = true;
+            let mut mc = m;
+            mc.amps = true;
+            draw(&mc, scope_ui::Popup::Ch1(1), &pc, true);
+            ck.check_replica("gen/ch1-cur");
+            save(out, "s08-ch1-cur");
+            let sc = scope_ui::block_look(&mc, scope_ui::BLK_CH1).scale;
+            let sv = scope_ui::block_look(&m, scope_ui::BLK_CH1).scale;
+            println!("CH1 scale: Vol {:?}, Cur {:?}", sv.as_str(), sc.as_str());
+            if !(sc.as_str().ends_with('A') && sv.as_str().ends_with('V')) {
+                ck.fail("gen/ch1-cur", format!("CH1 scale unit: Vol {:?}, Cur {:?}", sv.as_str(), sc.as_str()));
+            }
+            let sx = scope_ui::PANEL_X - 200;
+            let ty = |i: i16| scope_ui::side_hit(false, 1, &pc, sx + 94 + 22 + 44 * i, 262);
+            if !(matches!(ty(0), scope_ui::SideHit::Type(0)) && matches!(ty(1), scope_ui::SideHit::Type(1))) {
+                ck.fail("gen/ch1-cur", "the CH1 Probe tab's Type list is not hit".to_string());
+            }
+            if !matches!(scope_ui::side_hit(false, 1, &pc, sx + 94, 120), scope_ui::SideHit::Probe(_)) {
+                ck.fail("gen/ch1-cur", "the Probe spinner lost its hit".to_string());
+            }
+        }
         if !combined {
             // The MF popup covers the panel (owner 2026-11-06): its box
             // shows nothing of the panel under it (a pressed part, the
