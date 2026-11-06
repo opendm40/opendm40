@@ -3052,27 +3052,33 @@ pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "
 pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
 /// The MF popup's tabs (stock four, opendm40 Decode).
 pub const MF_TABS: [&str; 5] = [crate::tr!("Measure"), crate::tr!("Display"), crate::tr!("Trigger"), crate::tr!("Settings"), crate::tr!("Decode")];
-/// Tab pitch (stock four tabs in 401 px: 101; opendm40 five: 93).
-const MF_TAB_W: i16 = 93;
-/// The MF popup's box (opendm40, owner 2026-11-06): from x 13 as stock
-/// (the level markers at x 1..12 stay visible) over the right panel to
-/// x 478, the five tabs across it. While it is open nothing draws on the
-/// panel; it closes with the panel drawn again (`uncover`).
+/// The MF popup's box (opendm40, owner 2026-11-06): over the right panel,
+/// the same 13 px from both screen edges (x 13..466; the level markers at
+/// x 1..12 stay visible), the five tabs across it. While it is open nothing
+/// draws on the panel; it closes with the panel drawn again (`uncover`).
 pub const MF_X: i16 = 13;
-pub const MF_W: i16 = 5 * MF_TAB_W + 1;
+pub const MF_W: i16 = 480 - 2 * MF_X;
 /// The page area's left edge and width (inside the 1 px frame).
 const MF_IX: i16 = MF_X + 1;
 const MF_IW: i16 = MF_W - 2;
-/// The page's right column (the left one at x 24 as stock) and its width,
-/// to 7 px before the frame.
+/// Tab i's left edge: five tabs and their 1 px seams across the page
+/// width (89 / 90 px).
+const fn mf_tab_x(i: i16) -> i16 {
+    MF_IX + i * (MF_IW + 1) / 5
+}
+/// The narrowest tab.
+const MF_TAB_W: i16 = (MF_IW + 1) / 5 - 1;
+/// The page's columns, 10 px inside the frame on both sides: the left one
+/// at x 24 as stock, the right one (and its width) from the middle.
 pub const MF_C2: i16 = MF_IX + MF_IW / 2 + 10;
-pub const MF_C2_W: i16 = MF_IX + MF_IW - 7 - MF_C2;
+pub const MF_C2_W: i16 = MF_IX + MF_IW - 10 - MF_C2;
 /// A stepper in the right column: -, the value, + (x, width).
 pub const MF_STEP: [(i16, i16); 3] = [(MF_C2, 36), (MF_C2 + 40, MF_C2_W - 80), (MF_C2 + MF_C2_W - 36, 36)];
-/// The Measure tab's grid: 7 columns, cells MC_W wide every MC_P from MC_X.
-const MC_X: i16 = MF_IX + 2;
+/// The Measure tab's grid: 7 columns, cells MC_W wide every MC_P from MC_X
+/// (centred in the page).
 const MC_P: i16 = (MF_IW - 2) / 7;
 const MC_W: i16 = MC_P - 2;
+const MC_X: i16 = MF_IX + (MF_IW - (7 * MC_P - 2)) / 2;
 /// The display sliders (stock 140 px, value int(130 * v)) and their values.
 const SL_X: i16 = MF_C2;
 const SL_W: i16 = 140;
@@ -3293,12 +3299,12 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
     fill_c(rect(MF_X, 20, MF_W, hh), screen, C_FRAME);
     let tclip = rect(MF_IX, 21, MF_IW, hh - 1);
     // The stock tab font when every label fits the narrower tabs.
-    let font = if MF_TABS.iter().all(|t| sf::text_width(sf::SC_F22, t, 0) + 6 <= MF_TAB_W - 1) { sf::SC_F22 } else { sf::SC_F16 };
+    let font = if MF_TABS.iter().all(|t| sf::text_width(sf::SC_F22, t, 0) + 6 <= MF_TAB_W) { sf::SC_F22 } else { sf::SC_F16 };
     for i in 0..5i16 {
-        let x = MF_IX + MF_TAB_W * i;
-        let r = rect(x, 21, MF_TAB_W - 1, 40);
+        let (x, w) = (mf_tab_x(i), mf_tab_x(i + 1) - mf_tab_x(i) - 1);
+        let r = rect(x, 21, w, 40);
         let sel = i == tab as i16;
-        let ul = rect(x, 59, MF_TAB_W - 1, 2);
+        let ul = rect(x, 59, w, 2);
         let t = Ink::new(font, r, MF_TABS[i as usize], 8, 0);
 
         let (bg, fg) = if sel { (C_POP_BG, C_FILL) } else { (C_POP_TAB, C_WHITE) };
@@ -3489,7 +3495,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
         return if y >= 20 + hh && x >= 10 { MfHit::Close } else { MfHit::Outside };
     }
     if y < 61 {
-        return MfHit::Tab(((x - MF_IX) / MF_TAB_W).clamp(0, 4) as u8);
+        // The last tab i with mf_tab_x(i) <= x (a seam: the tab left of it).
+        return MfHit::Tab(((5 * (x - MF_IX) + 4) / (MF_IW + 1)).clamp(0, 4) as u8);
     }
     let near = |r: Rect| rect(r.x - 1, r.y - 2, r.w + 2, r.h + 4).has(x, y);
     match tab {
