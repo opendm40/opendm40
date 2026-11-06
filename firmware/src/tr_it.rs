@@ -23,6 +23,9 @@ macro_rules! tr {
     ("Back") => { "Indietro" };
     ("Backlight") => { "Retroillum." };
     ("Bargraph") => { "Barra" };
+    ("Battery empty: off in 10 s") => { "Batteria: si spegne tra 10 s" };
+    ("Battery empty: off in 20 s") => { "Batteria: si spegne tra 20 s" };
+    ("Battery empty: off in 30 s") => { "Batteria: si spegne tra 30 s" };
     ("Both always") => { "Sempre entrambi" };
     ("Brightness:") => { "Luminosit\u{1}:" };
     ("Burden voltage") => { "Caduta tens." };
@@ -101,6 +104,7 @@ macro_rules! tr {
     ("Loading...") => { "Caricamento..." };
     ("Log failed") => { "Errore log" };
     ("Loud") => { "Forte" };
+    ("Low battery! Please charge") => { "Batteria scarica! Ricaricare" };
     ("Lower") => { "Inf." };
     ("Lower = reading") => { "Inf. = lettura" };
     ("Lower limit") => { "Limite inf." };
@@ -192,6 +196,7 @@ macro_rules! tr {
     ("Try again") => { "Riprova" };
     ("Type:") => { "Tipo:" };
     ("USB disk") => { "Disco USB" };
+    ("Unstable: unplug USB?") => { "Instabile: scollegare USB?" };
     ("Until stopped") => { "Fino a stop" };
     ("Upper") => { "Sup." };
     ("Upper = reading") => { "Sup. = lettura" };
@@ -233,6 +238,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Back", "Indietro"),
     ("Backlight", "Retroillum."),
     ("Bargraph", "Barra"),
+    ("Battery empty: off in 10 s", "Batteria: si spegne tra 10 s"),
+    ("Battery empty: off in 20 s", "Batteria: si spegne tra 20 s"),
+    ("Battery empty: off in 30 s", "Batteria: si spegne tra 30 s"),
     ("Both always", "Sempre entrambi"),
     ("Brightness:", "Luminosit\u{1}:"),
     ("Burden voltage", "Caduta tens."),
@@ -311,6 +319,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Loading...", "Caricamento..."),
     ("Log failed", "Errore log"),
     ("Loud", "Forte"),
+    ("Low battery! Please charge", "Batteria scarica! Ricaricare"),
     ("Lower", "Inf."),
     ("Lower = reading", "Inf. = lettura"),
     ("Lower limit", "Limite inf."),
@@ -402,6 +411,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Try again", "Riprova"),
     ("Type:", "Tipo:"),
     ("USB disk", "Disco USB"),
+    ("Unstable: unplug USB?", "Instabile: scollegare USB?"),
     ("Until stopped", "Fino a stop"),
     ("Upper", "Sup."),
     ("Upper = reading", "Sup. = lettura"),
