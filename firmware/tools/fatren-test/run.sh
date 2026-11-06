@@ -53,6 +53,11 @@
 #      non-update DM40*.BIN); refusals (new file / dir, README, INFO, rename,
 #      label); a lockless host; power cuts in the staging + commit; the
 #      captured kernel sequences (captures/*.vcap.gz, vreplay.py).
+#   21. vone (feature vdisk-one, vone_test.py): the one USB disk mode with
+#      the meter adding files while the host writes back stale sectors:
+#      firmware copies (Linux / Windows-like orders, an Allow mid-copy, cp +
+#      eject), deletes, host files over unseen slots, meter deletes
+#      (tombstones), host files / folders / trash dropped at the eject.
 # upload (src/upload.rs, DBG:UPLOAD): DM40FW.BIN byte-identical, staged
 #   dm40*.bin removed, _DM40PRV.BIN kept, chunk sizes, wrong CRC / repeated
 #   chunk / not an update file refused, power cut before every block write.
@@ -1493,4 +1498,8 @@ echo "=== vwrite: host writes on the USB volume (delete from the PC, drag-and-dr
 # sequences in captures/ (usbip_msc.py --capture; vreplay.py).
 CAPS=$(ls captures/*.vcap.gz 2>/dev/null || true)
 python3 -I vwrite_test.py "$W/t" $W/f1m_native $W/f1m_none $W/src $VS $NATIVE $W/a.bin $W/vw $CAPS || { echo "FAIL: vwrite"; exit 1; }
+
+echo "=== vone: the one USB disk mode (feature vdisk-one; vone_test.py)"
+rustc --edition 2021 -O --cfg 'feature="vdisk"' --cfg 'feature="vdisk-one"' main.rs -o "$W/t1"
+python3 -I vone_test.py "$W/t1" $W/f1m_native $W/src $VS $NATIVE $W/vone || { echo "FAIL: vone"; exit 1; }
 echo PASS

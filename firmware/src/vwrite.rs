@@ -76,13 +76,13 @@
 
 use crate::dlog::{self, Raw as _};
 use crate::msc::BlockDevice;
-use crate::vdisk::{self, Owner, BS, CB, DATA_START, FAT_SECS, FAT_START, ID, ROOT_N, ROOT_START, SPC, T_DIR, T_FAT, T_MOVED, T_SRC};
+use crate::vdisk::{self, Owner, BS, CB, DATA_START, FAT_SECS, FAT_START, ID, ONE, ROOT_N, ROOT_START, SPC, T_DIR, T_FAT, T_MOVED, T_SRC};
 
 /// Host records in the root (raw 32-byte entries: a firmware file and the
 /// hosts' own directories with their long names).
-const NREC: usize = 10;
+const NREC: usize = if ONE { 16 } else { 10 };
 /// Host FAT entries (cluster -> value).
-const NPAIR: usize = 40;
+const NPAIR: usize = if ONE { 64 } else { 40 };
 /// Staged clusters: one firmware file (upload::MAX, 20) and the hosts' own
 /// directories / files (a Linux trash: 3 + 1 per file moved there).
 const NST: usize = 28;
@@ -103,7 +103,10 @@ pub const PARK_MS: u64 = 5_000;
 const SETTLE_MS: u64 = 300;
 /// The session's end (the Allow) waits at most this long for the check of
 /// a firmware file not checked yet (`release`).
-const END_WAIT_MS: u64 = 1500;
+const END_WAIT_MS: u64 = if ONE { 5000 } else { 1500 };
+/// One mode: the media-change UNIT ATTENTION waits until the host has not
+/// written for this long (vdisk.rs `media_change_now`).
+pub const UA_QUIET_MS: u64 = 2000;
 /// Temp files of a session at most.
 const MAX_PARKS: u8 = 100;
 const TMP_PRE: &[u8; 6] = b"_VHOST";
@@ -175,6 +178,8 @@ pub struct Stats {
     pub deleted: u16,
     pub fw_ok: u16,
     pub fw_bad: u16,
+    /// One mode: host writes accepted and dropped (sectors).
+    pub dropped: u32,
 }
 
 struct W {
@@ -245,7 +250,7 @@ static mut W0: W = W {
     parks: 0,
     purged: false,
     purge: false,
-    n: Stats { ok: 0, refused: 0, busy: 0, last_refused: 0, deleted: 0, fw_ok: 0, fw_bad: 0 },
+    n: Stats { ok: 0, refused: 0, busy: 0, last_refused: 0, deleted: 0, fw_ok: 0, fw_bad: 0, dropped: 0 },
 };
 /// The logger needs a constant interval (main.rs `disk_writes_blocked`):
 /// no SPI write for a staging meanwhile.
@@ -290,7 +295,7 @@ fn le32o(b: &[u8], o: usize) -> u32 {
 
 /// The mode in force (MODE SENSE WP bit, WRITE refused).
 pub fn read_only() -> bool {
-    !w().rw
+    !ONE && !w().rw
 }
 
 /// The mode asked for (applies at the next bus reset).
@@ -335,8 +340,18 @@ pub fn state() -> (usize, usize, usize, bool, bool, u8) {
 
 /// The layout must not change under the host (module text).
 pub fn frozen() -> bool {
+    if ONE {
+        return false; // the meter keeps adding files (vdisk.rs tombstones)
+    }
     let w = w();
     w.rw && (crate::msc::host_mounted() || w.end_at != 0 || (!w.locks && (w.session || (w.last != 0 && w.now.saturating_sub(w.last) < QUIET_MS))))
+}
+
+/// One mode: no host write in progress or in the last UA_QUIET_MS.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+pub fn host_quiet() -> bool {
+    let w = w();
+    !crate::msc::HOST_WRITING.load(core::sync::atomic::Ordering::Relaxed) && (w.last == 0 || w.now.saturating_sub(w.last) >= UA_QUIET_MS)
 }
 
 /// A staging owns the SPI free space (upload::busy).
@@ -395,7 +410,7 @@ pub fn staged_read(c: u32, s: u32, b: &mut [u8]) -> bool {
 /// `last_error` says why.
 pub fn write(lba: u32, d: &[u8]) -> bool {
     let w = w();
-    let r = if !w.rw { Err(E_REFUSED) } else { classify(lba, d) };
+    let r = if !w.rw && !ONE { Err(E_REFUSED) } else if ONE { classify_one(lba, d) } else { classify(lba, d) };
     match r {
         Ok(changed) => {
             w.last = w.now.max(1);
@@ -449,6 +464,205 @@ fn classify(lba: u32, d: &[u8]) -> R {
         Some(k) => dir(k, s % SPC, d, &g),
         None => data(c, s % SPC, d),
     }
+}
+
+// --- one mode (feature `vdisk-one`) ------------------------------------------------
+//
+// The volume is always writable and the meter keeps adding files while a
+// host has it (vdisk.rs: append-only, tombstones, the bad-cluster region,
+// the host's region from HOST_LO). A host may write back a sector it read
+// before the meter changed it (a stale copy), so every WRITE is taken entry
+// by entry against what the volume shows now: the changes of the module
+// text are kept, anything else is dropped (accepted, not kept, not shown
+// again: `Stats::dropped`; it vanishes when the host reads it again). A
+// delete counts only as the 0xE5 mark over the exact entry the volume shows
+// (name, start cluster, size: a host can write that only if it read the
+// file), so a stale "empty" slot or a host file over a slot the meter has
+// used since never deletes anything. A WRITE fails only for want of the SPI
+// disk (busy, I/O).
+
+/// One mode: the classifier (module text "one mode").
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.vwrite_cold")]
+fn classify_one(lba: u32, d: &[u8]) -> R {
+    let mut g = [0u8; BS];
+    if !vdisk::gen_sector(lba, &mut g) {
+        return Err(E_IO);
+    }
+    let same = g[..] == d[..BS];
+    if lba >= DATA_START {
+        let c = (lba - DATA_START) / SPC + 2;
+        return match vdisk::dir_kind(c) {
+            _ if same && !host_cluster(c) => Ok(false),
+            Some(k) => dir_one(k, (lba - DATA_START) % SPC, d, &g),
+            None if host_cluster(c) => match stage(c, (lba - DATA_START) % SPC, d) {
+                Err(E_REFUSED) => dropped(),
+                r => r,
+            },
+            None => dropped(),
+        };
+    }
+    if same {
+        return Ok(false);
+    }
+    if lba == 0 {
+        w().boot = d[0x25]; // the dirty flag; the rest is dropped
+        return Ok(true);
+    }
+    if lba < ROOT_START {
+        return fat_one((lba - FAT_START) % FAT_SECS, d, &g);
+    }
+    root_one(lba - ROOT_START, d, &g)
+}
+
+#[cfg_attr(target_os = "none", link_section = ".text.vwrite_cold")]
+fn dropped() -> R {
+    w().n.dropped += 1;
+    Ok(false)
+}
+
+/// One mode, a FAT sector: the dirty flags, a chain of ours freed whole
+/// (`T_FAT`), entries of the host's clusters (`pair`); the rest dropped (a
+/// stale copy shows the meter's newer files as bad clusters).
+#[cfg_attr(target_os = "none", link_section = ".text.vwrite_cold")]
+fn fat_one(s: u32, d: &[u8], g: &[u8]) -> R {
+    let per = (BS / 2) as u32;
+    let (mut changed, mut drop) = (false, false);
+    for i in 0..per {
+        let c = s * per + i;
+        let (o, n) = (le16(g, i), le16(d, i));
+        if o == n {
+            continue;
+        }
+        if c == 1 && n | 0xC000 == 0xFFFF {
+            w().fat1 = n as u32 | 0x1_0000;
+            changed = true;
+            continue;
+        }
+        match vdisk::owner(c) {
+            _ if c < 2 => drop = true,
+            Owner::Dyn(j) if ours_live(j, c) => {
+                if n == 0 && frees_all(j, s, d) {
+                    vdisk::entries()[j].id |= T_FAT;
+                    changed = true;
+                } else {
+                    drop = true;
+                }
+            }
+            Owner::Dyn(_) | Owner::Free => {
+                let bad = n != 0 && !(2..vdisk::CLUSTERS + 2).contains(&(n as u32)) && n < 0xFFF8;
+                if bad || (n != 0 && pair_idx(c).is_none() && !w().pair.iter().any(|p| p.c == 0)) {
+                    drop = true;
+                } else {
+                    set_pair(c, n);
+                    changed = true;
+                }
+            }
+            _ => drop = true,
+        }
+    }
+    if drop {
+        w().n.dropped += 1;
+    }
+    Ok(changed)
+}
+
+/// One mode, a root sector: any host entry in a slot after ours (kept as a
+/// record for the session while there is room: a firmware file, the hosts'
+/// folders, anything else); our entries' changes dropped.
+#[cfg_attr(target_os = "none", link_section = ".text.vwrite_cold")]
+fn root_one(s: u32, d: &[u8], g: &[u8]) -> R {
+    let per = (BS / 32) as u32;
+    let (mut changed, mut drop) = (false, false);
+    for i in 0..per {
+        let idx = (s * per + i) as usize;
+        let r = (i * 32) as usize..(i * 32 + 32) as usize;
+        let (ge, h) = (&g[r.clone()], &d[r]);
+        if ge == h {
+            continue;
+        }
+        if idx <= ROOT_N {
+            drop |= !dates_only(ge, h);
+            continue;
+        }
+        let w = w();
+        let k = w.rec.iter().position(|x| x.slot != 0 && x.slot as usize == idx);
+        if h[0] == 0 {
+            if let Some(k) = k {
+                w.rec[k] = REC0;
+                changed = true;
+            }
+            continue;
+        }
+        let start = le16o(h, 0x1A) as u32;
+        let entry = h[0] == 0xE5 || h[11] & 0x3F == 0x0F || (h[11] & 0x08 == 0 && le16o(h, 0x14) == 0 && (start == 0 || host_cluster(start)));
+        match k.or_else(|| w.rec.iter().position(|x| x.slot == 0)) {
+            Some(k) if entry => {
+                w.rec[k].slot = idx as u16;
+                w.rec[k].e.copy_from_slice(h);
+                changed = true;
+            }
+            _ => drop = true,
+        }
+    }
+    if drop {
+        w().n.dropped += 1;
+    }
+    Ok(changed)
+}
+
+/// One mode, a sector of a generated directory (`k` as `dir`): the 0xE5
+/// mark over an entry exactly as shown = a delete (`T_DIR`); anything else
+/// dropped. A host entry in a slot without a file of ours moves the
+/// meter's next slot past it (vdisk::hold_slot).
+#[cfg_attr(target_os = "none", link_section = ".text.vwrite_cold")]
+fn dir_one(k: usize, s: u32, d: &[u8], g: &[u8]) -> R {
+    let per = (BS / 32) as u32;
+    let (mut changed, mut drop) = (false, false);
+    for i in 0..per {
+        let slot = s * per + i;
+        let r = (i * 32) as usize..(i * 32 + 32) as usize;
+        let (ge, he) = (&g[r.clone()], &d[r]);
+        if ge == he || dates_only(ge, he) {
+            continue;
+        }
+        let ents = vdisk::entries();
+        let hit = if k < 3 { ents.iter().position(|e| vdisk::id_dir(e.id) == k && e.slot as u32 == slot && e.id & T_DIR == 0) } else { None };
+        if let Some(j) = hit {
+            let mut x = [0u8; 32];
+            x.copy_from_slice(ge);
+            x[0] = 0xE5;
+            if he[0] == 0xE5 && dates_only(&x, he) {
+                ents[j].id |= T_DIR;
+                if moved_ref(ents[j].vstart, ents[j].vsize) {
+                    ents[j].id |= T_MOVED; // its new entry came first
+                }
+                changed = true;
+                continue;
+            }
+        } else if he[0] != 0 && slot >= 2 {
+            vdisk::hold_slot(k, slot);
+        }
+        drop = true;
+    }
+    if drop {
+        w().n.dropped += 1;
+    }
+    Ok(changed)
+}
+
+/// One mode: the host ejected the medium (vdisk::on_eject): the session
+/// ends (`release_all`), or, while a firmware file's check is still due
+/// (`cp` + eject at once), once `poll` has decided it, at most END_WAIT_MS.
+pub fn end_session() {
+    let w = w();
+    if fw_unchecked(w) {
+        if w.end_at == 0 {
+            w.end_at = w.now.max(1);
+        }
+        return;
+    }
+    release_all(false);
 }
 
 fn boot(d: &[u8], g: &[u8]) -> R {
@@ -911,12 +1125,12 @@ pub fn poll(now: u64, blocked: bool) {
     // mounted again meanwhile keeps the session (its next Allow ends it).
     if w.end_at != 0 && (!fw_unchecked(w) || now.saturating_sub(w.end_at) >= END_WAIT_MS) {
         w.end_at = 0;
-        if !mounted {
+        if ONE || !mounted {
             release_all(false);
             dlog::set_stale();
         }
     }
-    if w.session && !w.locks && !mounted && now.saturating_sub(w.last) >= QUIET_MS {
+    if !ONE && w.session && !w.locks && !mounted && now.saturating_sub(w.last) >= QUIET_MS {
         release();
         dlog::set_stale();
     }
@@ -950,7 +1164,7 @@ pub fn poll(now: u64, blocked: bool) {
                 Err(_) => {}
             }
         }
-        if let Some(x) = vdisk::entries().iter_mut().find(|x| x.id & ID == id) {
+        if let Some(x) = vdisk::entries().iter_mut().find(|x| x.id & ID == id && x.vstart == e.vstart) {
             x.id |= T_SRC; // gone (or another file now: never touched)
         }
         return;
@@ -1316,7 +1530,15 @@ pub fn release_all(reset: bool) -> bool {
         let e = vdisk::entries()[k];
         let f = e.id;
         let del = f & T_DIR != 0 && f & T_SRC == 0 && (f & T_FAT != 0 || (f & T_MOVED != 0 && moved_ref(e.vstart, e.vsize)));
-        vdisk::entries()[k].id = if del { (f & ID) | T_DIR | T_FAT } else { f & ID };
+        vdisk::entries()[k].id = if del {
+            (f & ID) | T_DIR | T_FAT
+        } else if ONE && f & T_SRC != 0 {
+            // One mode: a tombstone stays one until the next bus reset
+            // (vdisk.rs compact).
+            f & (ID | T_DIR | T_FAT | T_SRC)
+        } else {
+            f & ID
+        };
     }
     if w.parks > 0 {
         w.purge = true;
@@ -1345,6 +1567,11 @@ pub fn release_all(reset: bool) -> bool {
 /// it, at most END_WAIT_MS (the layout stays frozen meanwhile): dropping
 /// the records first would drop the staged file and the install with it.
 pub fn release() -> bool {
+    if ONE {
+        // One mode: an Allow ends nothing (Windows sends one in the middle
+        // of a copy); the session ends at the eject or the bus reset.
+        return false;
+    }
     let w = w();
     if fw_unchecked(w) {
         if w.end_at == 0 {
