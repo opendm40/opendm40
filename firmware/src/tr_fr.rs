@@ -4,16 +4,16 @@
 #[macro_export]
 macro_rules! tr {
     ("0 A for 60 s: check the fuse?") => { "0 A pendant 60 s : fusible ?" };
-    ("1 hour") => { "1 heure" };
-    ("10 hours") => { "10 heures" };
-    ("2 hours") => { "2 heures" };
-    ("3 hours") => { "3 heures" };
-    ("4 hours") => { "4 heures" };
-    ("5 hours") => { "5 heures" };
-    ("6 hours") => { "6 heures" };
-    ("7 hours") => { "7 heures" };
-    ("8 hours") => { "8 heures" };
-    ("9 hours") => { "9 heures" };
+    ("1 hour") => { "1 h" };
+    ("10 hours") => { "10 h" };
+    ("2 hours") => { "2 h" };
+    ("3 hours") => { "3 h" };
+    ("4 hours") => { "4 h" };
+    ("5 hours") => { "5 h" };
+    ("6 hours") => { "6 h" };
+    ("7 hours") => { "7 h" };
+    ("8 hours") => { "8 h" };
+    ("9 hours") => { "9 h" };
     ("< Back") => { "< Retour" };
     ("< Prev") => { "< Pr\u{1}c" };
     ("A input path intact") => { "Entr\u{1}e A : circuit intact" };
@@ -229,16 +229,16 @@ macro_rules! tr {
 #[cfg(lang_log)]
 pub const PAIRS: &[(&str, &str)] = &[
     ("0 A for 60 s: check the fuse?", "0 A pendant 60 s : fusible ?"),
-    ("1 hour", "1 heure"),
-    ("10 hours", "10 heures"),
-    ("2 hours", "2 heures"),
-    ("3 hours", "3 heures"),
-    ("4 hours", "4 heures"),
-    ("5 hours", "5 heures"),
-    ("6 hours", "6 heures"),
-    ("7 hours", "7 heures"),
-    ("8 hours", "8 heures"),
-    ("9 hours", "9 heures"),
+    ("1 hour", "1 h"),
+    ("10 hours", "10 h"),
+    ("2 hours", "2 h"),
+    ("3 hours", "3 h"),
+    ("4 hours", "4 h"),
+    ("5 hours", "5 h"),
+    ("6 hours", "6 h"),
+    ("7 hours", "7 h"),
+    ("8 hours", "8 h"),
+    ("9 hours", "9 h"),
     ("< Back", "< Retour"),
     ("< Prev", "< Pr\u{1}c"),
     ("A input path intact", "Entr\u{1}e A : circuit intact"),
