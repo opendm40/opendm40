@@ -277,7 +277,7 @@ pub enum Smooth {
 }
 
 /// SCPI / settings names, indexed by `Smooth as usize`.
-pub const SMOOTH_NAMES: [&str; 3] = ["OFF", "LOW", "HIGH"];
+pub const SMOOTH_NAMES: [&str; 3] = [crate::tr!("OFF"), "LOW", "HIGH"];
 
 impl Smooth {
     pub const ALL: [Smooth; 3] = [Smooth::Off, Smooth::Low, Smooth::High];

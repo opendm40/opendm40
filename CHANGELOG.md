@@ -8,11 +8,66 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 - **Scope:** a second tap on the CH1 title with its popup open hides CH1.
+- **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
+
+- **Gallery: select several files and delete them together**
+  ([manual](docs/manual/README.md#the-gallery)).
+
+- Settings > Other > Reset settings: back to the defaults after a confirm; calibration, files and Bluetooth pairing stay.
+
+- **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
+- **Scope:** the MF menu spans the screen to the right edge, over the right panel, with wider columns; the panel is drawn again when it closes.
 ### New
 
 - **Chinese README and user manual** (machine translation, not yet reviewed
   by a native speaker): [README.zh.md](README.zh.md),
   [docs/manual/README.zh.md](docs/manual/README.zh.md).
+
+### Changed
+
+- **Scope: long DMM units** ("mWh") on the strip in the panel's
+  16 px font; the 20 px font is gone (2.3 KB of flash).
+
+### Changed
+
+- **Release images without the developer `DBG:` commands** (`DBG:IDLE`,
+  `DBG:READout?`, `DBG:FLASH?`, `DBG:CAP...`, `DBG:VDISK...` and more,
+  [list](docs/manual/scpi-reference.md#developer-image-only)): they answer
+  "Undefined header"; ~15 KB more room for new features. `DBG:VIEW?`,
+  `DBG:TAP`, `DBG:KEY`, `DBG:BOOT?` and the update commands stay.
+
+### Tools
+
+- `firmware/build.sh --dev` builds the developer image with them;
+  [`firmware/tools/reload.sh`](firmware/tools/reload.sh) and the emulator
+  build it by default (`reload.sh --release` for the release image).
+
+## v0.4.1 (unreleased)
+
+- **Scope:** the MF menu leaves nothing on the right panel, and the panel is no longer drawn over it after a tab change.
+### Fixed
+
+- **Capacitance with a laptop charger on the USB cable:** mains ripple no
+  longer sends a large capacitor (about 50–600 µF) back and forth between
+  ranges with "Discharging..." and a wrong value. Moderate ripple now
+  measures. When the ripple is too strong to measure, the meter shows
+  dashes and "Unstable: unplug USB?". The ripple case is checked in the
+  emulator only.
+- A firmware update or a restart from the scope or generator page could
+  turn the meter off; it now restarts as from the multimeter page.
+
+- **Multimeter:** the reading with the extra digit sits 4 px further right.
+- **Scope:** the trigger badge takes the new source's colour at once.
+- **Scope:** the probe factor is kept after a power-off also with Mode Remember OFF.
+- Function buttons: V and A show the remembered AC / DC / AC+DC / AUTO; continuity / diode and Hz / °C put the remembered sub-mode first.
+
+- Diode: the resistance stays on screen while the SHORT / BEEP band is on (0.4.0 hid it below 22 mV).
+
+- Battery level: no longer jumps up on the charger; it rises slowly with the real charge.
+
+- Low-battery warning: a 3 s message and a beep at about 17 % and 8 %, and a red battery symbol; not on USB power, and it waits for a recording to end. Below about 1 % a 30 s countdown, then a clean power-off.
+
+- Power meter from the combined view: the wiring notice returns to the combined view, not the multimeter page.
 
 ## v0.4.0 (2026-11-02)
 

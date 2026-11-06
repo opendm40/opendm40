@@ -3,7 +3,7 @@
 meter's wiring dialog and "Reset energy?" and the fuse check's start dialog
 close, the new function's page shows.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/pwdialogtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
 
 12 V / 2 A DC on the jacks:

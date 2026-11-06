@@ -643,7 +643,7 @@ pub fn entry_dialog(i_cont: f32, t_lim: u16) {
     }
     sf::label(sf::F14, rect(x + 16, 222, w - 32, 14), "COM carries the load current; P > 0: I into A", STATUS_FG, DLG_BODY, 8, 1);
     sf::label(sf::F14, rect(x + 16, 240, w - 32, 14), t.s(), VALUE, DLG_BODY, 8, 1);
-    for (r, l, c) in [(DLG_CANCEL, "Cancel", BTN), (DLG_OK, "OK", SEL)] {
+    for (r, l, c) in [(DLG_CANCEL, crate::tr!("Cancel"), BTN), (DLG_OK, crate::tr!("OK"), SEL)] {
         sf::rbox(r, 6, c, DLG_BODY);
         sf::glyphs(sf::TEXT22, r, l, STATUS_FG, c, 8, 0);
     }
@@ -689,7 +689,7 @@ pub const PS_RECORD: u8 = 32;
 /// The bottom row, left to right: Reset Wh, Wiring, Limits, Record, OK
 /// (8..472, 6 px gaps; Reset Wh, 87 px of text, the widest button).
 const PS_ROW5: [(u8, &str); 5] =
-    [(PS_RESET, "Reset Wh"), (PS_WIRING, "Wiring"), (PS_LIMITS, "Limits"), (PS_RECORD, "Record"), (PS_OK, "OK")];
+    [(PS_RESET, crate::tr!("Reset Wh")), (PS_WIRING, crate::tr!("Wiring")), (PS_LIMITS, crate::tr!("Limits")), (PS_RECORD, crate::tr!("Record")), (PS_OK, crate::tr!("OK"))];
 const PS_ROW5_X: [i16; 6] = [8, 114, 206, 298, 390, 478];
 
 fn ps_row5(i: usize) -> sf::Rect {
@@ -719,7 +719,7 @@ fn ps_button(r: sf::Rect, t: &str, sel: bool) {
 pub fn settings_page(pv: &PowerVals) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Power Settings", STATUS_FG, 0x2966, 8, 0);
+    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), crate::tr!("Power Settings"), STATUS_FG, 0x2966, 8, 0);
     sf::label(sf::TEXT22, rect(8, 46, 32, 38), "V", STATUS_FG, BG, 8, 0);
     sf::label(sf::TEXT22, rect(8, 90, 32, 38), "A", STATUS_FG, BG, 8, 0);
     for (i, n) in pw::V_NAMES.iter().enumerate() {
@@ -733,7 +733,7 @@ pub fn settings_page(pv: &PowerVals) {
     // Burden compensation (selected = on), self-zero, V self-calibration
     // (doc 3.12); the status line under the last row (`settings_status`).
     ps_button(ps_cell(2, 2), "At load", pv.comp);
-    ps_button(ps_cell(2, 3), "Zero", false);
+    ps_button(ps_cell(2, 3), crate::tr!("Zero"), false);
     ps_button(ps_cell(2, 4), "V cal", false);
     for (i, c) in PS_COUPS.iter().enumerate() {
         ps_button(rect(PS_ROW4[i], 182, 150, 38), pw::coup_name(*c), pv.coup == *c);
@@ -776,7 +776,7 @@ fn press_item(pv: &PowerVals, c: u8) -> Option<(sf::Rect, Option<(&'static str, 
         }
         14 => (ps_cell(2, 1), "AUTO", pv.i_auto),
         PS_BURDEN => (ps_cell(2, 2), "At load", pv.comp),
-        PS_ZERO => (ps_cell(2, 3), "Zero", false),
+        PS_ZERO => (ps_cell(2, 3), crate::tr!("Zero"), false),
         PS_VCAL => (ps_cell(2, 4), "V cal", false),
         PS_COUP..=30 => {
             let i = (c - PS_COUP) as usize;
@@ -799,7 +799,7 @@ pub fn job_dialog(job: u8) {
     } else {
         ("V cal of this V range", "Steady V, 10-70 % of range", "Gain vs DC V / AC V, 8 s")
     };
-    crate::dialog::fuse_check(title, crate::dialog::TITLE_BG, l1, l2, Some("Cancel"), Some("Start"));
+    crate::dialog::fuse_check(title, crate::dialog::TITLE_BG, l1, l2, Some(crate::tr!("Cancel")), Some(crate::tr!("Start")));
 }
 
 /// Settings page hit (PS_* codes).

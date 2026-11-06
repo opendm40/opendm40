@@ -2,8 +2,8 @@
 
 How other meters and DMM chips measure AC+DC (the true RMS of AC with its DC
 part), which approaches fit the HY3131, and the device record of the two
-that opendm40 built as alternatives to the stock alternation (section 10,
-[`src/acdcm.rs`](../src/acdcm.rs)). The stock method, which opendm40 runs by default
+that opendm40 built as alternatives to the stock alternation (section 10;
+their code is removed, 10.0). The stock method, which opendm40 runs by default
 (method A), alternates whole HY3131 rows: an AC phase (AD2 + RMS after the
 HPF on the AC-coupled PB4 node) and a DC phase (AD1), ~1.9 s per cycle,
 total = hypot(AC, DC) ([`src/dmm.rs`](../src/dmm.rs) `dc_out` / `poll_ac`).
@@ -60,12 +60,12 @@ Short names: "acdc" = `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the 
   signal the DC path's 0.03 % vs 0.1 % is irrelevant; on the ripple-on-a-supply
   case (the reason AC+DC exists, Fluke's own example) the DC error dominates
   and a 0.1 % DC path costs ~0.07 % of the total against AD1.
-* **Outcome (section 10).** Methods B (option (b)) and C (option (c)) run
+* **Outcome (section 10).** Methods B (option (b)) and C (option (c)) ran
   next to the stock alternation A, selected with `DBG:ACDC:METH`, in builds
-  with the cargo feature `acdc-meth` (off by default: A only). B failed
-  its device rule (its zero is bimodal per entry, 10.5). C meets the rule on
-  V on this unit (10.15); A stays the default until C is checked on the
-  current ranges with real current (10.16, TODO). Option (d) is not built.
+  with the cargo feature `acdc-meth`. B failed its device rule (its zero is
+  bimodal per entry, 10.5). C met the rule on V on this unit (10.15) and was
+  never checked on the current ranges with real current (10.16). The owner
+  kept A and the code of B and C is removed (10.0). Option (d) is not built.
 * **Recommendation of 2026-10-22 (section 7).** V: one fixed row with AD1 for the DC part
   (factory DC V calibration kept) and AD2 + AD3 + RMS for the AC part, option
   (b), **conditional** on the note-7 measurement running now: the AD1 offset
@@ -667,19 +667,27 @@ Web (retrieved 2026-10-22):
 
 ## 10. Prototype: methods B and C in opendm40 (2026-10-22, `src/acdcm.rs`)
 
+### 10.0 Removed
+
+The code of B and C is removed: `src/acdcm.rs`, the cargo feature
+`acdc-meth`, `DBG:ACDC:METH` / `STAT?` / `ZERO` / `R0` (now an undefined
+header in every build), `tools/acdcmeth.py`, `emu/hy3131/acdcmethtest.py`
+and `couptest.py --meth`. Method A, `DBG:ACDC:RANG` and `DBG:ACDC:TRACE`
+stay. Removed in [5fe14e17](https://github.com/opendm40/opendm40/commit/5fe14e17f3f8d26765fbe134b4b8385aa2db868c); the last commit with the code:
+[3bee3e1d](https://github.com/opendm40/opendm40/tree/3bee3e1db5825955507d0d38652e9e5f257b450d) ([`src/acdcm.rs`](https://github.com/opendm40/opendm40/blob/3bee3e1db5825955507d0d38652e9e5f257b450d/firmware/src/acdcm.rs),
+[`tools/acdcmeth.py`](https://github.com/opendm40/opendm40/blob/3bee3e1db5825955507d0d38652e9e5f257b450d/firmware/tools/acdcmeth.py),
+[`emu/hy3131/acdcmethtest.py`](https://github.com/opendm40/opendm40/blob/3bee3e1db5825955507d0d38652e9e5f257b450d/emu/hy3131/acdcmethtest.py)). The rest of
+this section is the record as it was then.
+
 Behind a RAM-only switch (`DBG:ACDC:METH`), default A (the stock
 alternation, unchanged), so a device session compares them. Built only with
-the cargo feature `acdc-meth` ([`Cargo.toml`](../Cargo.toml); `./build.sh
-native --features acdc-meth`): the default build has A alone and refuses
-`DBG:ACDC:METH` / `STAT?` / `ZERO` / `R0` (undefined header);
-`tools/acdcmeth.py`, `emu/hy3131/acdcmethtest.py` and `couptest.py --meth`
-need such an image. Device input
+the cargo feature `acdc-meth`. Device input
 before the prototype (feasibility 13.2): with AD2 + AD3 + RMS on for the
 whole DC V row AD1 shifts by 30..90 x its noise, offsets -2.9 mV / +17 mV /
 +0.17 V / -1.6 V on 6 / 60 / 600 / 1000 V (0.03..0.16 % of the range,
 repeating to ~1 %), and a gain shift up to -0.18 % on 60 V that did **not**
 repeat. So **C is the primary candidate**; B stays for the comparison (its
-zero removes the repeating offset, not the gain). 10.1 is what runs now;
+zero removes the repeating offset, not the gain). 10.1 is what ran last;
 10.2-10.16 are the dated record of how C got there.
 
 ### 10.1 What runs
@@ -702,8 +710,8 @@ its last evaluation (~107 ms; the decision rule in 10.9 item 2).
 SCPI: `DBG:ACDC:METH A|B|C` / `?` (a change restarts AC+DC / AUTO),
 `DBG:ACDC:STAT?`, `DBG:ACDC:ZERO k,v|AUTO` / `?`, `DBG:ACDC:R0 1|2`,
 `DBG:ACDC:RANG <MF item>|AUTO`, `DBG:ACDC:TRACE` / `TRACE?`; the fields are
-listed in the DBG block of [`src/scpi.rs`](../src/scpi.rs). Host:
-[`tools/acdcmeth.py`](../tools/acdcmeth.py) runs the device experiments (e1 .. e11, e8s,
+listed in the DBG block of `src/scpi.rs`. Host:
+`tools/acdcmeth.py` runs the device experiments (e1 .. e11, e8s,
 e8up, tc6, `--trace`).
 
 ### 10.2 Emulator model changes (HY3131.cs)

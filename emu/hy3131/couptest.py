@@ -9,10 +9,6 @@ every phase must match its expectation.
   emu/hy3131/couptest.py                          # all scenarios, opendm40 built from HEAD
   emu/hy3131/couptest.py --app firmware/opendm40.bin --port 3391 v
   emu/hy3131/couptest.py --list
-  emu/hy3131/couptest.py --meth C v i        # on AC+DC method B / C (acdcm.rs)
-
---meth needs an image built with `--features acdc-meth` (Cargo.toml; the
-default build refuses DBG:ACDC:METH / STAT?): pass it with --app.
 
 Results: emu/out/coup-<name>.json (+ .png of the end); the Renode log of that
 run: emu/out/coup-<name>-<port>-<pid>.log (capped by DM40_EMU_LOG_MAX_MB).
@@ -35,7 +31,6 @@ ap.add_argument('names', nargs='*')
 ap.add_argument('--app', help='opendm40 native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=3391, help='USB/IP port (default 3391)')
 ap.add_argument('--list', action='store_true')
-ap.add_argument('--meth', choices='ABC', help='AC+DC method first (DBG:ACDC:METH, opendm40 acdcm.rs; needs an acdc-meth build; default: the firmware\'s, A)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
@@ -192,8 +187,7 @@ SC = {
         (32, None, tie(4.776, 0.01), 're-enter on the square'),
     ], {16: 'VOLT:COUP DC', 17: 'VOLT:COUP AUTO', 32: 'VOLT:COUP DC', 33: 'VOLT:COUP AUTO'}),
 }
-# DBG:ACDC:STAT? (the method's state, failure context only) exists in acdc-meth builds only.
-EXTRA = {'tap': ['CURR:COUP?'], 'sqtie': ['DBG:ACDC:STAT?'] if A.meth else [], 'iac': ['SYST:ALER?', 'CONF?'], 'idc': ['SYST:ALER?', 'CONF?'], 'vac230': ['CONF?'], 'iacfill': ['SYST:ALER?', 'CONF?']}
+EXTRA = {'tap': ['CURR:COUP?'], 'iac': ['SYST:ALER?', 'CONF?'], 'idc': ['SYST:ALER?', 'CONF?'], 'vac230': ['CONF?'], 'iacfill': ['SYST:ALER?', 'CONF?']}
 
 
 def conf_range(d):
@@ -224,11 +218,6 @@ ALWAYS = {
     'vac230': [(0, 99, lambda d: not conf_range(d) < 1, 'never the mV range'),
                (14, 26, lambda d: conf_range(d) >= 600, '600 V range or above while 230 V')],
 }
-# Scenarios for some AC+DC methods only (default: all). iacfill: the RMS fill model is longer
-# than method A's AC phase on purpose; B / C keep one row and refill it at every range change
-# (1.2 s apart there), so under that model their AC part never reaches the input: no test of
-# them.
-METHS = {'iacfill': 'A'}
 # Scenarios whose AUTO part inside a phase (from its first AUTO reading after the phase's last
 # command) is DC and then at most one change (the decision), the same part in every phase.
 STABLE = {'sqtie'}
@@ -236,16 +225,12 @@ STABLE = {'sqtie'}
 
 def run(name):
     setup, cq, run_for, phases, acts = SC[name]
-    if (A.meth or 'A') not in METHS.get(name, 'ABC'):
-        print('RESULT %s SKIP (method %s: the scenario is for %s)' % (name, A.meth, METHS[name]), flush=True)
-        return True
-    setup = (['DBG:ACDC:METH ' + A.meth] if A.meth else []) + setup
     acts = dict(acts)
     script = [(t, spec) for t, spec, _, _ in phases if spec]
     if uc.port_busy(A.port):
         print('RESULT %s FAIL port %d in use (another emulator?): pass a free --port' % (name, A.port), flush=True)
         return False
-    tag = 'coup-' + name + (('-' + A.meth) if A.meth else '')
+    tag = 'coup-' + name
     # The run's own files (event script, Renode log, flash image, .resc) per
     # process: parallel runs (distinct --port) share none; results under tag.
     rtag = '%s-%d-%d' % (tag, A.port, os.getpid())
@@ -273,14 +258,6 @@ def run(name):
         try:
             for c in setup:
                 tm.write(c)
-            if A.meth:
-                tm.write('SYST:ERR?')
-                err = tm.read(timeout=60).decode(errors='replace').strip()
-                if err.startswith('-113'):
-                    print('RESULT %s FAIL --meth needs an image built with --features acdc-meth (%s)' % (name, err), flush=True)
-                    p.kill()
-                    p.communicate()
-                    return False
             # The actions in fw uptime, at their distance from their phase's start
             # (predicted by the clock marker; the same as the input marker will say).
             if mk.wait_clock() is None:

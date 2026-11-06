@@ -2,7 +2,7 @@
 """opendm40 protocol decoder band on the scope page (src/decode.rs,
 src/app_decode.rs, src/ui_decode.rs; DECode:...) in the emulator.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/decodetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--shots DIR]
 
 Signals: bit patterns from watched files the test rewrites while the

@@ -239,7 +239,7 @@ pub fn run(ck: &mut Checker, out: &str) {
     }
     // Trigger tab with the trigger-type rows (UF-13): every type x
     // condition x widest width text, both views; the runt marker.
-    let tab_area = Bx::new(14, 116, 399, 70);
+    let tab_area = Bx::new(scope_ui::MF_X as i32 + 1, 116, scope_ui::MF_W as i32 - 2, 70);
     let mut nt = 0;
     for combined in [false, true] {
         for ttype in 0..3u8 {
@@ -264,7 +264,7 @@ pub fn run(ck: &mut Checker, out: &str) {
                     2 => add.extend([rb(scope_ui::TP_COND), rb(scope_ui::TR_HINT)]),
                     _ => {}
                 }
-                ck.check_add(&name, &[("page", tab_area)], &add, Bx::new(13, 20, 401, 167));
+                ck.check_add(&name, &[("page", tab_area)], &add, Bx::new(scope_ui::MF_X as i32, 20, scope_ui::MF_W as i32, 167));
                 nt += 1;
                 if ttype == 1 && pcond == 0 && !combined {
                     save(out, "s03-trig-pulse");
@@ -704,6 +704,19 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         }
         scope_ui::update(&m);
         ck.same_as(&format!("gen/{}/update", combined as u8), &want);
+        // The source changed, the level not: the trigger badge in the new
+        // source's colour (GEN's) and back.
+        let badge_px = || (1..18usize).flat_map(|y| (352..414usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::C_GEN_TR).count();
+        let mut m1 = m;
+        m1.tsrc = scope::TSRC_CH1;
+        scope_ui::update(&m1);
+        let ch1 = badge_px();
+        scope_ui::update(&m);
+        let gen = badge_px();
+        ck.cases += 1;
+        if !(ch1 == 0 && gen > 20) {
+            ck.fail("gen/badge-source", format!("trigger badge GEN colour: {ch1} px on CH1, {gen} px on GEN"));
+        }
         for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
             draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
             let add = if tab == 1 {
@@ -711,8 +724,8 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             } else {
                 vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE)]
             };
-            let area = if tab == 1 { Bx::new(14, 161, 399, 99) } else { Bx::new(14, 186, 399, 50) };
-            ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(13, 20, 401, if tab == 1 { 241 } else { 216 }));
+            let area = if tab == 1 { Bx::new(scope_ui::MF_X as i32 + 1, 161, scope_ui::MF_W as i32 - 2, 99) } else { Bx::new(scope_ui::MF_X as i32 + 1, 186, scope_ui::MF_W as i32 - 2, 50) };
+            ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(scope_ui::MF_X as i32, 20, scope_ui::MF_W as i32, if tab == 1 { 241 } else { 216 }));
             if !combined {
                 save(out, name);
             }
@@ -735,6 +748,63 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             println!("CH1 off: {hidden} px in CH1's trace colour (on: {shown})");
             if !(shown > 300 && hidden == 0) {
                 ck.fail("gen/ch1-off", format!("CH1 off still drawn: {hidden} px of CH1's colour (on: {shown})"));
+            }
+        }
+        if !combined {
+            // The MF popup covers the panel (owner 2026-11-06): its box
+            // shows nothing of the panel under it (a pressed part, the
+            // CH1 title grey: the same box pixels).
+            let w = host::W;
+            let px = scope_ui::PANEL_X as usize;
+            let mut mp = m;
+            mp.pressed = 1;
+            mp.ch1_open = true;
+            for t in 0..5u8 {
+                let p = scope_ui::Popup::Mf(t);
+                let b = scope_ui::popup_box(p).unwrap();
+                let xr = px..(b.x + b.w) as usize;
+                let yr = b.y as usize..(b.y + b.h) as usize;
+                draw(&m, p, &pv, true);
+                let a = emu().fb.clone();
+                draw(&mp, p, &pv, true);
+                ck.cases += 1;
+                let bad = yr.clone().flat_map(|y| xr.clone().map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] != a[y * w + x]).count();
+                if bad > 0 {
+                    ck.fail("gen/mf-covers-panel", format!("MF tab {t}: {bad} px of the panel show through the box"));
+                }
+            }
+            // The panel after each popup (uncover): as the page without
+            // the popup, the gaps between its parts too.
+            let panel_diff = |fresh: &[u16], xr: core::ops::Range<usize>, yr: core::ops::Range<usize>| yr.flat_map(|y| xr.clone().map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] != fresh[y * w + x]).count();
+            draw(&m, scope_ui::Popup::None, &pv, true);
+            let fresh = emu().fb.clone();
+            for p in [0u8, 1, 2, 3, 4].map(scope_ui::Popup::Mf).into_iter().chain([scope_ui::Popup::Ch1(0), scope_ui::Popup::Math(0)]) {
+                draw(&m, p, &pv, true);
+                scope_ui::panel(&m);
+                ck.cases += 1;
+                let bad = panel_diff(&fresh, px..w, 20..301);
+                if bad > 0 {
+                    ck.fail("gen/panel-after-popup", format!("{bad} panel px differ from the page without the popup"));
+                }
+            }
+            // An MF tab change (scope_page sp_mf_tap): the new box, then
+            // the rows the old one covered and the new one does not, the
+            // panel's included: as the new tab drawn at once.
+            for (a, b) in [(0u8, 1u8), (1, 0), (0, 2), (2, 0), (1, 2), (2, 1), (3, 0), (0, 3), (3, 4), (4, 3), (1, 3), (1, 4)] {
+                let (pa, pb) = (scope_ui::Popup::Mf(a), scope_ui::Popup::Mf(b));
+                let (oa, ob) = (scope_ui::popup_box(pa).unwrap(), scope_ui::popup_box(pb).unwrap());
+                draw(&m, pb, &pv, true);
+                let want = emu().fb.clone();
+                draw(&m, pa, &pv, true);
+                scope_ui::graph().set_hole_at(scope_ui::H_POPUP, Some(ob));
+                scope_ui::draw_popup(pb, &pv);
+                scope_ui::regraph_rows(&m, ob, ob.y + ob.h, oa.y + oa.h);
+                scope_ui::graph().set_hole_at(scope_ui::H_POPUP, None);
+                ck.cases += 1;
+                let bad = panel_diff(&want, 0..w, 20..301);
+                if bad > 0 {
+                    ck.fail("gen/mf-tab-change", format!("{bad} px differ from MF tab {b} drawn at once, after tab {a}"));
+                }
             }
         }
     }
