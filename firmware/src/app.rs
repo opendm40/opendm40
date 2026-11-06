@@ -59,6 +59,9 @@ mod app_log;
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
+/// p[11] bit 31: bits 16..29 hold the ohm null (persist_words); older records
+/// have it clear (their bits 16..31 were the removed hold-to-grab ms).
+const OHM_NULL_SET: u32 = 1 << 31;
 /// Offered stock options: dim 5/10/30 min/never, shutdown 10/30/60 min/never.
 const DIM_MS: [u64; 4] = [300_000, 600_000, 1_800_000, 0];
 const OFF_MS: [u64; 4] = [600_000, 1_800_000, 3_600_000, 0];
@@ -2389,9 +2392,8 @@ impl App {
         // persist::W_GEN_OFFS.
         // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
         // records); bits 28..29: the V/div zoom of range 0 (Settings::vzoom,
-        // 0 in older records: 10 mV/div); p[11] bits 16..31: the ohm null in
-        // mohm (below; once the removed scope drag hold-to-grab ms, written
-        // 0 then, so older records read "off").
+        // 0 in older records: 10 mV/div); p[11] bits 16..29 / 31: the ohm
+        // null (below).
         let m = &self.meter;
         p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
         // v10: the power slot's values at persist::W_LIM_W (its bits as the
@@ -2411,8 +2413,14 @@ impl App {
         self.sp_persist(&mut p1, &mut p11);
         p[1] = p1;
         p[11] = p11;
-        // p[11] bits 16..31: the ohm null in mohm (0 = off).
-        p[11] |= ((self.dmm.ohm_null() * 1000.0 + 0.5) as u32).min(0xFFFF) << 16;
+        // p[11] bits 16..29: the ohm null in mohm, bit 31 set with it. v0.2.0
+        // and v0.3.0 kept the scope drag hold-to-grab ms (0..5000) in bits
+        // 16..31 with bit 31 clear; 0.4.0 wrote 0. A record without bit 31
+        // reads "off", so an old hold time is no null.
+        let mohm = ((self.dmm.ohm_null() * 1000.0 + 0.5) as u32).min(0x3FFF);
+        if mohm != 0 {
+            p[11] |= mohm << 16 | OHM_NULL_SET;
+        }
         self.sp_persist_ext(&mut p[crate::persist::W_SCOPE_EXT..]);
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
         let w = self.pw_words();
@@ -2517,7 +2525,8 @@ impl App {
         // Sensor and autorange flags before the mode, so a restored mode
         // enters with them.
         self.dmm.set_t_sensor(clk, (p[11] >> 8 & 0xF) as u8);
-        self.dmm.set_ohm_null((p[11] >> 16) as f32 * 1e-3);
+        let mohm = if p[11] & OHM_NULL_SET != 0 { p[11] >> 16 & 0x3FFF } else { 0 };
+        self.dmm.set_ohm_null(mohm as f32 * 1e-3);
         // FR-05 rate / smoothing; UF-21: a V autorange stored before the
         // AUTO+ default (no "trusted" bit in W_DMM_EXT) restores as AUTO+.
         let ext = crate::meter::ext_settings(p[crate::persist::W_DMM_EXT]);

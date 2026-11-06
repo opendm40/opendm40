@@ -2146,8 +2146,8 @@ pub struct Dmm {
     /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
     /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
     pub ohm_neg: bool,
-    /// Ohm null (Resistor Settings "Null", settings p[11] bits 16..31 in
-    /// mohm; `poll_ohm`): the test leads' resistance in ohm, taken off every
+    /// Ohm null (Resistor Settings "Null", settings p[11] bits 16..29 in
+    /// mohm, bit 31 set; `poll_ohm`): the test leads' resistance in ohm, taken off every
     /// ohm reading of r0..r6, independent of REL. 0 = off.
     ohm_null: f32,
     /// The experimental 600 Mohm range (r7, `poll_ohm600`).
