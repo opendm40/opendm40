@@ -188,9 +188,6 @@ BIG
 BMP with 
 BUSY
 Band
-Battery empty: off in 10 s
-Battery empty: off in 20 s
-Battery empty: off in 30 s
 Baud:
 Bd 
 Before: mean 
@@ -334,7 +331,6 @@ LOW
 Leads open, nothing in A
 Leave and open the gallery again to retry
 Lost:
-Low battery! Please charge
 Lowest V/div
 MANU
 MANUAL
@@ -371,6 +367,7 @@ No AC: DC is more precise
 No frames yet
 No reading to log
 No record to save
+# Noise: dmm.rs CAP_NOISE_UNIT, a unit tag compared by value (ui.rs), never drawn; its text is "Unstable: unplug USB?".
 Noise
 Not a DM40 update file
 Not while logging
@@ -480,7 +477,6 @@ USB host is writing
 Undefined header
 Unit: \u{2103}
 Unit: \u{2109}
-Unstable: unplug USB?
 Unsupported
 Unsupported format
 V cal
