@@ -28,8 +28,8 @@ DST = os.path.normpath(os.path.join(HERE, '../../../docs/manual/img'))
 if len(sys.argv) not in (5, 6):
     sys.exit(__doc__)
 man, readme, matrix, gallery = sys.argv[1:5]
-# Renders that only feed manual-annot.py (crops), not manual images.
-ANNOT_ONLY = {'contact-sheet', 'status-all', 'status-usb', 'status-locked', 'settings-usb-edit', 'dmm-temp-f', 'confirm-install'}
+# Renders that only feed manual-annot.py (crops) or the layout check, not manual images.
+ANNOT_ONLY = {'contact-sheet', 'status-all', 'status-usb', 'status-locked', 'settings-usb-edit', 'dmm-temp-f', 'confirm-install', 'dmm-cap-noise'}
 SRC = {os.path.basename(p)[:-4]: p for p in glob.glob(f'{man}/*.png') if os.path.basename(p)[:-4] not in ANNOT_ONLY}
 SRC.update({n: f'{readme}/{n}.png' for n in ['dmm', 'auto-acdc', 'burden', 'ajack', 'combined', 'generator', 'power', 'scope']})
 SRC['main-menu'] = f'{matrix}/m04-main-menu.png'
