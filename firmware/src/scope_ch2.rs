@@ -213,6 +213,30 @@ impl Store {
         Some((ia, ib))
     }
 
+    /// The stream's rate (samples/s) from its nominal period.
+    pub fn fs(&self) -> f32 {
+        crate::clock::HCLK_HZ as f32 / self.period
+    }
+
+    /// The samples [ia, ib) as a measurement source (`scope_meas::
+    /// compute_codes`): codes re-quantized to 1..=1022 over their min..max
+    /// (inside the 10-bit histogram, never "clipped"), with the SI of code
+    /// 0 and of one code step. A flat run is all code 1.
+    pub fn meas_src(&self, ia: u64, ib: u64) -> (crate::pack10::Codes, f32, f32) {
+        let (mut lo, mut hi) = (i16::MAX, i16::MIN);
+        for n in ia..ib {
+            let c = self.codes[(n % CAP as u64) as usize];
+            lo = lo.min(c);
+            hi = hi.max(c);
+        }
+        let span = (hi as i32 - lo as i32).max(0);
+        let (s_lo, s_hi) = (self.si(lo), self.si(hi));
+        let v_k = if span > 0 { (s_hi - s_lo) / MEAS_SPAN as f32 } else { 0.0 };
+        crate::pack10::set_ch2_q(lo, span);
+        let v = crate::pack10::Codes::new(self.codes.as_ptr().cast(), (ia % CAP as u64) as usize, (ib - ia) as usize, crate::pack10::CH2_VIEW);
+        (v, s_lo - v_k, v_k)
+    }
+
     fn min_max(&self, ia: u64, ib: u64) -> (f32, f32) {
         let (mut lo, mut hi) = (i16::MAX, i16::MIN);
         for n in ia..ib {
@@ -303,6 +327,12 @@ impl Store {
         Some((ia, ib))
     }
 }
+
+/// Code steps of `Store::meas_src` between the run's min (code 1) and max
+/// (code 1022; `pack10::ch2_quant`).
+const MEAS_SPAN: i32 = 1021;
+
+const _: () = assert!(CAP == crate::pack10::CH2_RING, "the CH2 view's ring is the store's");
 
 /// The state of a `Store::span_run` sequence.
 pub struct Run {
