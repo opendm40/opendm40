@@ -941,7 +941,8 @@ Only in the developer image (`./build.sh --dev`, [firmware/README.md](../../firm
 | `DBG:VDISK:RO[?]` | `0` or `1` | `<read-only>,<pending>` | USB |
 | `DBG:VDISK:RD?` | | USB disk read counters | USB |
 | `DBG:VDISK:MIR?` | | USB disk mirror state | USB |
-| `DBG:VDISK:WR?` | | Host write counters (13 fields) | USB |
+| `DBG:VDISK:WR?` | | Host write counters (13 fields; 14 with the `vdisk-one` build: host writes dropped) | USB |
+| `DBG:VDISK:UA[?]` | `0`, `1` or `2` | Build with `vdisk-one` only: which command gets the "files changed" notice to the computer: 0 none, 1 TEST UNIT READY (default), 2 any | USB |
 
 ### DBG:BOOT?
 
