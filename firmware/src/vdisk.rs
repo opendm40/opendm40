@@ -70,6 +70,18 @@
 //! changes only by the host's own writes (tomb flags `T_*` in the table,
 //! vwrite.rs records) until the session ends.
 //!
+//! One mode (feature `vdisk-one`, prototype): no read-only mode, no
+//! freeze. The meter keeps adding files while a host has the volume: a new
+//! file gets a fresh slot and clusters from the high-water mark, below
+//! HOST_LO; every cluster there without a file reads as bad (0xFFF7), so a
+//! host never allocates it; the last HOST_CL clusters (4 MiB) are free for
+//! the host (a firmware file, its own folders). Once a host has read the
+//! volume (`SEEN`), a file deleted on the meter stays as a tombstone (its
+//! slot 0xE5, its clusters bad) and nothing is renumbered until the next
+//! bus reset, which compacts at once. The media change goes out only on
+//! TEST UNIT READY after vwrite::UA_QUIET_MS without a host write
+//! (`UA_MODE`). The host's writes: vwrite.rs "one mode".
+//!
 //! RAM: the file table (MAX_VF x 16 bytes) and the built-in table in SRAM
 //! (.sram_bss / .dmabuf), the CSV / BMP read cursors in .bss.
 //!
