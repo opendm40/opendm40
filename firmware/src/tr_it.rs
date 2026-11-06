@@ -15,6 +15,7 @@ macro_rules! tr {
     ("Accuracy") => { "Precisione" };
     ("Again") => { "Ripeti" };
     ("Alerts") => { "Avvisi" };
+    ("Always") => { "Sempre" };
     ("Analog power") => { "Alim. analog." };
     ("Arm") => { "Arma" };
     ("Auto (per view)") => { "Auto (vista)" };
@@ -37,6 +38,7 @@ macro_rules! tr {
     ("Clear") => { "Cancella" };
     ("Clear limits") => { "Azzera limiti" };
     ("Color") => { "Colore" };
+    ("Continuity beep") => { "Bip continuit\u{1}" };
     ("Corners") => { "Angoli" };
     ("Coupling") => { "Accopp." };
     ("Current Settings") => { "Impost. corrente" };
@@ -94,7 +96,7 @@ macro_rules! tr {
     ("Install it now?") => { "Installare ora?" };
     ("Installing firmware...") => { "Installazione..." };
     ("Interval") => { "Intervallo" };
-    ("Jack alerts") => { "Avvisi boccole" };
+    ("Jack alerts") => { "Boccole" };
     ("Key/alert volume") => { "Volume tasti" };
     ("Lead from V/ohm jack to A") => { "Puntale da V/\u{3a9} ad A" };
     ("Limits") => { "Limiti" };
@@ -204,6 +206,7 @@ macro_rules! tr {
     ("Width:") => { "Larghezza:" };
     ("Window") => { "Finestra" };
     ("Wiring") => { "Schema" };
+    ("With volume") => { "Con il volume" };
     ("Yes") => { "S\u{2}" };
     ("expect ~48 \u{3a9}") => { "attesi ~48 \u{3a9}" };
     ("nothing else connected") => { "nient'altro collegato" };
@@ -225,6 +228,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Accuracy", "Precisione"),
     ("Again", "Ripeti"),
     ("Alerts", "Avvisi"),
+    ("Always", "Sempre"),
     ("Analog power", "Alim. analog."),
     ("Arm", "Arma"),
     ("Auto (per view)", "Auto (vista)"),
@@ -247,6 +251,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Clear", "Cancella"),
     ("Clear limits", "Azzera limiti"),
     ("Color", "Colore"),
+    ("Continuity beep", "Bip continuit\u{1}"),
     ("Corners", "Angoli"),
     ("Coupling", "Accopp."),
     ("Current Settings", "Impost. corrente"),
@@ -304,7 +309,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Install it now?", "Installare ora?"),
     ("Installing firmware...", "Installazione..."),
     ("Interval", "Intervallo"),
-    ("Jack alerts", "Avvisi boccole"),
+    ("Jack alerts", "Boccole"),
     ("Key/alert volume", "Volume tasti"),
     ("Lead from V/ohm jack to A", "Puntale da V/\u{3a9} ad A"),
     ("Limits", "Limiti"),
@@ -414,6 +419,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Width:", "Larghezza:"),
     ("Window", "Finestra"),
     ("Wiring", "Schema"),
+    ("With volume", "Con il volume"),
     ("Yes", "S\u{2}"),
     ("expect ~48 \u{3a9}", "attesi ~48 \u{3a9}"),
     ("nothing else connected", "nient'altro collegato"),

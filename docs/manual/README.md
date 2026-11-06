@@ -627,7 +627,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - The beeper sounds while the resistance is below about 67 Ω (*inferred*
   from the measuring chip's setting, the same as on the stock firmware). The
   chip switches it itself: the beep starts and stops with the contact.
-  Silent at [Key/alert volume](#alerts-tab) 0 %.
+  Silent at [Key/alert volume](#alerts-tab) 0 % unless **Continuity beep** is **Always**.
 - While it sounds (also at volume 0 %) a green **SHORT** band shows above the
   reading and the digits turn green, for at least 0.15 s.
 - Top left, small: the test current, **I -0.26 mA** (the short-circuit
@@ -653,7 +653,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
-  readings only. Silent at Key/alert volume 0 %.
+  readings only. At Key/alert volume 0 % as continuity (**Continuity beep**).
 - Top right: the resistance **V / 0.765 mA**; **0L** above about 0.8 V.
 - The same green band while it beeps: **SHORT** below 22 mV, **BEEP** for a
   pattern, left of the resistance.
@@ -2397,7 +2397,8 @@ goes back to the main menu.
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper unless **Continuity beep** is **Always**; it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Continuity beep** | With volume, Always | With volume | The continuity / diode beeper at Key/alert volume 0 %: **With volume** is silent, **Always** sounds. |
 | **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
 | **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
 

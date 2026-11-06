@@ -24,7 +24,7 @@ Swipe	Смахивание	M
 Press effect	Эфф. нажатия	M
 Tap step	Шаг касания	M
 Help	Справка	M
-Jack alerts	Предупр. гнёзд	M
+Jack alerts	Контроль гнёзд	M
 Danger alarm	Сигн. опасности	M
 USB disk	USB-диск	M
 Burden voltage	Падение напр.	M
@@ -232,3 +232,6 @@ Deleting	Удаление	M
 Selection cleared	Выбор сброшен	M
 Files changed	Файлы изменились	M
 Some skipped	Часть пропущена	M
+Continuity beep	Звук прозвонки	M
+Always	Всегда	M
+With volume	По громкости	M
