@@ -112,7 +112,7 @@ fn ink_contrast(ck: &mut Checker, out: &str) {
     if CH1_INK[base.m.colour as usize] != C_FILL || MATH_INK[base.m.math_colour as usize] != C_WHITE {
         ck.fail("ink/default", "default CH1 / math text colour differs from the stock".into());
     }
-    for i in 0..9usize {
+    for i in 0..scope_ui::NPAL {
         for (what, ink) in [("CH1", CH1_INK[i]), ("math", MATH_INK[i])] {
             ck.cases += 1;
             let c = contrast(PALETTE[i], ink);
@@ -708,7 +708,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         ck.same_as(&format!("gen/{}/update", combined as u8), &want);
         // The source changed, the level not: the trigger badge in the new
         // source's colour (GEN's) and back.
-        let badge_px = || (1..18usize).flat_map(|y| (352..414usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::C_GEN_TR).count();
+        let badge_px = || (1..18usize).flat_map(|y| (352..414usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::c_gen()).count();
         let mut m1 = m;
         m1.tsrc = scope::TSRC_CH1;
         scope_ui::update(&m1);
@@ -722,7 +722,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
             draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
             let add = if tab == 1 {
-                vec![rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)]
+                vec![rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS), rb(scope_ui::C2_COLOUR), rb(scope_ui::GT_COLOUR)]
             } else {
                 vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE)]
             };
@@ -766,7 +766,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             let (rx, fy) = ((scope_ui::GR - 12) as usize, top + scope_ui::line_fy(h, 90) as usize);
             // The trigger position's T (graph column 200) and its guide line.
             let (tx, vx) = ((scope_ui::GX + 1 + 200 - 6) as usize, (scope_ui::GX + 200) as usize);
-            for (src, c, name) in [(scope::TSRC_CH2, scope_ui::C_CH2, "ch2"), (scope::TSRC_GEN, scope_ui::C_GEN_TR, "gen")] {
+            for (src, c, name) in [(scope::TSRC_CH2, scope_ui::c_ch2(), "ch2"), (scope::TSRC_GEN, scope_ui::c_gen(), "gen")] {
                 let mut mt = m;
                 mt.tsrc = src;
                 mt.trig_row = 90;
@@ -840,7 +840,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             scope_ui::cells(&m, &["Freq:1.00kHz", "Vp-p:3.00V", "\u{2}Freq:1.00kHz", "\u{2}Y2-1:2.01A"]);
             ck.check_replica("gen/ch2-cells");
             // The CH2 cells (the last two) in the CH2 colour, the first two not.
-            let cell_px = |x0: i16, x1: i16| (302..319usize).flat_map(|y| (x0 as usize..x1 as usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::C_CH2).count();
+            let cell_px = |x0: i16, x1: i16| (302..319usize).flat_map(|y| (x0 as usize..x1 as usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::c_ch2()).count();
             let (mx, ms) = (scope_ui::MEAS_X, scope_ui::MEAS_STEP);
             let (ch1, ch2) = (cell_px(mx, mx + 2 * ms), cell_px(mx + 2 * ms, mx + 4 * ms));
             ck.cases += 1;
@@ -848,6 +848,23 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                 ck.fail("gen/ch2-cells", format!("CH2 colour in the cells: {ch1} px in CH1's, {ch2} px in CH2's"));
             }
             save(out, "s08-ch2-cells");
+        }
+        if !combined {
+            // CH2 in green (MF > Display "Color"): trace, '2' marker, DMM
+            // block, the Display tab's colour button.
+            scope_ui::set_ch2_colour(4);
+            draw(&m, scope_ui::Popup::None, &pv, true);
+            ck.check_replica("gen/ch2-colour");
+            save(out, "s08-ch2-colour");
+            draw(&m, scope_ui::Popup::Mf(1), &pv, true);
+            save(out, "s08-ch2-colour-display");
+            scope_ui::set_ch2_colour(0);
+            // GEN in orange (MF > Display "Color" of the GEN trace).
+            scope_ui::set_gen_colour(1);
+            draw(&m, scope_ui::Popup::Mf(1), &pv, true);
+            ck.check_replica("gen/gen-colour");
+            save(out, "s08-gen-colour-display");
+            scope_ui::set_gen_colour(scope_ui::GEN_COLOUR_DEFAULT);
         }
         if !combined {
             // The MF popup covers the panel (owner 2026-11-06): its box

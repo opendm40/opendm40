@@ -45,29 +45,83 @@ pub const C_SEL: Color = 0x059e; // list selection, spinner band, slider fill
 pub const C_YELLOW: Color = 0xffe0;
 /// The extra channels' traces (opendm40, docs/scope-gen-channel.md): the
 /// generator (computed) and the DMM's CH2.
-pub const C_GEN_TR: Color = 0x07ff;
-pub const C_CH2: Color = 0xf81f;
+/// The GEN trace's default colour (cyan); the user's choice is `c_gen`.
+pub const C_GEN_TR_DEFAULT: Color = 0x07ff;
+/// MF > Display GEN "Color" (`set_gen_colour`): a PALETTE index, cyan
+/// (the last) by default. Set by the app (settings W_SCOPE_EXT + 5 bits
+/// 20..23, stored XOR the default).
+static GEN_COLOUR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(GEN_COLOUR_DEFAULT);
+pub const GEN_COLOUR_DEFAULT: u8 = 9;
+
+pub fn gen_colour_idx() -> u8 {
+    GEN_COLOUR.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_gen_colour(i: u8) {
+    GEN_COLOUR.store(i % NPAL as u8, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The GEN trace / badge / block colour.
+pub fn c_gen() -> Color {
+    PALETTE[gen_colour_idx() as usize % NPAL]
+}
+/// The DMM CH2's default colour (magenta); the user's choice is `c_ch2`.
+pub const C_CH2_DEFAULT: Color = 0xf81f;
+/// MF > Display CH2 "Color" (`set_ch2_colour`): 0 the default magenta,
+/// 1..=NPAL the CH1 palette (PALETTE). Set by the app (settings W_SCOPE_EXT +
+/// 5 bits 16..19).
+static CH2_COLOUR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+/// The CH2 colour names in `CH2_COLOUR` order.
+pub const CH2_COLOUR_NAMES: [&str; 11] = ["magenta", "red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold", "cyan"];
+
+pub fn ch2_colour_idx() -> u8 {
+    CH2_COLOUR.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_ch2_colour(i: u8) {
+    CH2_COLOUR.store(i % (NPAL as u8 + 1), core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The CH2 trace / marker / label / measurement colour.
+pub fn c_ch2() -> Color {
+    match ch2_colour_idx() {
+        0 => C_CH2_DEFAULT,
+        i => PALETTE[(i as usize - 1) % NPAL],
+    }
+}
+
+/// Text on a CH2-coloured fill (the DMM block): white on magenta, else as
+/// on the CH1 palette (CH1_INK).
+pub fn c_ch2_ink() -> Color {
+    match ch2_colour_idx() {
+        0 => C_WHITE,
+        i => CH1_INK[(i as usize - 1) % NPAL],
+    }
+}
 /// The strip value's digits below the accuracy (ui::strip_acc): the DMM
 /// page's VALUE_LOW.
 pub const C_LOW: Color = crate::ui::VALUE_LOW;
 /// Palette 0x0806c730: red orange yellow green blue purple brown pink gold.
-pub const PALETTE: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x001f, 0x8010, 0xa145, 0xfe19, 0xfea0];
-pub const COLOUR_NAMES: [&str; 9] = ["red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold"];
+/// opendm40 adds cyan as the tenth: every channel's
+/// choice (CH1, MATH, CH2). The GEN trace is cyan too.
+pub const NPAL: usize = 10;
+pub const PALETTE: [Color; NPAL] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x001f, 0x8010, 0xa145, 0xfe19, 0xfea0, 0x07ff];
+pub const COLOUR_NAMES: [&str; NPAL] = ["red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold", "cyan"];
 /// Text on a CH1-coloured fill (zoom buttons, CHA, V/div badge, the source
 /// badge's selected half), per PALETTE entry: the stock dark text, white
 /// where dark reads worse than the stock default math panel (white on
 /// orange, contrast 1.97:1): blue 1.83, purple 1.72.
-pub const CH1_INK: [Color; 9] = [C_FILL, C_FILL, C_FILL, C_FILL, C_WHITE, C_WHITE, C_FILL, C_FILL, C_FILL];
+pub const CH1_INK: [Color; NPAL] = [C_FILL, C_FILL, C_FILL, C_FILL, C_WHITE, C_WHITE, C_FILL, C_FILL, C_FILL, C_FILL];
 /// Text on a math-coloured panel button (math on), per PALETTE entry: the
 /// stock white, dark where white reads worse than on the default orange:
 /// yellow 1.07, pink 1.52, gold 1.41.
-pub const MATH_INK: [Color; 9] = [C_WHITE, C_WHITE, C_FILL, C_WHITE, C_WHITE, C_WHITE, C_WHITE, C_FILL, C_FILL];
+pub const MATH_INK: [Color; NPAL] = [C_WHITE, C_WHITE, C_FILL, C_WHITE, C_WHITE, C_WHITE, C_WHITE, C_FILL, C_FILL, C_FILL];
 /// Text in the channel colour on the dark bar / graph (trigger badge,
 /// measurement strip, FFT labels), per PALETTE entry: the palette colour,
 /// or halfway to white where it reads worse on C_BAR than the stock
 /// default math panel (1.97:1): blue 1.20, purple 1.13, brown 1.43 ->
 /// 3.22, 3.60, 4.08.
-pub const PAL_TEXT: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x841f, 0xc418, 0xd492, 0xfe19, 0xfea0];
+pub const PAL_TEXT: [Color; NPAL] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x841f, 0xc418, 0xd492, 0xfe19, 0xfea0, 0x07ff];
 
 pub const TB_LABELS: [&str; 30] = [
     "10ns", "20ns", "50ns", "100ns", "200ns", "500ns", "1us", "2us", "5us", "10us", "20us", "50us", "100us", "200us", "500us", "1ms", "2ms",
@@ -457,7 +511,7 @@ impl Model {
     };
 
     pub fn pal(&self) -> Color {
-        PALETTE[self.colour as usize % 9]
+        PALETTE[self.colour as usize % NPAL]
     }
     /// Trace colour: palette blended into the fill by the brightness.
     pub fn trace_colour(&self) -> Color {
@@ -470,23 +524,23 @@ impl Model {
     /// Math colour: the palette entry (unblended, stock), grey while math
     /// is off (the pill).
     pub fn math_pal(&self) -> Color {
-        PALETTE[self.math_colour as usize % 9]
+        PALETTE[self.math_colour as usize % NPAL]
     }
     /// Text colour on `pal()` (CH1_INK).
     pub fn pal_ink(&self) -> Color {
-        CH1_INK[self.colour as usize % 9]
+        CH1_INK[self.colour as usize % NPAL]
     }
     /// Text colour on `math_pal()` (MATH_INK).
     pub fn math_ink(&self) -> Color {
-        MATH_INK[self.math_colour as usize % 9]
+        MATH_INK[self.math_colour as usize % NPAL]
     }
     /// CH1-coloured text on the dark bar / graph (PAL_TEXT).
     pub fn pal_text(&self) -> Color {
-        PAL_TEXT[self.colour as usize % 9]
+        PAL_TEXT[self.colour as usize % NPAL]
     }
     /// Math-coloured text on the graph (PAL_TEXT).
     pub fn math_text(&self) -> Color {
-        PAL_TEXT[self.math_colour as usize % 9]
+        PAL_TEXT[self.math_colour as usize % NPAL]
     }
     pub fn grid_colour(&self) -> Color {
         blend565(0xffff, C_FILL, (self.grid.min(100) as u32 * 255 / 100) as u8)
@@ -920,8 +974,8 @@ pub fn trig_badge(m: &Model) {
 /// The trigger source's colour: the badge, the T marker and its level line.
 fn trig_colour(m: &Model) -> Color {
     match m.tsrc {
-        crate::scope::TSRC_GEN => C_GEN_TR,
-        crate::scope::TSRC_CH2 => C_CH2,
+        crate::scope::TSRC_GEN => c_gen(),
+        crate::scope::TSRC_CH2 => c_ch2(),
         _ => m.pal_text(),
     }
 }
@@ -1019,9 +1073,9 @@ pub fn block_look(m: &Model, b: usize) -> Look {
             on: m.ch1_on,
             open: m.ch1_open,
         },
-        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: C_CH2, ink: C_WHITE, on: false, open: false },
-        BLK_DMM => Look { name: Txt::new("DMM"), glyph: 0, scale: m.ch2_txt, col: C_CH2, ink: C_WHITE, on: m.ch2_on, open: false },
-        BLK_GEN => Look { name: Txt::new("GEN"), glyph: 0, scale: m.gen_txt, col: C_GEN_TR, ink: C_FILL, on: m.gen_on, open: false },
+        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: c_ch2(), ink: c_ch2_ink(), on: false, open: false },
+        BLK_DMM => Look { name: Txt::new("DMM"), glyph: 0, scale: m.ch2_txt, col: c_ch2(), ink: c_ch2_ink(), on: m.ch2_on, open: false },
+        BLK_GEN => Look { name: Txt::new("GEN"), glyph: 0, scale: m.gen_txt, col: c_gen(), ink: CH1_INK[gen_colour_idx() as usize % NPAL], on: m.gen_on, open: false },
         _ => {
             // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
             // math_scale shows the stock defaults.
@@ -1179,7 +1233,7 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
         _ => Txt::new(text),
     };
     let t = Ink::new(sf::SC_F12, r, text.as_str(), 8, 0);
-    let pal = if ch2 { C_CH2 } else { m.pal_text() };
+    let pal = if ch2 { c_ch2() } else { m.pal_text() };
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
         if let Some(g) = t.at(x, y) {
             return (pal, tag(2, g));
@@ -1418,7 +1472,7 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
         n += 1;
     }
     if m.ch2_on {
-        out[n] = (CH2_LEVEL, level(off_row(m.ch2_pos), FAM_2, m.sel_v == CH2_LEVEL, C_CH2));
+        out[n] = (CH2_LEVEL, level(off_row(m.ch2_pos), FAM_2, m.sel_v == CH2_LEVEL, c_ch2()));
         n += 1;
     }
     if let Some(yc) = m.ycur {
@@ -1862,7 +1916,7 @@ pub struct Graph {
     pub tr: [(i16, i16); NCOL],
     pub ps: [(i16, i16); NCOL],
     pub ma: [(i16, i16); NCOL],
-    /// The GEN trace (C_GEN) and the CH2 trace (C_CH2), under CH1.
+    /// The GEN trace (C_GEN) and the CH2 trace (c_ch2()), under CH1.
     pub gn: [(i16, i16); NCOL],
     pub c2: [(i16, i16); NCOL],
     d_tr: [(i16, i16); NCOL],
@@ -2160,9 +2214,9 @@ fn band_run(sp: &mut [Color], tr: &[(i16, i16)], ps: &[(i16, i16)], ma: &[(i16, 
         } else if r >= tr.0 && r <= tr.1 {
             d.trace
         } else if r >= c2.0 && r <= c2.1 {
-            C_CH2
+            c_ch2()
         } else if r >= gn.0 && r <= gn.1 {
-            C_GEN_TR
+            c_gen()
         } else if r >= ps.0 && r <= ps.1 {
             d.half
         } else if (rc | R_ALL) & cc != 0 {
@@ -2262,10 +2316,10 @@ impl Graph {
                 return d.trace;
             }
             if fy >= c2.0 && fy <= c2.1 {
-                return C_CH2;
+                return c_ch2();
             }
             if fy >= gn.0 && fy <= gn.1 {
-                return C_GEN_TR;
+                return c_gen();
             }
             if fy >= ps.0 && fy <= ps.1 {
                 return d.half;
@@ -2411,9 +2465,9 @@ impl Graph {
                     } else if fy >= tr.0 && fy <= tr.1 {
                         d.trace
                     } else if fy >= c2.0 && fy <= c2.1 {
-                        C_CH2
+                        c_ch2()
                     } else if fy >= gn.0 && fy <= gn.1 {
-                        C_GEN_TR
+                        c_gen()
                     } else if fy >= ps.0 && fy <= ps.1 {
                         d.half
                     } else if fy & 1 == 1 && fy <= vrow {
@@ -2501,9 +2555,9 @@ impl Graph {
                         } else if r >= tr.0 && r <= tr.1 {
                             d.trace
                         } else if r >= c2.0 && r <= c2.1 {
-                            C_CH2
+                            c_ch2()
                         } else if r >= gn.0 && r <= gn.1 {
-                            C_GEN_TR
+                            c_gen()
                         } else if r >= ps.0 && r <= ps.1 {
                             d.half
                         } else if let Some(c) = if vrow { vl(&d, x) } else { None } {
@@ -3268,7 +3322,7 @@ fn spinner(r: Rect, clip: Rect, items: &[&str], cur: usize, colours: bool) {
         }
         let y = r.y + k * 30;
         let in_band = y == band.y;
-        col[k as usize] = if colours { PALETTE[idx as usize % 9] } else if in_band { C_WHITE } else { C_POP_BG };
+        col[k as usize] = if colours { PALETTE[idx as usize % NPAL] } else if in_band { C_WHITE } else { C_POP_BG };
         let tr = if colours { rect(r.x + (r.w - 56) / 2, y + (30 - 13) / 2, 56, 13) } else { rect(r.x, y, r.w, 30) };
         ink[k as usize] = Ink::new(sf::SC_F16, tr, items[idx as usize], 8, 0);
     }
@@ -3373,7 +3427,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
         0 => {
             fill_c(rect(MF_IX + 1, 61, MF_IW - 1, 110), pc, C_POP_BG);
             // The item names in the colour of the channel they measure.
-            let ink = if v.meas_src2 { C_CH2 } else { C_WHITE };
+            let ink = if v.meas_src2 { c_ch2() } else { C_WHITE };
             for i in 0..20i16 {
                 let r = rect(MC_X + MC_P * (i % 7), 66 + 35 * (i / 7), MC_W, 30);
                 let c = if v.pressed_cell == Some(i as u8) { C_DIS } else { C_BAR };
@@ -3382,13 +3436,13 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             // opendm40: the Source cell in the grid's free 21st place.
             let i = MEAS_SRC_CELL;
             let r = rect(MC_X + MC_P * (i % 7), 66 + 35 * (i / 7), MC_W, 30);
-            let (t, c) = if v.meas_src2 { ("CH2", C_CH2) } else { ("CH1", C_YELLOW) };
+            let (t, c) = if v.meas_src2 { ("CH2", c_ch2()) } else { ("CH1", C_YELLOW) };
             rbox_text(r, pc, 8, C_POP_TAB, C_POP_BG, sf::SC_F16, t, c);
             fill_c(rect(MF_IX + 1, 171, MF_IW - 1, 40), pc, C_POP_BG);
             for k in 0..v.meas_n.min(4) as usize {
                 let r = rect(MC_X + MC_P * k as i16, 176, MC_W, 30);
                 let sel = v.meas[k];
-                let c = if crate::scope_meas::is_ch2(sel) { C_CH2 } else { C_YELLOW };
+                let c = if crate::scope_meas::is_ch2(sel) { c_ch2() } else { C_YELLOW };
                 rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[crate::scope_meas::item(sel) as usize % 20], c);
             }
             // Clear and Default under the grid's last two columns.
@@ -3406,10 +3460,16 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             // opendm40: the computed generator trace.
             fill_c(rect(MF_IX, 161, MF_IW, 50), pc, C_POP_BG);
             fill_text(GT_LABEL, pc, C_POP_BG, sf::SC_F16, GT_LABEL, "GEN trace:", C_FILL, 1, 0);
+            let mut gb = Buf::new();
+            gb.push(crate::tr!("Color")).push(": ").push(COLOUR_NAMES[gen_colour_idx() as usize % NPAL]);
+            rbox_text(GT_COLOUR, pc, 8, c_gen(), C_POP_BG, sf::SC_F16, gb.as_str(), CH1_INK[gen_colour_idx() as usize % NPAL]);
             option_list(GT_LIST, pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.gen_trace { 0 } else { 1 });
             // opendm40: the DMM as CH2 and its V/div.
             fill_c(rect(MF_IX, 211, MF_IW, 49), pc, C_POP_BG);
             fill_text(C2_LABEL, pc, C_POP_BG, sf::SC_F16, C2_LABEL, "CH2 (DMM):", C_FILL, 1, 0);
+            let mut cb = Buf::new();
+            cb.push(crate::tr!("Color")).push(": ").push(CH2_COLOUR_NAMES[ch2_colour_idx() as usize % (NPAL + 1)]);
+            rbox_text(C2_COLOUR, pc, 8, c_ch2(), C_POP_BG, sf::SC_F16, cb.as_str(), c_ch2_ink());
             option_list(C2_LIST, pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.ch2_on { 0 } else { 1 });
             option_list(C2_UNIT, pc, &["V", "A"], 44, v.ch2_func as usize);
             if v.ch2_on {
@@ -3493,6 +3553,10 @@ pub const C2_UNIT: Rect = rect(120, 233, 88, 24);
 pub const C2_MINUS: Rect = rect(MF_STEP[0].0, 235, MF_STEP[0].1, 20);
 pub const C2_VALUE: Rect = rect(MF_STEP[1].0, 235, MF_STEP[1].1, 20);
 pub const C2_PLUS: Rect = rect(MF_STEP[2].0, 235, MF_STEP[2].1, 20);
+/// MF > Display: the CH2 colour (a tap: the next one), right of its label.
+pub const C2_COLOUR: Rect = rect(MF_C2, 210, MF_C2_W, 22);
+/// MF > Display: the GEN trace's colour, right of its label.
+pub const GT_COLOUR: Rect = rect(MF_C2, 164, MF_C2_W, 21);
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
 pub fn fmt_s125(out: &mut Buf, s: f32) {
     let (x, u) = if s >= 0.999 {
@@ -3548,6 +3612,10 @@ pub enum MfHit {
     Ch2Step(bool),
     /// MF > Display: CH2's unit, true = A (the multimeter follows).
     Ch2Func(bool),
+    /// MF > Display: the next CH2 colour.
+    Ch2Colour,
+    /// MF > Display: the next GEN trace colour.
+    GenColour,
     PriScr,
     SaveCsv,
     /// The Decode tab's page.
@@ -3611,6 +3679,10 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Ch2Step(false)
             } else if v.ch2_on && near(C2_PLUS) {
                 MfHit::Ch2Step(true)
+            } else if rect(C2_COLOUR.x - 2, C2_COLOUR.y - 2, C2_COLOUR.w + 4, C2_COLOUR.h + 3).has(x, y) {
+                MfHit::Ch2Colour
+            } else if rect(GT_COLOUR.x - 2, GT_COLOUR.y - 2, GT_COLOUR.w + 4, GT_COLOUR.h + 4).has(x, y) {
+                MfHit::GenColour
             } else {
                 MfHit::Inside
             }
@@ -3757,7 +3829,7 @@ pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
     if math {
         return match tab {
             0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, |i| SideHit::MathMode(5 + i)),
-            1 => spinner_hit(rect(SX + 84, 70, 110, 150), 9, v.math_colour as usize, x, y).map_or(SideHit::Inside, SideHit::MathColour),
+            1 => spinner_hit(rect(SX + 84, 70, 110, 150), NPAL, v.math_colour as usize, x, y).map_or(SideHit::Inside, SideHit::MathColour),
             2 => spinner_hit(rect(SX + 84, 70, 110, 150), 4, v.fft_hz.min(3) as usize, x, y).map_or(SideHit::Inside, SideHit::HzDiv),
             _ => {
                 if let Some(i) = spinner_hit(rect(SX + 84, 70, 110, 150), WINDOWS.len(), v.fft_win.min(5) as usize, x, y) {
@@ -3774,7 +3846,7 @@ pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
             Some(i) => SideHit::Probe(i),
             None => option_hit(rect(SX + 94, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Type),
         },
-        _ => spinner_hit(rect(SX + 84, 70, 110, 150), 9, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
+        _ => spinner_hit(rect(SX + 84, 70, 110, 150), NPAL, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
     }
 }
 

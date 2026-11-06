@@ -14,6 +14,7 @@ section named after the tag as the release notes; how to cut a release:
 - **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
 - **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
 - **Scope:** MF > Measure can measure the DMM channel (a CH1 / CH2 cell); CUR Y shows a second Y2-1 at the CH2 V/div.
+- **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
 - **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
 
 - **Gallery: select several files and delete them together**
