@@ -963,6 +963,24 @@ pub static ICONS_B: [u8; 916] = *b"\
 ;
 pub static ICONS_FD: FontData = FontData{line_h:30,descent:0,fmt:HUF,entries:&ICONS_E,blob:&ICONS_B};
 
+#[link_section = ".rodata.fonts.SC_C_E"]
+pub static SC_C_E: [Entry; 13] = [
+    E(0x27,0,4,16,4,0,2,3),E(0x41,2,10,16,10,0,2,12),E(0x44,17,10,16,10,0,2,12),E(0x48,32,10,16,10,0,2,12),
+    E(0x49,47,10,16,10,0,2,12),E(0x4E,62,10,16,10,0,2,12),E(0x4F,77,10,16,10,0,2,12),E(0x50,92,10,16,10,0,2,12),
+    E(0x52,107,10,16,10,0,2,12),E(0x53,122,10,16,10,0,2,12),E(0x54,137,10,16,10,0,2,12),E(0x55,152,10,16,10,0,2,12),
+    E(0x57,167,10,16,10,0,2,12),
+];
+#[link_section = ".rodata.fonts.SC_C_B"]
+pub static SC_C_B: [u8; 182] = *b"\
+\x1f\x80\x00\x01\xff\x3f\xf6\x18\xc1\x8c\x18\x61\x83\xff\x1f\xf0\x00\x00\x0f\xff\xff\xfc\x03\xc0\x3c\x03\xe0\x77\xfe\x3f\xc0\x00\
+\x00\x0f\xff\xff\xf0\x60\x06\x00\x60\x06\x0f\xff\xff\xf0\x00\x00\x00\x00\xc0\x3c\x03\xff\xff\xff\xc0\x3c\x03\x00\x00\x00\x00\x0f\
+\xff\xff\xf7\x80\x1e\x00\x78\x01\xef\xff\xff\xf0\x00\x00\x03\xfc\x7f\xee\x07\xc0\x3c\x03\xe0\x77\xfe\x3f\xc0\x00\x00\x0f\xff\xff\
+\xfc\x30\xc3\x0c\x30\xe7\x07\xe0\x3c\x00\x00\x00\x0f\xff\xff\xfc\x30\xc3\x0c\x30\xe7\x87\xef\x3c\x70\x00\x00\x03\x04\x78\x6f\xc7\
+\xcc\x3c\x63\xe3\xf6\x1e\x20\xc0\x00\x00\x0c\x00\xc0\x0c\x00\xff\xff\xff\xc0\x0c\x00\xc0\x00\x00\x00\x0f\xfc\xff\xe0\x07\x00\x30\
+\x03\x00\x7f\xfe\xff\xc0\x00\x00\x0f\xfe\xff\xf0\x03\x0f\xe0\xfe\x00\x3f\xff\xff\xe0\x00"
+;
+pub static SC_C_FD: FontData = FontData{line_h:16,descent:0,fmt:BIT1,entries:&SC_C_E,blob:&SC_C_B};
+
 #[link_section = ".rodata.fonts.SC_F12_E"]
 pub static SC_F12_E: [Entry; 19] = [
     E(0x20,0,6,12,6,0,0,0),E(0x21,0,3,12,6,0,2,8),E(0x25,3,6,12,7,0,2,8),E(0x27,9,3,12,6,0,1,3),
@@ -1170,6 +1188,7 @@ pub fn font_data(addr: u32) -> Option<&'static FontData> {
         0x08059428 => Some(&G_08059428_FD),
         0x0805C5DC => Some(&K_FONT_FD),
         0x0805592C => Some(&ICONS_FD),
+        0x08054828 => Some(&SC_C_FD),
         0x0804F24C => Some(&SC_F12_FD),
         0x08054FC0 => Some(&SC_PROBE_FD),
         0x08055014 => Some(&SC_EDGE_FD),

@@ -70,10 +70,8 @@ What can be dropped or packed without changing a pixel:
 
 * **Unused fonts.** The stock scope page's 20 px ASCII (0x08054148, the
   panel buttons) is not embedded: our panel and the strip's units too
-  wide for SC_DIGITS ("mWh") use SC_F16, the same face at 16 px. Nor
-  are the 16 px status letters (class C: RUN / STOP / WAIT, the timebase's
-  H): SC_F16 draws them. Of G_08059428 only the up arrow (the
-  generator's wave drop-down) is kept.
+  wide for SC_DIGITS ("mWh") use SC_F16, the same face at 16 px. Of
+  G_08059428 only the up arrow (the generator's wave drop-down) is kept.
 * **Unused glyphs.** 232 glyphs are CJK / full-width (U+2E80 up): 216 in
   TEXT22, 16 in ASCII26, 16.2 KB of bitmaps. opendm40 is English only and
   no source string contains one. The ASCII fonts (TEXT22, F14, ASCII26,
@@ -92,7 +90,7 @@ What can be dropped or packed without changing a pixel:
   in narrower stock cells: punctuation, I, j) and takes the others below
   0x80 from F14; SC_F16 stores 1 and takes the others from SC_F12 (`SHARE`
   in `mkstockfont.py`, `font_base` in `stockfont.rs`), placed in its own
-  line box with the same fields as before: -2.8 KB of region B.
+  line box with the same fields as before: -2.4 KB of region B.
 
 ## 2a. Glyphs of our own
 

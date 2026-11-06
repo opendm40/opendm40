@@ -1126,6 +1126,7 @@ pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
 
 /// Fonts of the stock scope page (stock font-object addresses; embedded by
 /// tools/mkstockfont.py).
+pub const SC_C: Font = Font(0x0805_4828); // 10x16 status letters ' R U N S T O P W A I D H
 pub const SC_F12: Font = Font(0x0804_F24C); // 12 px texts (ASCII of 0x0805471c + own table)
 pub const SC_F16: Font = Font(0x0804_F260); // 16 px popup texts (ASCII 0x080534c4)
 pub const SC_F22: Font = TEXT22; // 22 px tab labels, toasts

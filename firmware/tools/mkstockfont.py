@@ -384,6 +384,20 @@ def main():
             gl.append((code, gw, gh, adv, yoff, bytes(data)))
         return line_h, descent, four, gl, ('A' if class_a else 'B')
 
+    def load_class_c():
+        """Class C font 0x08054828 (vtable 0x08054820, FUN_0802362c/FUN_080235bc):
+        fixed 1 bpp bitmaps, ' (4x16) at 0x08054728, R U N S T O P W A I D H
+        (10x16, 20 bytes each) from 0x08054730; line_h 16, descent 0."""
+        gl = []
+        for i, ch in enumerate("'RUNSTOPWAIDH"):
+            if i == 0:
+                a, w = 0x08054728, 4
+            else:
+                a, w = 0x08054730 + 20 * (i - 1), 10
+            gl.append((ord(ch), w, 16, w, 0, img[a - BASE: a - BASE + (w * 16 + 7) // 8]))
+        gl.sort()
+        return 16, 0, False, gl, 'C'
+
     def load_merged(first, second):
         """B+ font: every code of `first` (0x0805471c) and, for the codes it
         lacks, the font's own table (`second`), as FUN_08023425 looks them up.
@@ -404,6 +418,7 @@ def main():
     fonts += [(name, key, src) for name, key, src in [
         # Stock scope page fonts (stock/re/docs/stock-scope-ui.md sec. 0.1), keyed by
         # the font-object address the stock page uses.
+        ('SC_C', 0x08054828, load_class_c),                                  # status letters, "H"
         ('SC_F12', 0x0804F24C, lambda: load_merged(0x0805471C, 0x0804F24C)),  # 12 px texts
         ('SC_PROBE', 0x08054FC0, lambda: load(0x08054FC0)),                   # coupling / probe glyph
         ('SC_EDGE', 0x08055014, lambda: load(0x08055014)),                    # trigger edge
