@@ -10,8 +10,8 @@ chooses what you see. It adds a power meter, data logging, remote control
 over USB and Bluetooth, and more.
 
 The firmware installs like a stock update file. It does not touch the
-Alientek bootloaders or the calibration of your meter, so
-you can always go back to the stock firmware
+Alientek bootloaders or the calibration of your meter, so you can always go
+back to the stock firmware
 ([Back to the stock firmware](#back-to-the-stock-firmware)).
 
 ![Multimeter page](img/dmm.png)
@@ -21,8 +21,8 @@ its ratings. Follow the safety rules and limits in Alientek's user manual.
 opendm40 adds warnings for wrong connections ([Safety and
 alerts](#safety-and-alerts)), but they cannot catch every mistake.
 
-**Status.** Ready to use. Tested and used by multiple people already.
-Validated against calibrator and stock firmware.
+**Status.** Ready to use. Tested and used by several people. Validated
+against a calibrator and against the stock firmware.
 
 ## Contents
 

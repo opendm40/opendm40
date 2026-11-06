@@ -5,15 +5,15 @@
 Open-source replacement firmware for the Alientek DM40 multimeter,
 oscilloscope and signal generator (DM40A, DM40B, DM40C).
 
-The multimeter, the oscilloscope and the generator now run at the same time.
-opendm40 keeps the stock look and touch control
-and adds a power meter, inrush current capture, wrong-connection alerts, data
-logging, remote control over USB (USBTMC / SCPI) and Bluetooth, a USB disk
-with your logs and screenshots as CSV and BMP files, and a lot more.
+The multimeter, the oscilloscope and the generator run at the same time.
+opendm40 keeps the stock look and touch control and adds a power meter, inrush
+current capture, wrong-connection alerts, data logging, remote control over
+USB (USBTMC / SCPI) and Bluetooth, a USB disk with your logs and screenshots
+as CSV and BMP files, and more.
 
 It installs like a stock update file and does not touch the Alientek
-bootloaders or your device's calibration, so you can always
-go back to the stock firmware.
+bootloaders or your meter's calibration, so you can always go back to the
+stock firmware.
 
 ![opendm40 on a DM40A: the multimeter page](docs/manual/img/dmm.png)
 
@@ -21,8 +21,8 @@ go back to the stock firmware.
 
 ## Status
 
-Ready to use. Tested and used by multiple people already.
-Validated against calibrator and stock firmware.
+Ready to use. Tested and used by several people. Validated against a
+calibrator and against the stock firmware.
 
 Measured accuracy against calibrators (DC V, DC A, frequency, resistance):
 [firmware/docs/data](firmware/docs/data/README.md).
@@ -75,12 +75,13 @@ You need a DM40 with the stock firmware and a USB cable.
    or [build it](firmware/README.md#build).
 2. On the meter: **Settings > Other Settings > USB Connect**, and connect the
    cable. A USB disk appears.
-3. Copy the file onto it, as the only `dm40*.bin` file there. The file name must start with "dm40"! Eject the disk.
+3. Copy the file onto it, as the only `dm40*.bin` file there. The file name
+   must start with `dm40`. Eject the disk.
 4. Switch the meter off and on. The stock update procedure installs the file.
    The first start takes a few seconds (opendm40 shows a progress bar): do
    not switch off in the first 10 seconds.
-5. Important! Back up your meter: copy the `INFO/` folder from the opendm40 USB disk to
-   your computer and keep it ([Back up](#back-up-with-opendm40)).
+5. **Back up your meter.** Copy the `INFO/` folder from the opendm40 USB disk
+   to your computer and keep it ([Back up](#back-up-with-opendm40)).
 
 The same steps with pictures, and updating from a running opendm40:
 [the manual, Getting started](docs/manual/README.md#getting-started).
@@ -144,7 +145,6 @@ The [emulator](emu/README.md) runs opendm40 and the stock firmware without a
 meter.
 
 The hardware as far as it is known: [hw/README.md](hw/README.md).
-
 
 Tools for the stock update file: [stock/README.md](stock/README.md).
 Bug reports and pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
