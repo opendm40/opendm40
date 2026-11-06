@@ -16,10 +16,10 @@ cd "$(dirname "$0")"
 ROOT=$(cd ../.. && pwd)
 SUITES="accuracy-test bargraph-test bt-scpi-test cring-test dbgsrc-test decode-test dlog-test fft-test gen-test
 autooff-test logfmt-test meter-test scpi-test scpi-msg-test sinc-test ch2-test touch-test trig-test
-ui-render gallery-test fatren-test font-matrix stock-ui"
+ui-render gallery-test fatren-test font-matrix stock-ui lang-check lang-render"
 # Start order: the long ones first (seconds on a GitHub runner, 2026-10-25:
 # ui-render 275, fatren-test 231, dlog-test 52, font-matrix 33, the rest < 10).
-LONG="ui-render fatren-test dlog-test font-matrix"
+LONG="lang-render ui-render fatren-test dlog-test font-matrix"
 [ $# -gt 0 ] && SUITES="$*"
 JOBS=${JOBS:-$(nproc)}
 OUT=$(mktemp -d)
@@ -37,7 +37,7 @@ run() {
     local s=$1 args t0 rc
     case $s in
     font-matrix) args="$OUT/font-matrix.txt" ;;
-    ui-render|bargraph-test|gallery-test|stock-ui) args="$OUT/$s" ;;
+    ui-render|lang-render|bargraph-test|gallery-test|stock-ui) args="$OUT/$s" ;;
     *) args= ;;
     esac
     t0=$(date +%s)

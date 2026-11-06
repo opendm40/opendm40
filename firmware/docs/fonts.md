@@ -22,19 +22,22 @@ threshold compositing of the scope page (`Ink`), the half-size +1 digit
 
 ## 2. The stock fonts
 
-27 font objects (class A: 12-byte entries with yoff / w / h / adv; class B:
-8-byte entries, h = line_h; class C: fixed 1 bpp; B+: merged), 1101 glyphs.
-Bit depth 1 bpp (11 fonts) or 4 bpp anti-aliased (16 fonts); the 4 bpp fonts
+26 font objects (class A: 12-byte entries with yoff / w / h / adv; class B:
+8-byte entries, h = line_h; class C: fixed 1 bpp; B+: merged), 1005 glyphs.
+Bit depth 1 bpp (10 fonts) or 4 bpp anti-aliased (16 fonts); the 4 bpp fonts
 use all 16 coverage levels, so a lower bpp is not lossless. The stock stores
-one column-major bit stream per glyph box: 90 897 B of bitmaps and 13 212 B
+one column-major bit stream per glyph box: 88 497 B of bitmaps and 12 444 B
 of entries.
 
 What can be dropped or packed without changing a pixel:
 
+* **Unused fonts.** The stock scope page's 20 px ASCII (0x08054148, the
+  panel buttons) is not embedded: our panel and the strip's units too
+  wide for SC_DIGITS ("mWh") use SC_F16, the same face at 16 px.
 * **Unused glyphs.** 232 glyphs are CJK / full-width (U+2E80 up): 216 in
   TEXT22, 16 in ASCII26, 16.2 KB of bitmaps. opendm40 is English only and
   no source string contains one. The ASCII fonts (TEXT22, F14, ASCII26,
-  SC_F12 / F16 / F20) draw flowing text (menus, dialogs, file names,
+  SC_F12 / F16) draw flowing text (menus, dialogs, file names,
   SCPI-set values), so they keep all of 0x20..0x7F.
 * **Padding.** Class B glyphs are line_h tall: 9.1 KB of blank rows and
   columns. Blank columns are part of the layout (w is the text width), so
@@ -86,7 +89,8 @@ Random access (`alpha`) remains for `Ink::at` / the scope markers (1 bpp
 fonts); on a HUF glyph it decodes from the top (correct, slow, not used by
 any 4 bpp drawing path).
 
-Result: 27 142 B of bitmaps (4 bpp 18 843 B, was 24 123 B as RLE4 and
+Result (with the 20 px scope font, since dropped: -1 317 B of bitmaps,
+-960 B of entries): 27 142 B of bitmaps (4 bpp 18 843 B, was 24 123 B as RLE4 and
 90 897 B raw), 182 B of tables, 8 690 B of entries. Against RLE4: region A2
 +2 148 B free, region B +2 296 B (4 bpp data -5 280 B, tables +182 B,
 decoder code +624 B), SRAM -512 B, static worst stack path unchanged. Draw time
@@ -128,6 +132,16 @@ after the shim, below the loader marker; [native-boot.md, Region
 A2](native-boot.md#region-a2-2026-10-22)). Moving another blob to A2 is one
 name in `A2_FONTS`; the link fails if A2 overlaps the marker. No font may go
 to region C (not zero-wait): labels are drawn while the AD2 stream ISR runs.
+
+## 3a. Localized images
+
+[i18n/](../i18n/README.md), [`src/lang.rs`](../src/lang.rs): one language per
+image (features `zh`, `ru`, `it`, `fr`), resolved at build time (`tr!`); none in
+the default image.
+Chinese: 14 px 1 bpp glyphs in one set for every font of 15 px and up, each hanzi
+stored as U+0400 + its index. Russian: letters shaped like a Latin one use the
+stock glyph (and one byte of text); the others per font, sized by `fit_size` in
+[`mklang_x.py`](../tools/mklang_x.py). Italian, French: stock letter plus accent.
 
 ## 4. Options not taken
 

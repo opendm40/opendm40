@@ -4,7 +4,7 @@
 as drawn when the page opened: an offset step, which moves the cold
 junction, did not show).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/tempinfotest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
 
 A type K thermocouple at 100 C, cold junction 25 C (run.py --dmm tc / cj):
