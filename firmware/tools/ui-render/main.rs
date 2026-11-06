@@ -1269,12 +1269,12 @@ fn bar_unit_check(ck: &mut Checker, scene: &str, r: &Reading) {
     let bg = ui::BG;
     let mask = |x0: i32| -> Vec<bool> {
         let e = emu();
-        (161..173).flat_map(|y| (x0..end).map(move |x| (x, y))).map(|(x, y)| e.fb[y as usize * W + x as usize] != bg).collect()
+        (163..175).flat_map(|y| (x0..end).map(move |x| (x, y))).map(|(x, y)| e.fb[y as usize * W + x as usize] != bg).collect()
     };
     let got = mask(end - w - 2);
     let snap = host::snapshot();
-    lcd::fill_rect((end - 120) as u16, 161, 120, 12, bg);
-    sf::label(sf::F14, sf::rect((end - 120) as i16, 161, 120, 12), &u, ui::DIM, bg, 4, 1);
+    lcd::fill_rect((end - 120) as u16, 163, 120, 12, bg);
+    sf::label(sf::F14, sf::rect((end - 120) as i16, 163, 120, 12), &u, ui::DIM, bg, 4, 1);
     let want = mask(end - w - 2);
     host::restore(&snap);
     ck.cases += 1;
