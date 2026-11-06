@@ -141,7 +141,7 @@ scope, generator) shares one ground.
 | LCD controller | [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) (ID read 0x9488) | ID 0x9488 read by `board::init` ([`firmware/TODO.md`](../firmware/TODO.md) T1); stock init sequence `stock/re/analysis/lcd_buzzer_v2_6.h`. Not in the BOM |
 | LCD panel | 3.5" IPS, 480 x 320, active area 74 x 50 mm | review |
 | Touch | Hynitron CST-type controller at I2C 0x5A (chip type byte 0xA8) on this unit; the stock also supports a Goodix GT1158 at 0x14 | [`firmware/src/touch.rs`](../firmware/src/touch.rs); GT1158 path from the stock code only. Not in the BOM (the touch controller sits on the panel FPC) |
-| Bluetooth | Jieli BP2A838-20A2, 24 MHz crystal, PCB meander antenna | BOM (custom Jieli chip, no public datasheet); antenna and 24.000 MHz crystal next to a chip with the Jieli logo in [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
+| Bluetooth | Jieli AC6328A (AC632N family, SOP8, 2 Mbit flash; BOM marking BP2A838-20A2; datasheet: see [datasheets/README.md](datasheets/README.md)), 24 MHz crystal, PCB meander antenna | flash image of the chip (`stock/re/docs/bt-module-ac6328a.md`); 8-pin chip with the Jieli logo next to the antenna and the 24.000 MHz crystal in [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
 | DMM front end | Hycon [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) | code (register protocol, `stock/re/analysis/hy3131_v2_6.h`); the chip itself is under the shield can (4.9152 MHz crystal and VDD/VSS silkscreen next to it in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg)) |
 | HY3131 crystal | 4.9152 MHz | photo and stock constant 4915.2 (`stock/re/analysis/hy3131_v2_6.h`) |
 | Voltage reference | [MAX6190](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf) (1.25 V, 5 ppm/°C) on HY3131 PB6 | BOM only for the part (placement: see [Unknowns](#unknowns)); the 1.25 V value matches the stock scaling ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7) |
@@ -347,10 +347,17 @@ scope and generator ground (*inferred*).
 
 ## Bluetooth
 
-- Module / chip: Jieli BP2A838-20A2 (BOM and the photo), own 24 MHz crystal, PCB meander antenna at the board edge
+- Chip: Jieli AC6328A, SOP8, AC632N family (BOM marking BP2A838-20A2; datasheet: see
+  [datasheets/README.md](datasheets/README.md)), own 24 MHz crystal, PCB meander antenna at the board edge
   ([main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg)). Classic SPP (RFCOMM channel 1,
   [`docs/bt-protocol.md`](../docs/bt-protocol.md)) and BLE ([`firmware/src/bt.rs`](../firmware/src/bt.rs)).
-- UART4: TX PA0, RX PA1 (AF8), 115200 8N1, no RTS/CTS ([`bt.rs`](../firmware/src/bt.rs)).
+- Firmware in the chip: Jieli SDK `spp_and_le` application built as "KT6368A-BLE", variant
+  "BLE03", version `VER2.1-20240615` (its start text). It has 23 `AT+` commands, of which the meter
+  uses `AT+SBN`, `AT+CBN`, `AT+SLED`, `AT+RESET`; the public KT6368A manual describes a different
+  command set. Chip key, flash layout and the full command table: `stock/re/docs/bt-module-ac6328a.md`.
+- UART4: TX PA0, RX PA1 (AF8), 115200 8N1, no RTS/CTS ([`bt.rs`](../firmware/src/bt.rs)). On the
+  chip this is UART1 on pins 7/8 (USB0DM = RX, USB0DP = TX) and PC14 reads pin 2 (PA9), the
+  only other GPIO (*inferred* from the pinout, not traced).
 - PC0 = module power, **low = on**, high = off ([`bt.rs`](../firmware/src/bt.rs),
   `stock/re/analysis/bt_meas_v2_6.h`; [`board.rs`](../firmware/src/board.rs) sets it high at boot = off, as the stock).
 - PC14 = link status input, high = connected ([`power.rs`](../firmware/src/power.rs), [`bt.rs`](../firmware/src/bt.rs)).
