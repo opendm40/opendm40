@@ -28,12 +28,13 @@ macro_rules! tr {
     ("Burden voltage") => { "Caduta tens." };
     ("CSV save failed") => { "Errore CSV" };
     ("Calibrate") => { "Calibra" };
+    ("Calibration, files stay") => { "Calibrazione e file salvi" };
     ("Cancel") => { "Annulla" };
     ("Cannot delete") => { "Non eliminabile" };
     ("Capacitance Settings") => { "Impost. capacit\u{1}" };
     ("Change") => { "Variazione" };
     ("Check leads") => { "Controlla puntali" };
-    ("Clear") => { "Canc." };
+    ("Clear") => { "Cancella" };
     ("Clear limits") => { "Azzera limiti" };
     ("Color") => { "Colore" };
     ("Corners") => { "Angoli" };
@@ -45,12 +46,15 @@ macro_rules! tr {
     ("DMM rate") => { "Velocit\u{1} DMM" };
     ("DMM row") => { "Riga DMM" };
     ("Danger alarm") => { "Allarme pericolo" };
-    ("Decode") => { "Decod." };
+    ("Decode") => { "Decodifica" };
     ("Default") => { "Predef." };
     ("Delete") => { "Elimina" };
     ("Delete failed") => { "Errore elimin." };
     ("Delete screenshot?") => { "Eliminare schermata?" };
+    ("Delete selected") => { "Elimina scelti" };
+    ("Delete selected?") => { "Eliminare i selezionati?" };
     ("Delete this log?") => { "Eliminare log?" };
+    ("Deleting") => { "Eliminazione" };
     ("Device info") => { "Info dispositivo" };
     ("Dim screen") => { "Oscuramento" };
     ("Discharging...") => { "Scarica..." };
@@ -69,6 +73,7 @@ macro_rules! tr {
     ("Falling") => { "Discesa" };
     ("Fast") => { "Veloce" };
     ("File not found") => { "File non trovato" };
+    ("Files changed") => { "File modificati" };
     ("Files live") => { "Sola lett." };
     ("Files live (replug)") => { "Sola lett. (reins.)" };
     ("Free") => { "Libero" };
@@ -79,7 +84,7 @@ macro_rules! tr {
     ("Gallery") => { "Galleria" };
     ("Gallery: screenshots and logs") => { "Galleria: schermate e log" };
     ("Generator is off") => { "Generatore spento" };
-    ("Grid intensity:") => { "Lumin. griglia:" };
+    ("Grid intensity:") => { "Luminosit\u{1} griglia:" };
     ("Halves (stock)") => { "Met\u{1} (orig.)" };
     ("Help") => { "Aiuto" };
     ("History") => { "Storico" };
@@ -126,7 +131,7 @@ macro_rules! tr {
     ("Overload: 10 A shunt selected") => { "Sovraccarico: shunt 10 A" };
     ("PC can edit") => { "PC scrive" };
     ("PC can edit (replug)") => { "Scrittura (reins.)" };
-    ("Persist:") => { "Persist.:" };
+    ("Persist:") => { "Persistenza:" };
     ("Power") => { "Alim." };
     ("Power Settings") => { "Impost. potenza" };
     ("Power off") => { "Spegni" };
@@ -141,9 +146,11 @@ macro_rules! tr {
     ("Recording") => { "Registrazione" };
     ("Recording CSV") => { "Registraz. CSV" };
     ("Replace: 10 A ceramic fuse") => { "Sostituire: ceramico 10 A" };
+    ("Reset settings") => { "Ripristina impostazioni" };
+    ("Reset settings?") => { "Ripristino impostazioni?" };
     ("Resistor Settings") => { "Impost. resistenza" };
     ("Rising") => { "Salita" };
-    ("Roll:") => { "Scorrim.:" };
+    ("Roll:") => { "Scorrimento:" };
     ("SN") => { "S/N" };
     ("Sampling") => { "Acquisizione" };
     ("Save") => { "Salva" };
@@ -155,12 +162,15 @@ macro_rules! tr {
     ("Scope") => { "Oscillosc." };
     ("Screenshot") => { "Schermata" };
     ("Screenshot failed") => { "Errore schermata" };
+    ("Select") => { "Scegli" };
+    ("Selection cleared") => { "Selezione annullata" };
     ("Settings") => { "Impostaz." };
     ("Shutdown") => { "Spegnimento" };
     ("Signal") => { "Generatore" };
     ("Sine") => { "Sinusoide" };
     ("Single") => { "Singolo" };
     ("Smoothing") => { "Livellamento" };
+    ("Some skipped") => { "Alcuni saltati" };
     ("Source:") => { "Sorgente:" };
     ("Square") => { "Quadra" };
     ("Start") => { "Avvia" };
@@ -228,12 +238,13 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Burden voltage", "Caduta tens."),
     ("CSV save failed", "Errore CSV"),
     ("Calibrate", "Calibra"),
+    ("Calibration, files stay", "Calibrazione e file salvi"),
     ("Cancel", "Annulla"),
     ("Cannot delete", "Non eliminabile"),
     ("Capacitance Settings", "Impost. capacit\u{1}"),
     ("Change", "Variazione"),
     ("Check leads", "Controlla puntali"),
-    ("Clear", "Canc."),
+    ("Clear", "Cancella"),
     ("Clear limits", "Azzera limiti"),
     ("Color", "Colore"),
     ("Corners", "Angoli"),
@@ -245,12 +256,15 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("DMM rate", "Velocit\u{1} DMM"),
     ("DMM row", "Riga DMM"),
     ("Danger alarm", "Allarme pericolo"),
-    ("Decode", "Decod."),
+    ("Decode", "Decodifica"),
     ("Default", "Predef."),
     ("Delete", "Elimina"),
     ("Delete failed", "Errore elimin."),
     ("Delete screenshot?", "Eliminare schermata?"),
+    ("Delete selected", "Elimina scelti"),
+    ("Delete selected?", "Eliminare i selezionati?"),
     ("Delete this log?", "Eliminare log?"),
+    ("Deleting", "Eliminazione"),
     ("Device info", "Info dispositivo"),
     ("Dim screen", "Oscuramento"),
     ("Discharging...", "Scarica..."),
@@ -269,6 +283,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Falling", "Discesa"),
     ("Fast", "Veloce"),
     ("File not found", "File non trovato"),
+    ("Files changed", "File modificati"),
     ("Files live", "Sola lett."),
     ("Files live (replug)", "Sola lett. (reins.)"),
     ("Free", "Libero"),
@@ -279,7 +294,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Gallery", "Galleria"),
     ("Gallery: screenshots and logs", "Galleria: schermate e log"),
     ("Generator is off", "Generatore spento"),
-    ("Grid intensity:", "Lumin. griglia:"),
+    ("Grid intensity:", "Luminosit\u{1} griglia:"),
     ("Halves (stock)", "Met\u{1} (orig.)"),
     ("Help", "Aiuto"),
     ("History", "Storico"),
@@ -326,7 +341,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Overload: 10 A shunt selected", "Sovraccarico: shunt 10 A"),
     ("PC can edit", "PC scrive"),
     ("PC can edit (replug)", "Scrittura (reins.)"),
-    ("Persist:", "Persist.:"),
+    ("Persist:", "Persistenza:"),
     ("Power", "Alim."),
     ("Power Settings", "Impost. potenza"),
     ("Power off", "Spegni"),
@@ -341,9 +356,11 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Recording", "Registrazione"),
     ("Recording CSV", "Registraz. CSV"),
     ("Replace: 10 A ceramic fuse", "Sostituire: ceramico 10 A"),
+    ("Reset settings", "Ripristina impostazioni"),
+    ("Reset settings?", "Ripristino impostazioni?"),
     ("Resistor Settings", "Impost. resistenza"),
     ("Rising", "Salita"),
-    ("Roll:", "Scorrim.:"),
+    ("Roll:", "Scorrimento:"),
     ("SN", "S/N"),
     ("Sampling", "Acquisizione"),
     ("Save", "Salva"),
@@ -355,12 +372,15 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Scope", "Oscillosc."),
     ("Screenshot", "Schermata"),
     ("Screenshot failed", "Errore schermata"),
+    ("Select", "Scegli"),
+    ("Selection cleared", "Selezione annullata"),
     ("Settings", "Impostaz."),
     ("Shutdown", "Spegnimento"),
     ("Signal", "Generatore"),
     ("Sine", "Sinusoide"),
     ("Single", "Singolo"),
     ("Smoothing", "Livellamento"),
+    ("Some skipped", "Alcuni saltati"),
     ("Source:", "Sorgente:"),
     ("Square", "Quadra"),
     ("Start", "Avvia"),

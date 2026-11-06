@@ -28,6 +28,7 @@ macro_rules! tr {
     ("Burden voltage") => { "Chute tension" };
     ("CSV save failed") => { "Erreur CSV" };
     ("Calibrate") => { "Calibrer" };
+    ("Calibration, files stay") => { "Calibrage, fichiers gard\u{1}s" };
     ("Cancel") => { "Annuler" };
     ("Cannot delete") => { "Suppr. impossible" };
     ("Capacitance Settings") => { "R\u{1}glages capacit\u{1}" };
@@ -50,7 +51,10 @@ macro_rules! tr {
     ("Delete") => { "Supprimer" };
     ("Delete failed") => { "\u{3}chec suppr." };
     ("Delete screenshot?") => { "Supprimer la capture ?" };
+    ("Delete selected") => { "Suppr. s\u{1}lection" };
+    ("Delete selected?") => { "Supprimer la s\u{1}lection ?" };
     ("Delete this log?") => { "Supprimer ce log ?" };
+    ("Deleting") => { "Suppression" };
     ("Device info") => { "Infos appareil" };
     ("Dim screen") => { "Veille \u{1}cran" };
     ("Discharging...") => { "D\u{1}charge..." };
@@ -69,6 +73,7 @@ macro_rules! tr {
     ("Falling") => { "Desc." };
     ("Fast") => { "Rapide" };
     ("File not found") => { "Fichier introuvable" };
+    ("Files changed") => { "Fichiers modifi\u{1}s" };
     ("Files live") => { "Lecture seule" };
     ("Files live (replug)") => { "Lecture (rebr.)" };
     ("Free") => { "Libre" };
@@ -80,7 +85,7 @@ macro_rules! tr {
     ("Gallery") => { "Galerie" };
     ("Gallery: screenshots and logs") => { "Galerie : captures et logs" };
     ("Generator is off") => { "G\u{1}n\u{1}rateur \u{1}teint" };
-    ("Grid intensity:") => { "Lum. grille :" };
+    ("Grid intensity:") => { "Luminosit\u{1} grille :" };
     ("Halves (stock)") => { "Moiti\u{1}s (origine)" };
     ("Hardware") => { "Mat\u{1}riel" };
     ("Help") => { "Aide" };
@@ -127,7 +132,7 @@ macro_rules! tr {
     ("Overload: 10 A shunt selected") => { "Surcharge : shunt 10 A" };
     ("PC can edit") => { "PC modifie" };
     ("PC can edit (replug)") => { "\u{3}criture (rebr.)" };
-    ("Persist:") => { "Persist. :" };
+    ("Persist:") => { "Persistance :" };
     ("Power") => { "Alim." };
     ("Power Settings") => { "R\u{1}glages puissance" };
     ("Power off") => { "Arr\u{2}t" };
@@ -144,9 +149,11 @@ macro_rules! tr {
     ("Replace: 10 A ceramic fuse") => { "Remplacer : c\u{1}ram. 10 A" };
     ("Reset") => { "RAZ" };
     ("Reset Wh") => { "RAZ Wh" };
+    ("Reset settings") => { "R\u{1}initialiser les r\u{1}glages" };
+    ("Reset settings?") => { "R\u{1}glages par d\u{1}faut ?" };
     ("Resistor Settings") => { "R\u{1}glages r\u{1}sist." };
     ("Rising") => { "Montant" };
-    ("Roll:") => { "D\u{1}fil. :" };
+    ("Roll:") => { "D\u{1}filement :" };
     ("SN") => { "N. s\u{1}rie" };
     ("Sampling") => { "Acquisition" };
     ("Save") => { "Sauver" };
@@ -158,6 +165,8 @@ macro_rules! tr {
     ("Scope") => { "Oscillo" };
     ("Screenshot") => { "Capture" };
     ("Screenshot failed") => { "Erreur capture" };
+    ("Select") => { "Choisir" };
+    ("Selection cleared") => { "S\u{1}lection effac\u{1}e" };
     ("Settings") => { "R\u{1}glages" };
     ("Shutdown") => { "Extinction" };
     ("Signal") => { "G\u{1}n\u{1}rateur" };
@@ -165,6 +174,7 @@ macro_rules! tr {
     ("Single") => { "Monoc." };
     ("Smoothing") => { "Lissage" };
     ("Software") => { "Logiciel" };
+    ("Some skipped") => { "Certains ignor\u{1}s" };
     ("Source:") => { "Source :" };
     ("Square") => { "Carr\u{1}" };
     ("Start") => { "D\u{1}marrer" };
@@ -234,6 +244,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Burden voltage", "Chute tension"),
     ("CSV save failed", "Erreur CSV"),
     ("Calibrate", "Calibrer"),
+    ("Calibration, files stay", "Calibrage, fichiers gard\u{1}s"),
     ("Cancel", "Annuler"),
     ("Cannot delete", "Suppr. impossible"),
     ("Capacitance Settings", "R\u{1}glages capacit\u{1}"),
@@ -256,7 +267,10 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Delete", "Supprimer"),
     ("Delete failed", "\u{3}chec suppr."),
     ("Delete screenshot?", "Supprimer la capture ?"),
+    ("Delete selected", "Suppr. s\u{1}lection"),
+    ("Delete selected?", "Supprimer la s\u{1}lection ?"),
     ("Delete this log?", "Supprimer ce log ?"),
+    ("Deleting", "Suppression"),
     ("Device info", "Infos appareil"),
     ("Dim screen", "Veille \u{1}cran"),
     ("Discharging...", "D\u{1}charge..."),
@@ -275,6 +289,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Falling", "Desc."),
     ("Fast", "Rapide"),
     ("File not found", "Fichier introuvable"),
+    ("Files changed", "Fichiers modifi\u{1}s"),
     ("Files live", "Lecture seule"),
     ("Files live (replug)", "Lecture (rebr.)"),
     ("Free", "Libre"),
@@ -286,7 +301,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Gallery", "Galerie"),
     ("Gallery: screenshots and logs", "Galerie : captures et logs"),
     ("Generator is off", "G\u{1}n\u{1}rateur \u{1}teint"),
-    ("Grid intensity:", "Lum. grille :"),
+    ("Grid intensity:", "Luminosit\u{1} grille :"),
     ("Halves (stock)", "Moiti\u{1}s (origine)"),
     ("Hardware", "Mat\u{1}riel"),
     ("Help", "Aide"),
@@ -333,7 +348,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Overload: 10 A shunt selected", "Surcharge : shunt 10 A"),
     ("PC can edit", "PC modifie"),
     ("PC can edit (replug)", "\u{3}criture (rebr.)"),
-    ("Persist:", "Persist. :"),
+    ("Persist:", "Persistance :"),
     ("Power", "Alim."),
     ("Power Settings", "R\u{1}glages puissance"),
     ("Power off", "Arr\u{2}t"),
@@ -350,9 +365,11 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Replace: 10 A ceramic fuse", "Remplacer : c\u{1}ram. 10 A"),
     ("Reset", "RAZ"),
     ("Reset Wh", "RAZ Wh"),
+    ("Reset settings", "R\u{1}initialiser les r\u{1}glages"),
+    ("Reset settings?", "R\u{1}glages par d\u{1}faut ?"),
     ("Resistor Settings", "R\u{1}glages r\u{1}sist."),
     ("Rising", "Montant"),
-    ("Roll:", "D\u{1}fil. :"),
+    ("Roll:", "D\u{1}filement :"),
     ("SN", "N. s\u{1}rie"),
     ("Sampling", "Acquisition"),
     ("Save", "Sauver"),
@@ -364,6 +381,8 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Scope", "Oscillo"),
     ("Screenshot", "Capture"),
     ("Screenshot failed", "Erreur capture"),
+    ("Select", "Choisir"),
+    ("Selection cleared", "S\u{1}lection effac\u{1}e"),
     ("Settings", "R\u{1}glages"),
     ("Shutdown", "Extinction"),
     ("Signal", "G\u{1}n\u{1}rateur"),
@@ -371,6 +390,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Single", "Monoc."),
     ("Smoothing", "Lissage"),
     ("Software", "Logiciel"),
+    ("Some skipped", "Certains ignor\u{1}s"),
     ("Source:", "Source :"),
     ("Square", "Carr\u{1}"),
     ("Start", "D\u{1}marrer"),

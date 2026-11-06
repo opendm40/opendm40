@@ -3204,15 +3204,18 @@ pub const S_OHM_NEG: u8 = 22;
 /// stock): ON restarts the multimeter after a power-off as it was (app.rs
 /// `restore`).
 pub const S_REMEMBER: u8 = 23;
+/// Reset settings: a confirm, then a restart with the defaults (app.rs
+/// `reset_ask`).
+pub const S_RESET: u8 = 24;
 /// Number of settings (the value array's length).
-pub const SET_N: usize = 24;
+pub const SET_N: usize = 25;
 
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
     crate::tr!("Dim screen"), crate::tr!("Shutdown"), crate::tr!("Backlight"), crate::tr!("Key/alert volume"), crate::tr!("Bluetooth"), crate::tr!("Start page"), crate::tr!("Analog power"),
     crate::tr!("DMM rate"), crate::tr!("Smoothing"), crate::tr!("DMM row"), crate::tr!("Temp unit"), crate::tr!("Swipe"), crate::tr!("Press effect"), crate::tr!("Tap step"), crate::tr!("Help"), crate::tr!("Jack alerts"),
     crate::tr!("Danger alarm"), crate::tr!("USB disk"), crate::tr!("Burden voltage"), crate::tr!("Device info"), crate::tr!("Touch test"), crate::tr!("Accuracy"), crate::tr!("Negative ohm"),
-    crate::tr!("Mode Remember"),
+    crate::tr!("Mode Remember"), crate::tr!("Reset settings"),
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
@@ -3224,7 +3227,7 @@ pub const SET_TABS: [(&str, &[u8]); 6] = [
     (crate::tr!("Power"), &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     (crate::tr!("Multimeter"), &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     (crate::tr!("Scope"), &[S_SWIPE, S_PRESS, S_TAP_STEP]),
-    (crate::tr!("Other"), &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP]),
+    (crate::tr!("Other"), &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP, S_RESET]),
 ];
 /// The section of the USB disk row (its value follows the bus), the
 /// Device / touch test / help rows (their pages return to it).
@@ -3232,7 +3235,7 @@ pub const TAB_OTHER: u8 = 5;
 
 /// Rows that open a page (a ">" instead of a value).
 pub fn set_opens(id: u8) -> bool {
-    matches!(id, S_HELP | S_DEVICE | S_TOUCH)
+    matches!(id, S_HELP | S_DEVICE | S_TOUCH | S_RESET)
 }
 
 /// Rows with a -/+ stepper.

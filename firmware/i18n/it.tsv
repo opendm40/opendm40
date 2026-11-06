@@ -53,7 +53,7 @@ Back	Indietro	M
 Next >	Succ >	M
 Save	Salva	M
 Delete	Elimina	M
-Clear	Canc.	M
+Clear	Cancella	M
 Default	Predef.	M
 Reset	Reset	M
 Start	Avvia	M
@@ -66,7 +66,7 @@ Edge	Fronte	M
 Pulse	Impulso	M
 Trigger	Trigger	M
 Measure	Misure	M
-Decode	Decod.	M
+Decode	Decodifica	M
 Window	Finestra	M
 Sine	Sinusoide	M
 Square	Quadra	M
@@ -81,10 +81,10 @@ Type:	Tipo:	M
 Mode:	Modo:	M
 Mode	Modo	M
 Edge:	Fronte:	M
-Persist:	Persist.:	M
-Roll:	Scorrim.:	M
+Persist:	Persistenza:	M
+Roll:	Scorrimento:	M
 Brightness:	Luminosità:	M
-Grid intensity:	Lumin. griglia:	M
+Grid intensity:	Luminosità griglia:	M
 FFT Unit	Unità FFT	M
 Source:	Sorgente:	M
 Threshold:	Soglia:	M
@@ -222,3 +222,13 @@ A input path intact	Ingresso A integro	M
 No ohm reading	Nessuna lettura Ω	M
 expect ~48 \u{3a9}	attesi ~48 \u{3a9}	M
 Runt	Runt	E
+Reset settings	Ripristina impostazioni	M
+Reset settings?	Ripristino impostazioni?	M
+Calibration, files stay	Calibrazione e file salvi	M
+Select	Scegli	M
+Delete selected	Elimina scelti	M
+Delete selected?	Eliminare i selezionati?	M
+Deleting	Eliminazione	M
+Selection cleared	Selezione annullata	M
+Files changed	File modificati	M
+Some skipped	Alcuni saltati	M

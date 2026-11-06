@@ -71,8 +71,22 @@
 080592f0	Voltage on circuit - power off
 080592f0	Voltage on V jack, no current
 080592f0	Yes
+080592f0	Reset settings?
+080592f0	Calibration, files stay
+080592f0	Delete selected?
+080592f0	Deleting
+080592f0	Selection cleared
+080592f0	Files changed
+080592f0	Some skipped
+080592f0	Disk read error
+080592f0	Delete failed
+080592f0	Delete
+080592f0	Stop recording
 0805b138	OK
 0805b138	Wave
+0805b138	Disk busy
+0805b138	No data
+0805b138	Recording
 0806b13c	< Back
 0806b13c	10 min
 0806b13c	1 hour
@@ -187,4 +201,7 @@
 0806b13c	Wave
 0806b13c	Wiring
 0806b13c	Zero
+0806b13c	Reset settings
+0806b13c	Select
+0806b13c	Delete selected
 # Which stock font draws which string (ui-render, LANG_LOG): tools/mklang_x.py.

@@ -81,10 +81,10 @@ Type:	Type :	M
 Mode:	Mode :	M
 Mode	Mode	M
 Edge:	Front :	M
-Persist:	Persist. :	M
-Roll:	Défil. :	M
+Persist:	Persistance :	M
+Roll:	Défilement :	M
 Brightness:	Luminosité :	M
-Grid intensity:	Lum. grille :	M
+Grid intensity:	Luminosité grille :	M
 FFT Unit	Unité FFT	M
 Source:	Source :	M
 Threshold:	Seuil :	M
@@ -222,3 +222,13 @@ A input path intact	Entrée A : circuit intact	M
 No ohm reading	Pas de mesure en Ω	M
 expect ~48 \u{3a9}	attendu ~48 \u{3a9}	M
 Runt	Runt	E
+Reset settings	Réinitialiser les réglages	M
+Reset settings?	Réglages par défaut ?	M
+Calibration, files stay	Calibrage, fichiers gardés	M
+Select	Choisir	M
+Delete selected	Suppr. sélection	M
+Delete selected?	Supprimer la sélection ?	M
+Deleting	Suppression	M
+Selection cleared	Sélection effacée	M
+Files changed	Fichiers modifiés	M
+Some skipped	Certains ignorés	M

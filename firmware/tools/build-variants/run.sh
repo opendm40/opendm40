@@ -5,8 +5,6 @@
 #   spi-disk          --no-default-features --features ad2-isr (the writable
 #                     SPI disk as the USB LUN, no generated volume)
 #   fatren-dry-run, keep-screen
-#   acdc-meth         the AC+DC prototype methods B / C (src/acdcm.rs, ~1 100
-#                     lines no default build compiles)
 #   memprobe          DBG:PEEK? / POKE / MTEST? ... (src/memprobe.rs)
 #   dev               the developer image (./build.sh --dev, feature dbg-dev)
 # Each one is a full build.sh run (link asserts: TCM stack, SRAM, regions
@@ -34,7 +32,6 @@ run no-ad2-isr --no-default-features --features vdisk
 run spi-disk --no-default-features --features ad2-isr
 run fatren-dry-run --features fatren-dry-run
 run keep-screen --features keep-screen
-run acdc-meth --features acdc-meth
 run memprobe --features memprobe
 run dev --dev
 [ -f opendm40.bin ] && echo "opendm40.bin untouched: $(stat -c %y opendm40.bin)"

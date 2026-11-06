@@ -1746,6 +1746,12 @@ Windows 和 macOS：未测试。
 
 - 在查看器中点击显示操作条：**< Back**、名称和编号，以及 **Delete**。左右滑动到下一个或上一个文件。
 - **Delete** 要求确认（**Cancel** / **Delete**）。
+- 删除多个文件：在网格中点 **Select**，点选图块（翻页后勾选保留），点 **Delete selected**。再点一次 **Select** 退出。正在记录的文件不能勾选。
+
+![在图库中选择文件](img/gallery-select.png)
+
+*在图库中选择文件。*
+
 - 标题栏的 **< Back** 或 **MENU** 返回。
 
 图库也显示原厂固件的截图。
@@ -1831,6 +1837,7 @@ Windows 和 macOS：未测试。
 | **Device info** | | | 打开 [Device 页](#device-页)。 |
 | **Touch test** | | | [触摸测试页](#触摸测试)。 |
 | **Help** | | | [屏幕帮助](#屏幕帮助)。 |
+| **Reset settings** | | | 点 **Yes** 后表重启，所有设置恢复默认，进入 DC V。触摸和功率计校准、文件和蓝牙配对保留。记录期间拒绝执行。 |
 
 ### Device 页
 

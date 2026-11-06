@@ -50,13 +50,6 @@ mod clock;
 mod dialog;
 #[path = "../../src/sentinel.rs"]
 mod sentinel;
-// dmm.rs acdcm.rs (AC+DC method C): chip access only.
-mod ad2exp {
-    pub fn dc_enter(_mode: u8, _r: u8, _r26: u8, _measure: bool) {}
-    pub fn dcv_row(_r: u8, _r26: u8, _opt: u8, _op1chop: u8, _ad2: bool) -> [u8; crate::hy3131::CFG_LEN] {
-        [0; crate::hy3131::CFG_LEN]
-    }
-}
 #[path = "../../src/fastvos.rs"]
 mod fastvos;
 #[path = "../../src/dmm.rs"]
@@ -2901,7 +2894,7 @@ fn main() {
 
     // 6e. Confirm dialogs (dialog.rs, one box and Yes / No): power off,
     // energy reset, the firmware install question (vwrite.rs).
-    for (k, f) in [("power-off", dialog::power_off as fn()), ("energy-reset", dialog::energy_reset), ("fw-install", dialog::fw_install)] {
+    for (k, f) in [("power-off", dialog::power_off as fn()), ("energy-reset", dialog::energy_reset), ("settings-reset", dialog::settings_reset), ("fw-install", dialog::fw_install)] {
         host::reset(0);
         f();
         let (x, y, w2, h2) = dialog::BOX;

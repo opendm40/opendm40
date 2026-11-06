@@ -28,40 +28,6 @@ pub mod pw;
 #[path = "acdctr.rs"]
 pub mod acdctr;
 use acdctr::{self as tr, TrEnt};
-/// AC+DC methods B / C (DBG:ACDC:METH): only with the feature `acdc-meth`
-/// (Cargo.toml); without it method A (the stock alternation) is all there
-/// is and the hooks below are empty.
-#[cfg(feature = "acdc-meth")]
-#[path = "acdcm.rs"]
-pub mod am;
-#[cfg(not(feature = "acdc-meth"))]
-mod am {
-    use super::*;
-    impl Dmm {
-        #[inline(always)]
-        pub(super) fn am_on(&self) -> bool {
-            false
-        }
-        #[inline(always)]
-        pub(super) fn am_enter(&mut self) {}
-        #[inline(always)]
-        pub(super) fn am_mode(&mut self) -> bool {
-            false
-        }
-        #[inline(always)]
-        pub(super) fn am_row(&mut self, cfg: &[u8; hy::CFG_LEN]) -> [u8; hy::CFG_LEN] {
-            *cfg
-        }
-        #[inline(always)]
-        pub(super) fn am_ref(&mut self, _: &mut Clock, _: f32, _: f32, _: u8, _: &'static str, _: f32, _: (u8, i8)) -> Option<Reading> {
-            None
-        }
-        #[inline(always)]
-        pub(super) fn poll_am(&mut self, _: &mut Clock, _: u64) -> Option<Reading> {
-            None
-        }
-    }
-}
 #[cfg(all(target_os = "none", feature = "dbg-src"))]
 #[path = "dbgsrc_dmm.rs"]
 pub mod src;
@@ -2081,9 +2047,6 @@ pub struct Dmm {
     fuse_res: sentinel::FuseRes,
     /// Power meter state and settings (powermeter.rs).
     pub pw: &'static mut Pw,
-    /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only; feature `acdc-meth`).
-    #[cfg(feature = "acdc-meth")]
-    pub am: &'static mut am::Am,
     /// AC+DC event trace (acdctr.rs; DBG:ACDC:TRACE, RAM only, off at boot).
     pub tr: &'static mut tr::Trace,
     /// Burden voltage readout in the A functions (Settings > Multimeter "Burden
@@ -2718,8 +2681,6 @@ impl Dmm {
             fuse_job: None,
             fuse_res: sentinel::FuseRes::Idle,
             pw: pw::pw_static(),
-            #[cfg(feature = "acdc-meth")]
-            am: am::am_static(),
             tr: tr::tr_static(),
             burden_show: false,
             ohm_neg: false,
@@ -2994,11 +2955,6 @@ impl Dmm {
         if self.pw.on {
             return self.pw_write_config(clk);
         }
-        // AC+DC method B / C (acdcm.rs): the step's row, no sentinel.
-        let am = self.am_on();
-        if am {
-            self.am_mode();
-        }
         let m = self.mode;
         let r = self.range.max(0) as usize;
         let cfg: &[u8; hy::CFG_LEN] = match m {
@@ -3037,7 +2993,6 @@ impl Dmm {
         let pre = self.precond_ms != 0
             && self.a_blind
             && matches!(m, 7..=9)
-            && !am
             && self.func() != self.sent_mode
             && self.sent.mask & sentinel::M_VJACK != 0
             && self.fuse_job.is_none();
@@ -3075,10 +3030,10 @@ impl Dmm {
         // Misconnect sentinel: the stock row with the idle comparator / AD1
         // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
         let mask = if self.fuse_job.is_some() || src_row.is_some() { 0 } else { self.sent.mask };
-        let (row, kind) = if am { (self.am_row(cfg), Kind::Off) } else { sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg) };
+        let (row, kind) = sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg);
         // The comparator rows' negative leg (sentinel NEGATIVE LEG): AD2 on
         // PB1 (not ohm 600 Mohm: its phases write R32 whole).
-        let neg = !am && !is_ohm600(m, self.range) && sentinel::neg_leg(m, r as u8, self.acdc, kind, sentinel::variant());
+        let neg = !is_ohm600(m, self.range) && sentinel::neg_leg(m, r as u8, self.acdc, kind, sentinel::variant());
         let row = if neg { sentinel::neg_row(&row) } else { row };
         // The probe (PB2) over the comparator rows after a hit, and while
         // latched in every DC V / mV / ohm / temperature row (OP2 / AD2 are
@@ -3103,13 +3058,13 @@ impl Dmm {
         // row enables AD1 last: ENAD1 0 -> 1 restarts it (emulator
         // autorangetest from 1000 V: 0.84 V without).
         let mut row = row;
-        let dc_rows = self.dc_rated() && !am && src_row.is_none();
+        let dc_rows = self.dc_rated() && src_row.is_none();
         if dc_rows {
             row[2] = self.dc_r22();
         }
         let restart = dc_rows && row[2] == self.r22 && row[3] & 0x80 != 0;
         self.jwin = 0;
-        if sentinel::ad1_last(kind, &row) || ((self.probe || am || restart) && row[3] & 0x80 != 0) {
+        if sentinel::ad1_last(kind, &row) || ((self.probe || restart) && row[3] & 0x80 != 0) {
             let mut c = row;
             c[3] &= !0x80;
             hy::configure(&c);
@@ -3412,7 +3367,7 @@ impl Dmm {
 
     /// Vet one DC conversion (`vet_start`): true = use it.
     fn vet_ad1(&mut self, ad1: i32) -> bool {
-        if self.vet_left == 0 || self.am_on() {
+        if self.vet_left == 0 {
             return true;
         }
         let p = self.vet_prev;
@@ -3492,7 +3447,7 @@ impl Dmm {
     /// no step down then (the magnitude would use the stale AC part; device
     /// decaf60 / emulator: a DC -> AC current step walked uA -> 10 A -> mA).
     fn acs_dc_step(&mut self, now: u64, x: f32, lim: f32) -> bool {
-        if !self.acdc || self.am_on() {
+        if !self.acdc {
             return false;
         }
         if self.acs_t0 == 0 && (x - self.acs_dc).abs() > ACS_DC_STEP * lim {
@@ -3730,7 +3685,6 @@ impl Dmm {
         self.cpl_auto = sub == 3;
         self.phase_n = 0;
         self.reset_values();
-        self.am_enter();
         self.set(clk, if sub == 1 { ac } else { dc }, r, t);
         // A coupling change starts the function afresh (`entry_ms`: the
         // AUTO coupling's SCPI wait counts from it) even on the same mode.
@@ -4805,7 +4759,6 @@ impl Dmm {
         let r = if self.pw.on { self.poll_power(clk, now) } else { None };
         let r = if self.pw.on { r } else { match self.mode {
             10 | 12 if src::active() => self.poll_src(now),
-            0 | 4..=6 if self.am_on() => self.poll_am(clk, now),
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
             1 | 3 => self.poll_dcv(clk),
             7..=9 => self.poll_dca(clk),
@@ -5130,9 +5083,7 @@ impl Dmm {
             if m == 1 {
                 if up && r < 3 {
                     self.set(clk, 1, r as i8 + 1, 250);
-                } else if self.acdc_down(now, vet && !hold && mag < 0.1 * lim / ov && !self.am_on()) {
-                    // (not in an AC+DC method's reference step: it is taken at
-                    // the method's range, acdcm.rs)
+                } else if self.acdc_down(now, vet && !hold && mag < 0.1 * lim / ov) {
                     if r > 0 {
                         self.set(clk, 1, r as i8 - 1, 250);
                     } else if self.v_auto & 2 != 0 {
@@ -5145,7 +5096,7 @@ impl Dmm {
                 } else if self.v_auto & 1 != 0 {
                     self.set(clk, 1, 0, 350);
                 }
-            } else if r == 1 && self.acdc_down(now, vet && !hold && mag < 0.1 * lim / ov && !self.am_on()) {
+            } else if r == 1 && self.acdc_down(now, vet && !hold && mag < 0.1 * lim / ov) {
                 // 600 mV -> 60 mV (opendm40; the stock steps mV only up and
                 // leaves 60 mV to a manual choice): the stock's down rule of
                 // every other range, below 0.1 x the range / over (58.3 mV;
@@ -5170,7 +5121,7 @@ impl Dmm {
             return;
         }
         let d = self.dc_val;
-        let jump = vet && !self.am_on() && d.abs() > 0.01 * lim && (x - d).abs() > tr::TR_JUMP * d.abs();
+        let jump = vet && d.abs() > 0.01 * lim && (x - d).abs() > tr::TR_JUMP * d.abs();
         let fl = vet as u8 * tr::F_VET | jump as u8 * tr::F_TRIG | hold as u8 * tr::F_HOLD;
         self.tr_ev(now, tr::K_DC, ad1, x, fl);
     }
@@ -5205,9 +5156,6 @@ impl Dmm {
             let ol = x.abs() / lim > ov;
             let v = if ol { Val::ol(dec, unit) } else { Val::new(x, dec, unit).with_ext(ext) };
             return Some(self.reading(v, x * si_k));
-        }
-        if self.am_on() {
-            return self.am_ref(clk, x, lim, dec, unit, si_k, before);
         }
         if (self.mode, self.range) != before {
             return None;
@@ -5351,10 +5299,6 @@ impl Dmm {
             (self.dc_val, dm)
         };
         self.auto_total_si = t * si_k;
-        #[cfg(feature = "acdc-meth")]
-        {
-            self.am.n_rd = self.am.n_rd.wrapping_add(1);
-        }
         let ol = v.abs() / lim > self.over();
         let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
         rd.mode = mode;

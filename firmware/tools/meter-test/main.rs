@@ -38,13 +38,9 @@ mod meter;
 mod fastenc;
 #[path = "../../src/logger.rs"]
 mod logger;
-// logger.rs `start` / `dc_prepare` (the DC rows' AD2 row), dmm.rs acdcm.rs
-// (AC+DC method C): chip access only.
+// logger.rs `start` / `dc_prepare` (the DC rows' AD2 row): chip access only.
 mod ad2exp {
     pub fn dc_enter(_mode: u8, _r: u8, _r26: u8, _measure: bool) {}
-    pub fn dcv_row(_r: u8, _r26: u8, _opt: u8, _op1chop: u8, _ad2: bool) -> [u8; crate::hy3131::CFG_LEN] {
-        [0; crate::hy3131::CFG_LEN]
-    }
 }
 // The wave view's streaming trigger (logger.rs `wave`).
 #[path = "../../src/trigsoft.rs"]

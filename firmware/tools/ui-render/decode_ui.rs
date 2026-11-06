@@ -413,7 +413,7 @@ pub fn run(ck: &mut Checker, out: &str) {
             stock::draw_with(&sc, &pv);
             let name = format!("decode/setup/{k}/{}", combined as u8);
             ck.check_replica(&name);
-            let page = Bx::new(14, 61, 399, ud::PAGE_H as i32 - 1);
+            let page = Bx::new(scope_ui::MF_X as i32 + 1, 61, scope_ui::MF_W as i32 - 2, ud::PAGE_H as i32 - 1);
             let dali = v.proto == dc::P_DALI;
             let mut add: Vec<Bx> = ud::SU_LABELS[..if dali { 5 } else { 6 }].iter().map(|r| rb(*r)).collect();
             let thr = ud::thr_rects(dali);
@@ -427,7 +427,7 @@ pub fn run(ck: &mut Checker, out: &str) {
                     add.push(rb(r));
                 }
             }
-            ck.check_add(&name, &[("page", page)], &add, Bx::new(13, 20, 401, 40 + ud::PAGE_H as i32));
+            ck.check_add(&name, &[("page", page)], &add, Bx::new(scope_ui::MF_X as i32, 20, scope_ui::MF_W as i32, 40 + ud::PAGE_H as i32));
             if k == 0 && !combined {
                 save(out, "d06-decode-tab");
             }
@@ -472,7 +472,7 @@ pub fn log_view(ck: &mut Checker, out: &str) {
         add.push(rb(r));
     }
     let b = ul::SU_BOX;
-    ck.check_add("decode/log/setup", &[("page", Bx::new(14, 61, 399, ud::PAGE_H as i32 - 1))], &add, Bx::new(b.x as i32, b.y as i32, b.w as i32, b.h as i32));
+    ck.check_add("decode/log/setup", &[("page", Bx::new(scope_ui::MF_X as i32 + 1, 61, scope_ui::MF_W as i32 - 2, ud::PAGE_H as i32 - 1))], &add, Bx::new(b.x as i32, b.y as i32, b.w as i32, b.h as i32));
     save(out, "d11-log-setup");
     log_snippet(ck, "d12-log-wave-uart", false);
     save(out, "d12-log-wave-uart");

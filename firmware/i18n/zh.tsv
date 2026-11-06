@@ -223,3 +223,13 @@ A input path intact	A 输入通路完好	M
 No ohm reading	无电阻读数	R
 expect ~48 \u{3a9}	应约 48 \u{3a9}	R
 Runt	欠幅	M
+Reset settings	恢复默认设置	M
+Reset settings?	恢复默认设置?	M
+Calibration, files stay	校准和文件保留	M
+Select	选择	M
+Delete selected	删除所选	M
+Delete selected?	删除所选文件?	M
+Deleting	正在删除	M
+Selection cleared	已清除选择	M
+Files changed	文件已更改	M
+Some skipped	部分已跳过	M

@@ -29,6 +29,7 @@
  row
  rows
  s average
+ selected
  stored
  to 
  uA
@@ -253,6 +254,7 @@ Decode log: MCX input only
 Decode log: inrush page open
 Decode log: no DALI
 Decode log: scope record in use
+Deleted 
 Device
 Disk full: log ended
 EXC
@@ -272,6 +274,7 @@ FUSE?
 Fast log cancelled
 Fast log failed
 Fast: DC/AC V or A only
+Files: 
 Firmware received
 Firmware upload
 Fit error: mean 

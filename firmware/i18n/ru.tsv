@@ -53,7 +53,7 @@ Back	Назад	M
 Next >	След >	M
 Save	Сохр.	M
 Delete	Удалить	M
-Clear	Очист.	M
+Clear	Очистить	M
 Default	Умолч.	M
 Reset	Сброс	M
 Start	Старт	M
@@ -81,7 +81,7 @@ Type:	Тип:	M
 Mode:	Режим:	M
 Mode	Режим	M
 Edge:	Фронт:	M
-Persist:	Послесвеч.:	M
+Persist:	Послесвечение:	M
 Roll:	Прокрутка:	M
 Brightness:	Яркость:	M
 Grid intensity:	Яркость сетки:	M
@@ -222,3 +222,13 @@ A input path intact	Цепь входа A цела	M
 No ohm reading	Нет показания Ω	M
 expect ~48 \u{3a9}	ожидается ~48 \u{3a9}	M
 Runt	Runt	E
+Reset settings	Сброс настроек	M
+Reset settings?	Сбросить настройки?	M
+Calibration, files stay	Калибр. и файлы целы	M
+Select	Выбрать	M
+Delete selected	Удалить выбр.	M
+Delete selected?	Удалить выбранные?	M
+Deleting	Удаление	M
+Selection cleared	Выбор сброшен	M
+Files changed	Файлы изменились	M
+Some skipped	Часть пропущена	M

@@ -6,13 +6,21 @@ static X_SC_F16_B: [u8; 32] = *b"\
     \x00\x03\xe1\xfd\x49\x92\x47\x90\xe0\x00\x00\x03\xe5\xfe\x49\x52\x47\x90\xe0\x00\x00\x01\xff\x1f\xf5\x11\x91\x11\x11\x10\x10\x00\
 ";
 #[link_section = ".rodata.fonts.LANG_ASCII26_E"]
-static X_ASCII26_E: [Entry; 2] = [E(1,0,12,17,13,-2,0,17), E(3,64,11,21,13,-2,0,21)];
+static X_ASCII26_E: [Entry; 3] = [E(1,0,12,17,13,-2,0,17), E(2,64,12,17,13,-2,0,17), E(3,130,11,21,13,-2,0,21)];
 #[link_section = ".rodata.fonts.LANG_ASCII26_B"]
-static X_ASCII26_B: [u8; 117] = *b"\
+static X_ASCII26_B: [u8; 183] = *b"\
     \xab\xbe\xa7\x7d\x3e\xfb\xf1\xc4\x32\xcf\x28\x20\x62\x97\x7a\xe0\x86\x6b\xd6\xba\xd9\x2e\x04\xe4\xe6\x85\x55\xa8\xdf\x8b\x4b\xbd\
     \x96\x59\x65\x91\x0b\xfc\xe2\xed\x22\x22\x22\x22\x2b\x5c\x09\x8b\x6d\xb8\xb9\xac\xd5\xb7\x64\x51\x86\x5e\x38\x84\xc3\x18\xde\xe0\
-    \xa7\x7d\x3e\xfa\x3b\xef\xce\xd2\x94\xa5\x29\x4a\x52\xb2\x5e\x8d\x23\x37\x5d\x75\xd7\x5c\xe9\x14\x01\x22\xf6\x59\x65\x96\x3c\x4b\
-    \xe7\x81\x22\x80\x02\x47\x73\xcf\x3c\xf3\xce\xc9\x7a\x36\x50\x84\x21\x08\x42\x10\x70\
+    \xa7\x9e\x9f\xf3\xd1\xdf\x9d\xf7\xe3\x88\x65\x9e\x50\x40\xc5\x2e\xf5\xc1\x0c\xd7\xad\x75\xb2\x5c\x09\xc9\xcd\x0a\xab\x51\xbf\x16\
+    \x97\x7b\x2c\xb2\xcb\x22\x17\xf9\xc5\xda\x44\x44\x44\x44\x56\xb8\x13\x16\xdb\x71\x73\x59\xab\x6e\xc8\xa3\x0c\xbc\x71\x09\x86\x31\
+    \xbd\xc0\xa7\x7d\x3e\xfa\x3b\xef\xce\xd2\x94\xa5\x29\x4a\x52\xb2\x5e\x8d\x23\x37\x5d\x75\xd7\x5c\xe9\x14\x01\x22\xf6\x59\x65\x96\
+    \x3c\x4b\xe7\x81\x22\x80\x02\x47\x73\xcf\x3c\xf3\xce\xc9\x7a\x36\x50\x84\x21\x08\x42\x10\x70\
+";
+#[link_section = ".rodata.fonts.LANG_F14_E"]
+static X_F14_E: [Entry; 1] = [E(1,0,6,10,6,0,0,10)];
+#[link_section = ".rodata.fonts.LANG_F14_B"]
+static X_F14_B: [u8; 8] = *b"\
+    \x0f\x87\xf5\x26\x49\x1e\x43\x80\
 ";
 #[link_section = ".rodata.fonts.LANG_TEXT22_E"]
 static X_TEXT22_E: [Entry; 6] = [E(1,0,11,14,11,3,0,14), E(2,20,11,14,11,3,0,14), E(3,40,11,19,11,3,0,19), E(4,67,11,14,11,3,0,14), E(5,87,11,14,11,3,0,14), E(6,107,11,14,11,3,0,14)];
@@ -27,4 +35,4 @@ pub const N: usize = 0;
 pub const SIZE: u8 = 0;
 pub const GB: usize = 1;
 pub static G: [u8; 0] = [];
-pub static EXTRA: [(u32, FontData); 3] = [(0x0804F260, FontData { line_h: 16, descent: 0, fmt: BIT1, entries: &X_SC_F16_E, blob: &X_SC_F16_B }), (0x080592F0, FontData { line_h: 26, descent: 7, fmt: HUF, entries: &X_ASCII26_E, blob: &X_ASCII26_B }), (0x0806B13C, FontData { line_h: 22, descent: 0, fmt: BIT1, entries: &X_TEXT22_E, blob: &X_TEXT22_B })];
+pub static EXTRA: [(u32, FontData); 4] = [(0x0804F260, FontData { line_h: 16, descent: 0, fmt: BIT1, entries: &X_SC_F16_E, blob: &X_SC_F16_B }), (0x080592F0, FontData { line_h: 26, descent: 7, fmt: HUF, entries: &X_ASCII26_E, blob: &X_ASCII26_B }), (0x0805B138, FontData { line_h: 14, descent: 3, fmt: BIT1, entries: &X_F14_E, blob: &X_F14_B }), (0x0806B13C, FontData { line_h: 22, descent: 0, fmt: BIT1, entries: &X_TEXT22_E, blob: &X_TEXT22_B })];
