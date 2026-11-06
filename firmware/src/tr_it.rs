@@ -96,7 +96,7 @@ macro_rules! tr {
     ("Install it now?") => { "Installare ora?" };
     ("Installing firmware...") => { "Installazione..." };
     ("Interval") => { "Intervallo" };
-    ("Jack alerts") => { "Avvisi boccole" };
+    ("Jack alerts") => { "Boccole" };
     ("Key/alert volume") => { "Volume tasti" };
     ("Lead from V/ohm jack to A") => { "Puntale da V/\u{3a9} ad A" };
     ("Limits") => { "Limiti" };
@@ -309,7 +309,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Install it now?", "Installare ora?"),
     ("Installing firmware...", "Installazione..."),
     ("Interval", "Intervallo"),
-    ("Jack alerts", "Avvisi boccole"),
+    ("Jack alerts", "Boccole"),
     ("Key/alert volume", "Volume tasti"),
     ("Lead from V/ohm jack to A", "Puntale da V/\u{3a9} ad A"),
     ("Limits", "Limiti"),

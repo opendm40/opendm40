@@ -105,7 +105,7 @@ macro_rules! tr {
     ("Install it now?") => { "\u{19}c\u{3}a\u{2}o\u{c}\u{1}\u{3}\u{8}?" };
     ("Installing firmware...") => { "\u{19}c\u{3}a\u{2}o\u{c}\u{4}a \u{6}po\u{16}\u{1}\u{c}\u{4}\u{1}..." };
     ("Interval") => { "\u{1d}\u{2}\u{3}ep\u{c}a\u{5}" };
-    ("Jack alerts") => { "\u{f}pe\u{7}y\u{6}p. \u{13}\u{2}\u{451}\u{e}\u{7}" };
+    ("Jack alerts") => { "Ko\u{2}\u{3}po\u{5}\u{8} \u{13}\u{2}\u{451}\u{e}\u{7}" };
     ("Key/alert volume") => { "\u{1a}po\u{b}\u{4}oc\u{3}\u{8}" };
     ("Lead from V/ohm jack to A") => { "\u{429}y\u{6} \u{1}\u{e} \u{13}\u{2}e\u{e}\u{7}a V/\u{3a9} \u{c} A" };
     ("Limits") => { "\u{1f}\u{1}\u{b}\u{1}\u{3}\u{11}" };
@@ -342,7 +342,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Install it now?", "\u{19}c\u{3}a\u{2}o\u{c}\u{1}\u{3}\u{8}?"),
     ("Installing firmware...", "\u{19}c\u{3}a\u{2}o\u{c}\u{4}a \u{6}po\u{16}\u{1}\u{c}\u{4}\u{1}..."),
     ("Interval", "\u{1d}\u{2}\u{3}ep\u{c}a\u{5}"),
-    ("Jack alerts", "\u{f}pe\u{7}y\u{6}p. \u{13}\u{2}\u{451}\u{e}\u{7}"),
+    ("Jack alerts", "Ko\u{2}\u{3}po\u{5}\u{8} \u{13}\u{2}\u{451}\u{e}\u{7}"),
     ("Key/alert volume", "\u{1a}po\u{b}\u{4}oc\u{3}\u{8}"),
     ("Lead from V/ohm jack to A", "\u{429}y\u{6} \u{1}\u{e} \u{13}\u{2}e\u{e}\u{7}a V/\u{3a9} \u{c} A"),
     ("Limits", "\u{1f}\u{1}\u{b}\u{1}\u{3}\u{11}"),

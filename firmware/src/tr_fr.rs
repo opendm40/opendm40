@@ -98,7 +98,7 @@ macro_rules! tr {
     ("Install it now?") => { "Installer ?" };
     ("Installing firmware...") => { "Installation..." };
     ("Interval") => { "Intervalle" };
-    ("Jack alerts") => { "Alertes bornes" };
+    ("Jack alerts") => { "Bornes" };
     ("Key/alert volume") => { "Volume touches" };
     ("Lead from V/ohm jack to A") => { "Cordon de V/\u{3a9} vers A" };
     ("Limits") => { "Limites" };
@@ -211,7 +211,7 @@ macro_rules! tr {
     ("Width:") => { "Largeur :" };
     ("Window") => { "Fen\u{2}tre" };
     ("Wiring") => { "Sch\u{1}ma" };
-    ("With volume") => { "Selon le volume" };
+    ("With volume") => { "Avec volume" };
     ("Yes") => { "Oui" };
     ("Zero") => { "Z\u{1}ro" };
     ("expect ~48 \u{3a9}") => { "attendu ~48 \u{3a9}" };
@@ -317,7 +317,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Install it now?", "Installer ?"),
     ("Installing firmware...", "Installation..."),
     ("Interval", "Intervalle"),
-    ("Jack alerts", "Alertes bornes"),
+    ("Jack alerts", "Bornes"),
     ("Key/alert volume", "Volume touches"),
     ("Lead from V/ohm jack to A", "Cordon de V/\u{3a9} vers A"),
     ("Limits", "Limites"),
@@ -430,7 +430,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Width:", "Largeur :"),
     ("Window", "Fen\u{2}tre"),
     ("Wiring", "Sch\u{1}ma"),
-    ("With volume", "Selon le volume"),
+    ("With volume", "Avec volume"),
     ("Yes", "Oui"),
     ("Zero", "Z\u{1}ro"),
     ("expect ~48 \u{3a9}", "attendu ~48 \u{3a9}"),
