@@ -232,5 +232,10 @@ Deleting	Удаление	M
 Selection cleared	Выбор сброшен	M
 Files changed	Файлы изменились	M
 Some skipped	Часть пропущена	M
+Low battery! Please charge	Зарядите батарею!	M
+Battery empty: off in 30 s	Батарея пуста: выкл. 30 с	O
+Battery empty: off in 20 s	Батарея пуста: выкл. 20 с	O
+Battery empty: off in 10 s	Батарея пуста: выкл. 10 с	O
+Unstable: unplug USB?	Нестабильно: отключите USB?	M
 CH2 (DMM) is off	CH2 (DMM) выкл.	M
 Trigger source: CH1	Источник триггера: CH1	M

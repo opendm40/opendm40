@@ -204,4 +204,9 @@
 0806b13c	Reset settings
 0806b13c	Select
 0806b13c	Delete selected
+080592f0	Low battery! Please charge
+080592f0	Battery empty: off in 30 s
+080592f0	Battery empty: off in 20 s
+080592f0	Battery empty: off in 10 s
+0805b138	Unstable: unplug USB?
 # Which stock font draws which string (ui-render, LANG_LOG): tools/mklang_x.py.
