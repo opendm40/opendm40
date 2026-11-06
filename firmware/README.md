@@ -8,19 +8,26 @@ in the [documentation index](../docs/README.md). Paths below are relative to
 ## Build
 
 ```
-./build.sh                    # -> opendm40.bin + dm40_opendm40_v<version>.bin
-tools/reload.sh               # build, upload over USBTMC, install, check
+./build.sh                    # release image -> opendm40.bin + dm40_opendm40_v<version>.bin
+./build.sh --dev              # developer image -> opendm40.bin + dm40_opendm40_v<version>-dev.bin
+tools/build-langs.sh          # -> dm40_opendm40_v<version>-{zh,ru,it,fr}.bin (i18n/README.md)
+tools/reload.sh               # build (--dev), upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
 tools/scpi-doc-check/run.sh   # SCPI parser vs docs/manual/scpi-reference.md
 tools/linkcheck.py ..         # every relative link and #anchor in the *.md files
-tools/doc-lang-check.sh origin/main  # English and Russian README/manual in step
+tools/doc-lang-check.sh origin/main  # English, Russian and Chinese README/manual in step
 ../emu/run.py fwrs --run-for 4 --shot out.png   # run opendm40 in the emulator
 ```
 
 `build.sh` links with [`link-native.x`](link-native.x), checks the stack
 ([`tools/stack-depth/stackdepth.py`](tools/stack-depth/stackdepth.py)) and
 the flash / SRAM budgets, and packs the body into the stock update format with
-[`../stock/dm40fw.py`](../stock/dm40fw.py). The emulator
+[`../stock/dm40fw.py`](../stock/dm40fw.py). The release image (the default;
+CI artifacts and releases) has no developer `DBG:` commands; the developer
+image (`--dev` or `DM40_DEV=1`, Cargo feature `dbg-dev`; list in
+[`Cargo.toml`](Cargo.toml)) adds them. Emulator tests and device checks need
+it: [`tools/reload.sh`](tools/reload.sh) and `emu/run.py` build it unless
+`reload.sh --release`. The emulator
 ([emu/README.md](../emu/README.md)) needs a flash dump of your own meter (not
 in the repo).
 
@@ -129,7 +136,7 @@ as 3 bytes per pixel packed big-endian into the 16-bit words
 tools/reload.sh [cargo args]     # e.g. --features keep-screen
 ```
 
-1. `./build.sh [cargo args]`; `dm40dbg.py image` checks the file (vendor
+1. `./build.sh --dev [cargo args]` (`--release`: without `--dev`); `dm40dbg.py image` checks the file (vendor
    header CRC, body CRC, size, reset vector) before anything is staged.
 2. A running opendm40 that does not answer `DBG:BOOT?` is refused; so is the
    stock "USB Connect" disk or the loader update screen (`28e9:028f`) unless
@@ -137,7 +144,8 @@ tools/reload.sh [cargo args]     # e.g. --features keep-screen
 3. `dm40dbg.py upload`: `DBG:UPLOAD` writes the file as `DM40FW.BIN` into the
    SPI flash's root (every other `dm40*.bin` there removed first), the meter
    re-reads it and checks the CRC-32 ([`src/upload.rs`](src/upload.rs));
-   then `DBG:FLASH?` must report no SPI write error.
+   then `DBG:FLASH?` must report no SPI write error (skipped when a release
+   image runs: it has no `DBG:FLASH?`).
 4. `dm40dbg.py update --wait 90 --expect FILE`: `DBG:UPDATE` zeroes the loader
    marker and resets; the vendor loader installs the file and deletes it. If
    the device is still on USB after 5 s, `SYST:ERR?` is reported ("Flash
@@ -147,7 +155,7 @@ tools/reload.sh [cargo args]     # e.g. --features keep-screen
    `DBG:BOOT?` is printed and the loader marker compared with the file's
    12-byte update header: "installed OK" (~1 min in all).
 
-Options (`tools/reload.sh --help`): `--no-build`, `--image FILE`, `--wait S`,
+Options (`tools/reload.sh --help`): `--release`, `--no-build`, `--image FILE`, `--wait S`,
 `--stock FILE`, `--from-stock`.
 
 **First install** (the meter runs stock): `tools/reload.sh --from-stock`
@@ -172,9 +180,9 @@ and pull request to `main`; a push that changes only documentation (Markdown, `d
 
 | Job | What |
 |---|---|
-| Build | `build.sh --locked` (stack, region and update-file checks fail it), [`tools/build-variants`](tools/build-variants/run.sh); the image and `SHA256SUMS` as a workflow artifact |
+| Build | `build.sh --locked` (the release image; stack, region and update-file checks fail it), [`tools/build-variants`](tools/build-variants/run.sh) (the developer image among them); the image and `SHA256SUMS` as a workflow artifact |
 | Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): the host suites listed in the script, `JOBS` at a time (default: the CPU count; each suite's log printed whole after all finish); `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
-| Doc checks | [`tools/linkcheck.py`](tools/linkcheck.py), [`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh), [`tools/doc-lang-check.sh`](tools/doc-lang-check.sh) (the English and Russian README and manual: same headings and images; on a pull request both languages changed, see [AGENTS.md](../AGENTS.md)) |
+| Doc checks | [`tools/linkcheck.py`](tools/linkcheck.py), [`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh), [`tools/doc-lang-check.sh`](tools/doc-lang-check.sh) (the English, Russian and Chinese README and manual: same headings, tables, lists, images, links and code; on a pull request all languages changed, see [AGENTS.md](../AGENTS.md)) |
 | Version | [`tools/version-check.sh`](tools/version-check.sh): fails when the firmware changed since the last `v*` tag but the version did not; on a pull request [`tools/pr-version-check.sh`](tools/pr-version-check.sh) also fails when the PR changes the firmware without raising the version above `main`'s |
 
 The emulator tests ([emu/README.md](../emu/README.md)) are not in CI: they

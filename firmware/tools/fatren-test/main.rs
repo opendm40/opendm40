@@ -2030,6 +2030,27 @@ fn setfile_cmd(a: &[String], img: Img) {
         }
         w
     };
+    // Reset settings: the defaults, the calibration words from the old
+    // record; the request travels in the slot like any other word.
+    {
+        let (d, o) = (words(1), words(2));
+        let mut r = o;
+        persist::reset_record(&mut r, |i| d[i]);
+        let kept = |i: usize| {
+            (persist::W_TOUCH_CAL..persist::W_TOUCH_CAL + 6).contains(&i)
+                || (persist::W_POWER + 1..persist::W_POWER + 6).contains(&i)
+                || (persist::W_POWER + 7..persist::W_POWER + 10).contains(&i)
+                || (persist::W_POWER_ZD..persist::W_POWER_ZD + 3).contains(&i)
+        };
+        let ok = (0..persist::WORDS).all(|i| match i {
+            2 => r[2] == d[2] & !0xFF | 1,
+            _ if i == persist::W_REC => r[i] == d[i] & !persist::REC_RESET,
+            _ if i == persist::W_POWER + 6 => r[i] == d[i] & !0x1_FFFF | o[i] & 0x1_FFFF,
+            _ if kept(i) => r[i] == o[i],
+            _ => r[i] == d[i],
+        });
+        check(ok, "reset_record keeps the calibration only");
+    }
     let boot = || {
         let i = im();
         setfile::boot(i);

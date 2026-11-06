@@ -117,8 +117,8 @@ pub fn page() {
     crate::probe::end();
     sf::glyphs(sf::TEXT22, rect(LINE_X + 203, LEGEND_Y, 60, 20), "down", STATUS_FG, M_BG, 1, 0);
     hint(false);
-    button(CALIB, "Calibrate");
-    button(CLEAR, "Clear");
+    button(CALIB, crate::tr!("Calibrate"));
+    button(CLEAR, crate::tr!("Clear"));
 }
 
 /// A button box with its centred text.
@@ -196,10 +196,10 @@ fn w_line(i: usize, text: &str, c: Color) {
 pub fn cal_page() {
     lcd::fill_rect(0, 0, lcd::W, lcd::H, M_BG);
     targets();
-    w_line(0, "Touch calibration", M_ACCENT);
+    w_line(0, crate::tr!("Touch calibration"), M_ACCENT);
     w_line(1, "Tap the yellow cross", STATUS_FG);
-    button(BTN[0], "Cancel");
-    button(BTN[1], "Reset");
+    button(BTN[0], crate::tr!("Cancel"));
+    button(BTN[1], crate::tr!("Reset"));
 }
 
 /// The walk's step line: target `i` (0-based) of 9, tap `tap` (0-based) of
@@ -241,8 +241,8 @@ pub fn result_page(mean: u32, max: u32, before: u32, k: &[f32; 6], bad: Option<&
         None => cal_msg("Good fit: Save applies it", false),
         Some(why) => cal_msg(why, true),
     }
-    button(BTN[0], if bad.is_none() { "Save" } else { "Try again" });
-    button(BTN[1], "Cancel");
+    button(BTN[0], if bad.is_none() { crate::tr!("Save") } else { crate::tr!("Try again") });
+    button(BTN[1], crate::tr!("Cancel"));
 }
 
 /// Which of BTN (0, 1) holds (x, y).

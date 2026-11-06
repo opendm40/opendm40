@@ -2,7 +2,7 @@
 """opendm40 DC V autorange after a multi-step range change, and READ? across a
 range change (device decaf60, device-check doc "decaf60" 1 / 3).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/hy3131/autorangetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Input: 1 V DC on V/COM with the model's AD1 decimation memory on
