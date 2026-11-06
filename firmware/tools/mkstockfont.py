@@ -57,7 +57,7 @@ FONTS = [
     ('LIGHTNING', 0x0805A0E0),
     ('TEXT22', 0x0806B13C),
     # Fonts constructed inline by address in src/ui.rs (kept address-keyed).
-    ('G_08059428', 0x08059428),  # 42x42 box glyph
+    ('G_08059428', 0x08059428),  # the generator's wave drop-down arrow (ui.rs gen_wave_box)
     ('K_FONT', 0x0805C5DC),      # keypad font
     ('ICONS', 0x0805592C),       # menu icons
 ]
@@ -76,6 +76,20 @@ FONTS = [
 # audit #2 to region B audit #6 (2026-10-27: back in B, A2 above its 2 KiB
 # warning again).
 A2_FONTS = ('ASCII26', 'F14', 'LETTERS', 'UNIT', 'LOCK')
+
+# Glyphs kept of a font that is drawn with some of its codes only (the
+# others are not emitted): G_08059428's ' ' is the up arrow, its '!' (down)
+# is not drawn.
+ONLY = {'G_08059428': ' '}
+
+# Fonts drawn from another font's glyphs (docs/fonts.md "Shared glyphs"):
+# name -> (base, rows, lim). Every code below `lim` that the font has the
+# same as `base` (the bitmap `rows` lower in its line box than in the
+# base's) is not emitted: stockfont.rs looks it up in the base
+# (font_base) and gives it this font's box. The rest stay its own entries.
+# SC_F12 and F14 are both DM40 Term ter-u12b; F14's narrow cells
+# (punctuation, I, j) and the space differ.
+SHARE = {'SC_F12': ('F14', -1, 0x80)}
 
 
 # Codes from here up (CJK, full-width punctuation) are dropped: opendm40 draws
@@ -421,8 +435,9 @@ def main():
     mkterm.own_glyphs(face, os.path.join(FW, 'src', 'stockfont_w.rs'))
     # The 4 bpp glyphs of every font, in emit order: one token parse and one
     # set of Huffman tables for all of them.
-    four_gl = [(gw, gh, pixels(data, gw, gh, True)) for _, _, (_, _, four, gl, _) in loaded if four
-               for (code, gw, gh, adv, yoff, data) in gl if code < CJK_FROM]
+    kept = lambda name, code: code < CJK_FROM and (name not in ONLY or chr(code) in ONLY[name])
+    four_gl = [(gw, gh, pixels(data, gw, gh, True)) for name, _, (_, _, four, gl, _) in loaded if four
+               for (code, gw, gh, adv, yoff, data) in gl if kept(name, code)]
     toks, lens = huf_build(four_gl)
     codes = [huf_canon(ls) for ls in lens]
     maxl = max(max(ls.values()) for ls in lens if ls)
@@ -434,12 +449,16 @@ def main():
     ntok = sum(len(gt) for gt in toks)
     short = [sum(1 for gt in toks for cx, s, _, _, _ in gt if lens[cx][s] <= k) * 100.0 / ntok for k in range(1, maxl + 1)]
     huf_bytes = sum(len(c) + len(s) for c, s in zip(cnt, syms))
+    # Per font: {code: (w, h, adv, yoff, t, ih, stored bytes)} of all its
+    # glyphs, shared ones included; line_h, descent (SHARE).
+    full = {}
     for name, a, (line_h, descent, four, gl, cls) in loaded:
         bpp = 4 if four else 1
         blob = bytearray()
         entries = []
+        own = {}
         for (code, gw, gh, adv, yoff, data) in gl:
-            if code >= CJK_FROM:
+            if not kept(name, code):
                 dropped[0] += 1
                 dropped[1] += len(data)
                 continue
@@ -454,11 +473,35 @@ def main():
             else:
                 enc, t, ih = crop_glyph(px, gw, gh)
                 assert uncrop_glyph(enc, gw, gh, t, ih) == px, (name, code)
+            own[code] = (gw, gh, adv, yoff, t, ih, enc)
+            raw_total[0] += len(data)
+        full[name] = (dict(own), line_h, descent)
+        shared = 0
+        if name in SHARE:
+            bname, rows, lim = SHARE[name]
+            base, blh, bde = full[bname]
+            assert not four and cls in ('B', 'B+') and all(own[c][1] == line_h for c in own), name
+            # No code below lim that the font lacks may come from the base.
+            assert all(c in own for c in base if c < lim), (name, bname)
+            for code in sorted(base):
+                if code >= lim:
+                    continue
+                # The base glyph in this font's box, as stockfont.rs places it.
+                bw, bh, badv, byoff, bt, bih, benc = base[code]
+                top = blh - bde - bh - byoff + rows
+                # An inkless glyph's t is not read.
+                t = own[code][4] if bih == 0 else top + bt
+                if own[code] == (bw, line_h, badv, -descent, t, bih, benc):
+                    del own[code]
+                    shared += 1
+        for code in sorted(own):
+            gw, gh, adv, yoff, t, ih, enc = own[code]
             assert len(blob) < 0x10000 and code < 0x10000 and gw <= MAXW, (name, code)
             entries.append((code, len(blob), gw, gh, adv, yoff, t, ih))
             blob += enc
-            raw_total[0] += len(data)
         n = len(entries)
+        if shared:
+            print('  %s: %d glyphs from %s, %d own' % (name, shared, SHARE[name][0], n))
 
         total_blob += len(blob)
         total_glyphs += n
@@ -536,6 +579,17 @@ def main():
     out.append('    match addr {')
     for name, a, _ in fonts:
         out.append('        0x%08X => Some(&%s_FD),' % (a, name))
+    out.append('        _ => None,')
+    out.append('    }')
+    out.append('}')
+    out.append('')
+    out.append('/// The font whose glyphs below `lim` a font takes where it has none of')
+    out.append('/// its own: (base address, rows lower in this font\'s line box, lim).')
+    out.append('pub fn font_base(addr: u32) -> Option<(u32, i8, u16)> {')
+    out.append('    match addr {')
+    addr = {name: a for name, a, _ in fonts}
+    for name, (bname, rows, lim) in SHARE.items():
+        out.append('        0x%08X => Some((0x%08X, %d, 0x%X)),' % (addr[name], addr[bname], rows, lim))
     out.append('        _ => None,')
     out.append('    }')
     out.append('}')
