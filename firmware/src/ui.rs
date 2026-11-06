@@ -1225,7 +1225,7 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
     const PRE: &str = if cfg!(any(feature = "zh", feature = "ru", feature = "fr")) { "Discharging..." } else { crate::tr!("Discharging...") };
     let b = CAP_DIS_RECT;
     // (The value from a word space after the prefix.)
-    let w = sf::text_width(sf::F14, PRE, 1) + 10;
+    let w = sf::text_width(sf::F14, PRE, 1) + 11;
     if full {
         lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
         sf::label(sf::F14, rect(b.x, b.y, w, b.h), PRE, DIM, BG, 1, 1);

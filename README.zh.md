@@ -101,6 +101,7 @@ opendm40 采用 MIT 许可证（[LICENSE](LICENSE)），© opendm40 贡献者。
 
 - [`stock/vendor/dm40_v_2_6.bin`](stock/vendor/README.md)：Alientek 未经修改的升级文件，保留用于把表恢复到原厂固件。
 - 原厂固件 V2.6 的点阵字体，opendm40 把它们复制到固件映像中以保持原厂外观（[`firmware/src/stockfont_data.rs`](firmware/src/stockfont_data.rs)，[制作方法](firmware/docs/fonts.md)）。
+- 菜单和标签文字字体 DM40 Term，基于 Dimitar Zhekov 的 Terminus Font：SIL Open Font License 1.1（[`firmware/fonts/OFL-DM40Term.txt`](firmware/fonts/OFL-DM40Term.txt)）。
 - [`hw/photos/`](hw/photos/README.md) 和 [`hw/datasheets/`](hw/datasheets/README.md)：第三方资料，版权归其所有者（评测作者、芯片厂商），仅供参考。
 
 [`stock/patch/`](stock/patch) 包含原厂固件 V2.6 的地址和符号名称。

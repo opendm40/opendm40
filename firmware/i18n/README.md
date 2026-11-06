@@ -24,7 +24,10 @@ string is written `crate::tr!("...")`, and the image holds only its translation.
 ## Sources and licences
 
 - Glyphs: [SIL OFL 1.1](OFL.txt), Noto Sans CJK SC (Chinese), Liberation Sans
-  (Cyrillic). Accented Latin letters are the stock letters plus an accent.
+  (Cyrillic of the dialog font ASCII26); in the text fonts the Cyrillic is
+  DM40 Term's ([fonts/OFL-DM40Term.txt](../fonts/OFL-DM40Term.txt),
+  [docs/fonts.md](../docs/fonts.md#1a-dm40-term)). Accented Latin letters are
+  the font's letters plus an accent.
 - Wording marked `R`: OpenDM40-Chinese, MIT, Copyright (c) 2026
   xingyan4117-sketch. Only its texts are used, none of its glyphs or code.
 
