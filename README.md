@@ -5,16 +5,15 @@
 Open-source replacement firmware for the Alientek DM40 multimeter,
 oscilloscope and signal generator (DM40A, DM40B, DM40C).
 
-The multimeter, the oscilloscope and the generator run at the same time; the
-screen only chooses what you see, and the combined view shows the meter
-reading above the live scope. opendm40 keeps the stock look and touch control
-and adds a power meter, inrush current capture, wrong-connection alerts, data
-logging, remote control over USB (USBTMC / SCPI) and Bluetooth, and a USB disk
-with your logs and screenshots as CSV and BMP files.
+The multimeter, the oscilloscope and the generator run at the same time.
+opendm40 keeps the stock look and touch control and adds a power meter, inrush
+current capture, wrong-connection alerts, data logging, remote control over
+USB (USBTMC / SCPI) and Bluetooth, a USB disk with your logs and screenshots
+as CSV and BMP files, and more.
 
 It installs like a stock update file and does not touch the Alientek
-bootloader, the update loader or your meter's calibration, so you can always
-go back to the stock firmware.
+bootloaders or your meter's calibration, so you can always go back to the
+stock firmware.
 
 ![opendm40 on a DM40A: the multimeter page](docs/manual/img/dmm.png)
 
@@ -22,10 +21,9 @@ go back to the stock firmware.
 
 ## Status
 
-Experimental. Developed on a DM40A and tested on DM40A, DM40B and DM40C.
-Everything that has not run on a real meter yet, chiefly
-everything with a current through the A jack, is listed in the manual under
-[Known limitations](docs/manual/README.md#known-limitations).
+Ready to use. Tested and used by several people. Validated against a
+calibrator and against the stock firmware.
+
 Measured accuracy against calibrators (DC V, DC A, frequency, resistance):
 [firmware/docs/data](firmware/docs/data/README.md).
 
@@ -64,27 +62,26 @@ Changes per release: [CHANGELOG.md](CHANGELOG.md).
   the 34401A; SCPI and the stock phone-app protocol over Bluetooth; a libsigrok
   profile (not upstream yet) and a 34401A emulation for unpatched sigrok.
 
-What is new compared with the stock firmware, feature by feature, and what
-the stock firmware has that opendm40 does not (in short: the menus are
-English only):
+What is new compared with the stock firmware, feature by feature:
 [the manual, What's new](docs/manual/README.md#whats-new-compared-with-the-stock-firmware).
 Item by item against the stock firmware V2.6: [parity.md](firmware/docs/parity.md).
 
 ## Install
 
-You need a DM40 with the stock firmware, a USB cable and a charged battery.
+You need a DM40 with the stock firmware and a USB cable.
 
 1. Download `dm40_opendm40_v<version>.bin` from the latest
-   [release](https://github.com/opendm40/opendm40/releases/latest)
-   (`SHA256SUMS` next to it), or build it ([firmware/README.md, Build](firmware/README.md#build)).
+   [release](https://github.com/opendm40/opendm40/releases/latest),
+   or [build it](firmware/README.md#build).
 2. On the meter: **Settings > Other Settings > USB Connect**, and connect the
    cable. A USB disk appears.
-3. Copy the file onto it, as the only `dm40*.bin` file there. Eject the disk.
+3. Copy the file onto it, as the only `dm40*.bin` file there. The file name
+   must start with `dm40`. Eject the disk.
 4. Switch the meter off and on. The stock update procedure installs the file.
    The first start takes a few seconds (opendm40 shows a progress bar): do
    not switch off in the first 10 seconds.
-5. Back up your meter: copy the `INFO/` folder from the opendm40 USB disk to
-   your computer and keep it ([Back up](#back-up-with-opendm40)).
+5. **Back up your meter.** Copy the `INFO/` folder from the opendm40 USB disk
+   to your computer and keep it ([Back up](#back-up-with-opendm40)).
 
 The same steps with pictures, and updating from a running opendm40:
 [the manual, Getting started](docs/manual/README.md#getting-started).
@@ -115,7 +112,7 @@ stock](docs/manual/README.md#backup-recovery-and-back-to-stock).
 
 ## Safety and warranty
 
-- opendm40 is experimental software and comes **without any warranty**
+- opendm40 comes **without any warranty**
   ([LICENSE](LICENSE)). Installing it may void the vendor's warranty.
 - It is not certified. The meter's safety ratings come from its hardware and
   from Alientek's user manual; opendm40 does not change the input protection
@@ -142,9 +139,13 @@ every command: [SCPI reference](docs/manual/scpi-reference.md).
 ## Build and develop
 
 The firmware is written in Rust for the GD32F427 (Cortex-M4F). Build,
-debug link, tests and releases: [firmware/README.md](firmware/README.md). The
-[emulator](emu/README.md) runs opendm40 and the stock firmware without a
-meter. The hardware as far as it is known: [hw/README.md](hw/README.md).
+debug link, tests and releases: [firmware/README.md](firmware/README.md).
+
+The [emulator](emu/README.md) runs opendm40 and the stock firmware without a
+meter.
+
+The hardware as far as it is known: [hw/README.md](hw/README.md).
+
 Tools for the stock update file: [stock/README.md](stock/README.md).
 Bug reports and pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
 

@@ -10,8 +10,8 @@ chooses what you see. It adds a power meter, data logging, remote control
 over USB and Bluetooth, and more.
 
 The firmware installs like a stock update file. It does not touch the
-Alientek bootloader, the update loader or the calibration of your meter, so
-you can always go back to the stock firmware
+Alientek bootloaders or the calibration of your meter, so you can always go
+back to the stock firmware
 ([Back to the stock firmware](#back-to-the-stock-firmware)).
 
 ![Multimeter page](img/dmm.png)
@@ -21,9 +21,8 @@ its ratings. Follow the safety rules and limits in Alientek's user manual.
 opendm40 adds warnings for wrong connections ([Safety and
 alerts](#safety-and-alerts)), but they cannot catch every mistake.
 
-**Status.** opendm40 is experimental. It is developed on a DM40A and tested on
-DM40A, DM40B and DM40C. What is untested on a real meter is listed in [Known
-limitations](#known-limitations).
+**Status.** Ready to use. Tested and used by several people. Validated
+against a calibrator and against the stock firmware.
 
 ## Contents
 
@@ -61,7 +60,7 @@ Every SCPI command is in the separate [SCPI reference](scpi-reference.md).
 
 Before you start:
 
-- Charge the battery.
+- Make sure the battery is not empty.
 - Read [Back up your meter](#back-up-your-meter). The backup is made with
   opendm40 itself, after the install, and only takes a copy of a folder.
 
@@ -70,8 +69,7 @@ To install opendm40 on a meter that runs the stock firmware:
 1. Download the update file `dm40_opendm40_v<version>.bin`, for example
    `dm40_opendm40_v0.4.0.bin`, from the latest
    [release](https://github.com/opendm40/opendm40/releases/latest). You can
-   also build it from the source
-   ([firmware/README.md, Build](../../firmware/README.md#build)).
+   also [build it from the source](../../firmware/README.md#build).
 2. On the meter: **Settings > Other Settings > USB Connect**. Connect the
    meter to the computer with a USB cable. A USB disk appears.
 3. Copy the file onto that disk (any `dm40*.bin` name works). Keep it the
