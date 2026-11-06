@@ -35,9 +35,9 @@ Alientek（正点原子）DM40 万用表、示波器和信号发生器（DM40A�
 | ![示波器通道：CH1、DMM、发生器、数学](docs/manual/img/scope-channels.png) | ![Wave 视图](docs/manual/img/wave.png) |
 | 示波器通道：CH1、万用表作为 CH2、发生器波形、数学 | Wave 视图：万用表插孔上的波形，隔离 |
 
-- **万用表**：全部 16 个原厂功能；所有型号都有 60000 计数量程和 AC+DC；AUTO AC/DC；HOLD、AutoHold、REL、MIN/MAX/AVG、限值、趋势图；负担电压。
+- **万用表**：全部 16 个原厂功能；所有型号都有 60000 计数量程和 AC+DC；AUTO AC/DC；HOLD、AutoHold、REL、MIN/MAX/AVG、限值、趋势图；负荷电压。
 - **示波器**：原厂的时基和 V/div，Auto / Normal / Single，边沿、脉宽和 Runt 触发；2 和 5 mV/div；发生器可作为触发源和波形；万用表作为 CH2；带帧日志的协议解码器（UART 含 Modbus RTU、DALI）；万用表插孔上隔离的慢速 Wave 视图。
-- **发生器**：正弦波、三角波和锯齿波最高 50 kHz，方波最高 10 MHz，直流偏置。
+- **发生器**：正弦波、三角波和锯齿波最高 50 kHz，方波最高 10 MHz，直流偏移。
 - **功率计和涌流**，在 10 A 量程上。
 - **数据**：Record 页、原始采样的快速记录（最高 38.4 kS/s）、截图和屏幕图库。
 - **电脑**：无需驱动的 U 盘；34401A 风格的 USBTMC / SCPI；通过蓝牙的 SCPI 和原厂手机 App 协议；libsigrok 配置文件（尚未进入上游）和用于未打补丁 sigrok 的 34401A 模拟。

@@ -24,7 +24,7 @@
 pub const LOUD: u8 = 0;
 pub const VOLUME: u8 = 1;
 pub const OFF: u8 = 2;
-pub const NAMES: [&str; 3] = ["Loud", "Volume", "Off"];
+pub const NAMES: [&str; 3] = [crate::tr!("Loud"), crate::tr!("Volume"), crate::tr!("Off")];
 /// SCPI SYSTem:ALERt:ALARm? answers.
 pub const SCPI_NAMES: [&str; 3] = ["LOUD", "VOLUME", "OFF"];
 

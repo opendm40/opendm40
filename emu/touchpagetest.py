@@ -4,7 +4,7 @@ it opens from Settings > Other, draws dots for touches of the touch controller
 model (emu/peripherals/CST_Touch.cs), lights the touch-key boxes, ignores
 the touch keys, clears, and exits with a 2 s hold and with the power key.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/touchpagetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--keep DIR]
 
 Everything is scripted in emulator time (run.py --script): MENU, the
