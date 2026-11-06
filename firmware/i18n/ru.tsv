@@ -239,3 +239,6 @@ Battery empty: off in 10 s	Батарея пуста: выкл. 10 с	O
 Unstable: unplug USB?	Нестабильно: отключите USB?	M
 CH2 (DMM) is off	CH2 (DMM) выкл.	M
 Trigger source: CH1	Источник триггера: CH1	M
+Type	Тип	M
+Vol	Напр	M
+Cur	Ток	M

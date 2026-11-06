@@ -43,6 +43,7 @@ macro_rules! tr {
     ("Color") => { "Couleur" };
     ("Corners") => { "Coins" };
     ("Coupling") => { "Couplage" };
+    ("Cur") => { "Cour" };
     ("Current Settings") => { "R\u{1}glages courant" };
     ("Current in A jack: check leads") => { "Courant en A : voir cordons" };
     ("Current too high: reduce it") => { "Courant trop \u{1}lev\u{1} : r\u{1}duire" };
@@ -209,6 +210,7 @@ macro_rules! tr {
     ("Upper = reading") => { "Haut = mesure" };
     ("Upper limit") => { "Limite haute" };
     ("Vendor") => { "Fabricant" };
+    ("Vol") => { "Tens" };
     ("Voltage Settings") => { "R\u{1}glages tension" };
     ("Voltage on V jack, no current") => { "Tension sur V, sans courant" };
     ("Voltage on circuit - power off") => { "Couper la tension du circuit" };
@@ -266,6 +268,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Color", "Couleur"),
     ("Corners", "Coins"),
     ("Coupling", "Couplage"),
+    ("Cur", "Cour"),
     ("Current Settings", "R\u{1}glages courant"),
     ("Current in A jack: check leads", "Courant en A : voir cordons"),
     ("Current too high: reduce it", "Courant trop \u{1}lev\u{1} : r\u{1}duire"),
@@ -432,6 +435,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Upper = reading", "Haut = mesure"),
     ("Upper limit", "Limite haute"),
     ("Vendor", "Fabricant"),
+    ("Vol", "Tens"),
     ("Voltage Settings", "R\u{1}glages tension"),
     ("Voltage on V jack, no current", "Tension sur V, sans courant"),
     ("Voltage on circuit - power off", "Couper la tension du circuit"),

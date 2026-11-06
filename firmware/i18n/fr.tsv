@@ -239,3 +239,6 @@ Battery empty: off in 10 s	Batterie : arrêt dans 10 s	M
 Unstable: unplug USB?	Instable : débrancher l'USB ?	M
 CH2 (DMM) is off	CH2 (DMM) éteint	M
 Trigger source: CH1	Source trigger : CH1	M
+Type	Type	E
+Vol	Tens	M
+Cur	Cour	M

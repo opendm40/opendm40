@@ -2,6 +2,7 @@
   Bad 
   max 
  (AD2, isolated jacks)
+ (DMM calibration applied)\r\n
  (n/a here)
  (software),
  A now
@@ -524,6 +525,7 @@ Zero: leads open (12 s)
 Zero: signal present
 Zeroing: leads open
 ad2-isr
+amperes through the DMM A jack
 auto
 blue
 brown
@@ -584,11 +586,15 @@ settings: one value per setting
 shunt
 source DMM 
 t_s,raw,value_A,lost_before\r\n
+the value column is 
+the value column is amperes (CH1 type Cur; probe factor = A per input volt)\r\n
 uA
 uF
 uV
 us
 var
 view
+volts at the DMM jacks
+volts at the probe tip\r\n
 yellow
 zh

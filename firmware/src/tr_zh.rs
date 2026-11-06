@@ -43,6 +43,7 @@ macro_rules! tr {
     ("Clear limits") => { "\u{496}\u{4ed}\u{4ec}\u{416}" };
     ("Color") => { "\u{4f6}\u{4be}" };
     ("Coupling") => { "\u{4b9}\u{439}" };
+    ("Cur") => { "\u{4a2}\u{492}" };
     ("Current Settings") => { "\u{4a2}\u{492}\u{493}\u{4e4}\u{4cc}\u{4b7}" };
     ("Current in A jack: check leads") => { "A \u{471}\u{44a}\u{47f}\u{4a2}\u{492}, \u{4ce}\u{486}\u{481}\u{4c4}\u{4b0}" };
     ("Current too high: reduce it") => { "\u{4a2}\u{492}\u{4db}\u{446}, \u{4ce}\u{421}\u{450}" };
@@ -182,12 +183,14 @@ macro_rules! tr {
     ("Trigger") => { "\u{4c8}\u{432}" };
     ("Trigger source: CH1") => { "\u{4c8}\u{432}\u{498}: CH1" };
     ("Try again") => { "\u{4e3}\u{4cd}" };
+    ("Type") => { "\u{4b1}\u{444}" };
     ("Type:") => { "\u{4b1}\u{444}:" };
     ("USB disk") => { "U\u{4a5}\u{487}\u{45d}" };
     ("Until stopped") => { "\u{468}\u{428}\u{418}\u{48a}" };
     ("Upper") => { "\u{403}\u{4ec}" };
     ("Upper = reading") => { "\u{403}\u{4ec}=\u{4cf}\u{474}" };
     ("Upper limit") => { "\u{403}\u{4ec}" };
+    ("Vol") => { "\u{4a2}\u{430}" };
     ("Voltage Settings") => { "\u{4a2}\u{430}\u{493}\u{4e4}\u{4cc}\u{4b7}" };
     ("Voltage on V jack, no current") => { "V \u{471}\u{44a}\u{47f}\u{4a2}\u{430}, \u{478}\u{4a2}\u{492}" };
     ("Voltage on circuit - power off") => { "\u{4a2}\u{4d4}\u{455}\u{4a2}, \u{4ce}\u{41a}\u{476}\u{4a2}" };
@@ -246,6 +249,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Clear limits", "\u{496}\u{4ed}\u{4ec}\u{416}"),
     ("Color", "\u{4f6}\u{4be}"),
     ("Coupling", "\u{4b9}\u{439}"),
+    ("Cur", "\u{4a2}\u{492}"),
     ("Current Settings", "\u{4a2}\u{492}\u{493}\u{4e4}\u{4cc}\u{4b7}"),
     ("Current in A jack: check leads", "A \u{471}\u{44a}\u{47f}\u{4a2}\u{492}, \u{4ce}\u{486}\u{481}\u{4c4}\u{4b0}"),
     ("Current too high: reduce it", "\u{4a2}\u{492}\u{4db}\u{446}, \u{4ce}\u{421}\u{450}"),
@@ -385,12 +389,14 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Trigger", "\u{4c8}\u{432}"),
     ("Trigger source: CH1", "\u{4c8}\u{432}\u{498}: CH1"),
     ("Try again", "\u{4e3}\u{4cd}"),
+    ("Type", "\u{4b1}\u{444}"),
     ("Type:", "\u{4b1}\u{444}:"),
     ("USB disk", "U\u{4a5}\u{487}\u{45d}"),
     ("Until stopped", "\u{468}\u{428}\u{418}\u{48a}"),
     ("Upper", "\u{403}\u{4ec}"),
     ("Upper = reading", "\u{403}\u{4ec}=\u{4cf}\u{474}"),
     ("Upper limit", "\u{403}\u{4ec}"),
+    ("Vol", "\u{4a2}\u{430}"),
     ("Voltage Settings", "\u{4a2}\u{430}\u{493}\u{4e4}\u{4cc}\u{4b7}"),
     ("Voltage on V jack, no current", "V \u{471}\u{44a}\u{47f}\u{4a2}\u{430}, \u{478}\u{4a2}\u{492}"),
     ("Voltage on circuit - power off", "\u{4a2}\u{4d4}\u{455}\u{4a2}, \u{4ce}\u{41a}\u{476}\u{4a2}"),

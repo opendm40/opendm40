@@ -240,3 +240,6 @@ Battery empty: off in 10 s	电池耗尽: 10 秒后关机	M
 Unstable: unplug USB?	Unstable: unplug USB?	E
 CH2 (DMM) is off	CH2 (DMM) 已关闭	M
 Trigger source: CH1	触发源: CH1	M
+Type	类型	M
+Vol	电压	M
+Cur	电流	M
