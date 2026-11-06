@@ -3156,6 +3156,9 @@ fn fill_text(r: Rect, clip: Rect, bg: Color, font: Font, tr: Rect, text: &str, f
 /// `fill_text` of a button-like fill on a `parent` colour (the fill is a
 /// probed shape for the host hit-map checks when it differs from it).
 fn fill_text_on(r: Rect, clip: Rect, bg: Color, parent: Color, font: Font, tr: Rect, text: &str, fg: Color, align: u8, sp: i8) {
+    if off_strip(r) {
+        return;
+    }
     let t = Ink::new(font, tr, text, align, sp);
     paint(isect(r, clip), &[(K_TEXT, bg), (K_SHAPE, parent)], |x, y| match t.at(x, y) {
         Some(g) => (fg, tag(1, g)),
@@ -3163,8 +3166,19 @@ fn fill_text_on(r: Rect, clip: Rect, bg: Color, parent: Color, font: Font, tr: R
     });
 }
 
+/// Rows of `r` outside the open strip pass (lcd.rs "strip rendering"):
+/// the widget is skipped before its text layout (a popup in strips,
+/// App's popup_strips, runs every widget once per strip).
+#[inline(always)]
+fn off_strip(r: Rect) -> bool {
+    !lcd::rows_hit(r.y, r.y + r.h - 1)
+}
+
 /// A rounded box (on `outside`) with a centred text.
 fn rbox_text(r: Rect, clip: Rect, radius: i16, fill: Color, outside: Color, font: Font, text: &str, fg: Color) {
+    if off_strip(r) {
+        return;
+    }
     let t = Ink::new(font, r, text, 8, 0);
     paint(isect(r, clip), &[(K_SHAPE, outside), (K_TEXT, fill)], |x, y| {
         if let Some(g) = t.at(x, y) {
@@ -3198,6 +3212,9 @@ fn option_hit(r: Rect, n: usize, item_w: i16, x: i16, y: i16) -> Option<u8> {
 /// Spinner FUN_080274b2: 5 rows of 30 px, the current item in the band;
 /// `colours`: names drawn in their palette colour (text box 56 x 13).
 fn spinner(r: Rect, clip: Rect, items: &[&str], cur: usize, colours: bool) {
+    if off_strip(r) {
+        return;
+    }
     let rows = r.h / 30;
     let band = rect(r.x, r.y + (r.h - 30) / 2, r.w, 30);
     let mut ink = [Ink::none(); 5];
@@ -3578,6 +3595,9 @@ fn side_popup(title: &str, tabs: &[&str], tab: u8) {
     for (i, t) in tabs.iter().enumerate() {
         let y = 50 + 41 * i as i16;
         let r = rect(SX + 1, y, 78, 40);
+        if off_strip(r) {
+            continue;
+        }
         let sel = i == tab as usize;
         let ink = Ink::new(sf::SC_F16, r, t, 8, 1);
         let (bg, fg) = if sel { (C_POP_BG, C_BAR) } else { (C_BAR, C_WHITE) };
