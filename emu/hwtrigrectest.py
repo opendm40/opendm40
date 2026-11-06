@@ -4,7 +4,7 @@ hw_poll) in the emulator: DIGitize and SINGle at 1 us .. 200 ms/div with
 the comparator on (the default), Normal sweep; other trigger positions
 (hpos): firmware/tools/trig-test.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/hwtrigrectest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Two emulator runs (one input sine each: 20 kHz for 1 us .. 1 ms/div,

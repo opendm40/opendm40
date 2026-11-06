@@ -3,7 +3,7 @@
 through the whole boot chain: ROM -> FS-loader -> opendm40, the real vendor
 FS-loader included (run.py chain mode).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/recoverytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 The emulator models what the shim decides on (emu/peripherals/FWDGT.cs):

@@ -3,7 +3,7 @@
 or a DMM function is drawn (owner report 2026-10-29: "jerky, ugly screen
 updates when switching modes, opening menus").
 
-  cd firmware && ./build.sh --features mute
+  cd firmware && ./build.sh --dev --features mute
   emu/smoothtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
       [--mips 110] [--max-transient 2] [--out DIR]
 

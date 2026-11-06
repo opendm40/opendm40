@@ -1,0 +1,238 @@
+# opendm40 Simplified Chinese UI strings; tools/mklang.py.
+# English<TAB>Chinese<TAB>S stock firmware wording, R OpenDM40-Chinese wording (MIT, xingyan4117-sketch), M machine-written. E: English on purpose (budget).
+Multimeter	万用表	S
+Oscilloscope	示波器	S
+Signal	信号发生器	S
+Settings	设置	S
+Scope	示波器	S
+Main menu	主界面	S
+Display	显示	S
+Alerts	告警	R
+Power	电源	R
+Other	其他	S
+Dim screen	暗屏时间	S
+Shutdown	关机时间	S
+Backlight	背光亮度	S
+Key/alert volume	蜂鸣器音量	S
+Bluetooth	蓝牙开关	S
+Start page	启动界面	S
+Analog power	模拟电源	R
+DMM rate	测量速率	M
+Smoothing	平滑	R
+DMM row	DMM 行	R
+Temp unit	温度单位	R
+Swipe	滑动	R
+Press effect	Press effect	E
+Tap step	Tap step	E
+Help	Help	E
+Jack alerts	插孔告警	R
+Danger alarm	危险警报	R
+USB disk	U盘模式	M
+Burden voltage	负荷电压	M
+Device info	产品信息	S
+Touch test	Touch test	E
+Accuracy	准确度	R
+Negative ohm	Negative ohm	E
+Mode Remember	DMM模式记忆	S
+Never	从不	S
+1 hour	1小时	S
+1 min	1分钟	S
+5 min	5分钟	S
+10 min	10分钟	S
+30 min	30分钟	S
+On	开	S
+Off	关	S
+ON	开	S
+OFF	关	S
+Cancel	取消	S
+OK	确认	S
+Yes	是	R
+No	否	R
+Back	返回	R
+< Back	< 返回	R
+< Prev	< 上一页	R
+Next >	下一页 >	R
+Save	保存	S
+Delete	删除	R
+Clear	清除	S
+Default	默认	S
+Reset	重置	R
+Start	开始	R
+Auto	自动	S
+Normal	普通	S
+Single	单次	S
+Rising	上升沿	S
+Falling	下降沿	S
+Edge	边沿	S
+Pulse	脉宽	R
+Trigger	触发	S
+Measure	测量	S
+Decode	解码	R
+Window	窗函数	S
+Sine	正弦波	S
+Square	方波	S
+Triangle	三角波	S
+Ramp	锯齿波	S
+Frequency	频率	S
+Freq	频率	S
+Duty	占空比	S
+Coupling	耦合	S
+Probe	探头	S
+Type:	类型:	S
+Mode:	模式:	S
+Mode	模式	S
+Edge:	边沿:	S
+Persist:	余辉:	S
+Roll:	滚动:	S
+Brightness:	波形亮度:	S
+Grid intensity:	网格亮度:	S
+FFT Unit	FFT单位	S
+Source:	触发源:	M
+Threshold:	Threshold:	E
+Width:	宽度:	M
+Offset	偏移	R
+Color	颜色	S
+Save CSV	保存CSV	S
+Save CSV OK	Save CSV OK	E
+CSV save failed	CSV save failed	E
+Screenshot	截图	S
+Screenshot failed	Screenshot failed	E
+Stop the scope first	Stop the scope first	E
+Sampling	Sampling	E
+Vendor	Vendor	E
+Model	型号	S
+SN	SN	E
+Bootloader	Bootloader	E
+Software	Software	E
+Hardware	Hardware	E
+Voltage Settings	电压测量设置	S
+Current Settings	电流测量设置	S
+Resistor Settings	电阻测量设置	S
+Capacitance Settings	电容测量设置	S
+Temperature Settings	温度设置	R
+Power Settings	功率设置	R
+Power off	关机	R
+Power off?	关机?	R
+Range	量程	R
+Manual	手动	R
+Autorange	自动量程	R
+Auto Hold	自动保持	R
+Hold & Limits	保持/限值	M
+Limits	限值	R
+Lower	下限	R
+Upper	上限	R
+Lower limit	下限	R
+Upper limit	上限	R
+Clear limits	清除限值	R
+Fail beep	越限蜂鸣	M
+Record	记录	R
+Interval	间隔	R
+Change	变化量	M
+Duration	时长	R
+Free	可用	R
+Every reading	每个读数	R
+On change	变化时	R
+Fast	快速	R
+Until stopped	手动停止	M
+Start recording	开始记录	R
+Stop recording	停止记录	R
+Stop the recording	停止记录	R
+Stop the recording first	请先停止记录	R
+Recording	正在记录	R
+Recording CSV	正在记录	R
+Saving ...	保存中...	R
+Saving CSV...	正在保存...	R
+Saved	已保存	M
+Wave	波形	R
+History	历史	R
+Bargraph	柱状图	R
+Zero	调零	M
+Inrush	涌流	R
+Inrush Current	涌流	R
+Arm	就绪	R
+Wiring	接线	R
+Generator is off	Generator is off	E
+Gallery	图库	R
+Gallery: screenshots and logs	图库: 截图和记录	M
+No screenshots or logs	No screenshots or logs	E
+Delete screenshot?	删除截图?	M
+Delete this log?	删除记录?	M
+Delete failed	Delete failed	E
+Cannot delete	Cannot delete	E
+Log	Log	E
+Log failed	Log failed	E
+No data	No data	E
+No disk	No disk	E
+Disk full	Disk full	E
+Disk busy	磁盘忙	R
+Disk busy, try again	磁盘忙, 请重试	R
+Disk read error	Disk read error	E
+Read error	Read error	E
+Empty file	Empty file	E
+File not found	File not found	E
+Loading...	Loading...	E
+Try again	重试	R
+Again	重测	M
+Stopped	已停止	M
+Discharging...	放电中...	R
+Check leads	检查表笔	R
+Fuse check	保险丝自检	R
+Fuse OK	保险丝正常	R
+Fuse open	保险丝熔断	R
+Install it now?	Install it now?	E
+Installing firmware...	Installing firmware...	E
+Touch calibration	Touch calibration	E
+Calibrate	Calibrate	E
+Top bar	Top bar	E
+Off (stock)	关 (原厂)	R
+OFF (stock)	关 (原厂)	R
+Halves (stock)	Halves (stock)	E
+Corners	Corners	E
+Auto (per view)	Auto (per view)	E
+Both always	Both always	E
+Files live	只读	R
+PC can edit	PC 可编辑	R
+Files live (replug)	只读 (重插)	R
+PC can edit (replug)	PC 可编辑 (重插)	R
+Loud	高	R
+Volume	音量	S
+Measuring ...	测量中 ...	R
+Temp	Temp	E
+Cap	Cap	E
+Diode	Diode	E
+Upper = reading	上限=读数	R
+Lower = reading	下限=读数	R
+AUTO starts on mV: AUTO+ is safer	AUTO 从 mV 起步: AUTO+ 更安全	M
+AUTO+ recommended: never steps to mV	推荐 AUTO+: 不降到 mV	M
+Reset Wh	电能清零	R
+Current in A jack: check leads	A 插孔有电流, 请检查表笔	R
+A jack current: 10 A shunt on	A 插孔有电流: 已切到 10 A 分流器	M
+Overload: 10 A shunt selected	过载: 已切到 10 A 分流器	R
+Voltage on V jack, no current	V 插孔有电压, 无电流	R
+Voltage on circuit - power off	电路带电, 请先断电	R
+DC voltage here: use DC V?	这里是直流, 改用 DC V?	M
+AC voltage here: use AC V?	这里是交流, 改用 AC V?	M
+0 A for 60 s: check the fuse?	60 秒无电流, 检查保险丝?	R
+Current too high: reduce it	电流过大, 请减小	M
+Lead from V/ohm jack to A	表笔从 V/Ω 插孔接到 A	R
+nothing else connected	不接其他东西	M
+OL: no path from V to A	OL: V 到 A 不通	R
+Replace: 10 A ceramic fuse	更换 10 A 陶瓷保险丝	M
+One lead V/ohm to A only	只用一根表笔接 V/Ω 和 A	M
+A input path intact	A 输入通路完好	M
+No ohm reading	无电阻读数	R
+expect ~48 \u{3a9}	应约 48 \u{3a9}	R
+Runt	欠幅	M
+Reset settings	恢复默认设置	M
+Reset settings?	恢复默认设置?	M
+Calibration, files stay	校准和文件保留	M
+Select	选择	M
+Delete selected	删除所选	M
+Delete selected?	删除所选文件?	M
+Deleting	正在删除	M
+Selection cleared	已清除选择	M
+Files changed	文件已更改	M
+Some skipped	部分已跳过	M
+Type	类型	M
+Vol	电压	M
+Cur	电流	M

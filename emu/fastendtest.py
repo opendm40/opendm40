@@ -3,7 +3,7 @@
 while a host reads the USB volume, then MMEM:DATA? of the new file
 (device check d8e249d 6b: the meter hung there and the watchdog reset it).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/fastendtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 One USB/IP connection with the URBs demultiplexed by sequence number, so

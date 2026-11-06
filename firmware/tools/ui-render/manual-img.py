@@ -4,7 +4,8 @@
     tools/ui-render/run.sh OUT --manual     # manual.rs screens (all of them)
     tools/ui-render/run.sh OUT2 --readme    # README screens (readme.rs)
     tools/ui-render/run.sh OUT3             # the full matrix (main menu, inrush)
-    emu/gallerytest.py --app ELF --port P --shots OUT4   # the gallery
+    emu/gallerytest.py --app ELF --port P --shots OUT4   # the gallery viewer
+    tools/gallery-test/manual.sh OUT4        # the gallery grid, select mode
     tools/stock-ui/run.sh OUT5               # the stock scope page (optional)
     tools/ui-render/manual-img.py OUT OUT2 OUT3 OUT4 [OUT5]
 
@@ -33,7 +34,8 @@ SRC = {os.path.basename(p)[:-4]: p for p in glob.glob(f'{man}/*.png') if os.path
 SRC.update({n: f'{readme}/{n}.png' for n in ['dmm', 'auto-acdc', 'burden', 'ajack', 'combined', 'generator', 'power', 'scope']})
 SRC['main-menu'] = f'{matrix}/m04-main-menu.png'
 SRC['inrush'] = f'{matrix}/i02-inrush-dc.png'
-SRC['gallery'] = f'{gallery}/g01-grid-p1.png'
+SRC['gallery'] = f'{gallery}/gallery.png'
+SRC['gallery-select'] = f'{gallery}/gallery-select.png'
 SRC['gallery-view'] = f'{gallery}/g05-overlay.png'
 
 os.makedirs(DST, exist_ok=True)

@@ -83,6 +83,8 @@ jobs:
         run: firmware/build.sh --locked
       - name: Non-default feature sets (tools/build-variants)
         run: firmware/tools/build-variants/run.sh
+      - name: Localized images, each with the budget checks (tools/build-langs.sh)
+        run: firmware/tools/build-langs.sh --locked
       # The artifact: opendm40-<commit> for a push; for a pull request
       # the install name without .bin (dm40_opendm40_v0.3.2-pr148.1a2b3c4),
       # which pr-build.yml looks for, and BUILD.txt with the commits.
@@ -94,7 +96,7 @@ jobs:
         run: |
           name=dm40_opendm40_v$(tools/fw-version.sh).bin
           test -f "$name"
-          sha256sum "$name" | tee SHA256SUMS
+          sha256sum "$name" "${name%.bin}"-??.bin | tee SHA256SUMS
           printf 'merge %s\nbase %s\n' "$GITHUB_SHA" "$BASE_SHA" > BUILD.txt
           echo "name=$name" >> "$GITHUB_OUTPUT"
           if [ -n "${DM40_VERSION_SUFFIX:-}" ]; then
@@ -106,7 +108,7 @@ jobs:
         with:
           name: ${{ steps.image.outputs.artifact }}
           path: |
-            firmware/${{ steps.image.outputs.name }}
+            firmware/dm40_opendm40_v*.bin
             firmware/SHA256SUMS
             firmware/BUILD.txt
             firmware/target/native/stackdepth.txt

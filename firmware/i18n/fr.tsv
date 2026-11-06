@@ -1,0 +1,237 @@
+# opendm40 French UI strings; tools/mklang.py. English<TAB>French<TAB>M machine-written, needs a native review.
+Multimeter	Multimètre	M
+Oscilloscope	Oscilloscope	M
+Signal	Générateur	M
+Settings	Réglages	M
+Scope	Oscillo	M
+Main menu	Menu principal	M
+Display	Écran	M
+Alerts	Alertes	M
+Power	Alim.	M
+Other	Autre	M
+Dim screen	Veille écran	M
+Shutdown	Extinction	M
+Backlight	Rétroéclairage	M
+Key/alert volume	Volume touches	M
+Bluetooth	Bluetooth	M
+Start page	Page de départ	M
+Analog power	Alim. analog.	M
+DMM rate	Vitesse DMM	M
+Smoothing	Lissage	M
+DMM row	Ligne DMM	M
+Temp unit	Unité temp.	M
+Swipe	Geste	M
+Press effect	Effet appui	M
+Tap step	Pas tactile	M
+Help	Aide	M
+Jack alerts	Alertes bornes	M
+Danger alarm	Alarme danger	M
+USB disk	Disque USB	M
+Burden voltage	Chute tension	M
+Device info	Infos appareil	M
+Touch test	Test tactile	M
+Accuracy	Précision	M
+Negative ohm	Ohm négatif	M
+Mode Remember	Mémoire mode	M
+Never	Jamais	M
+1 hour	1 heure	M
+1 min	1 min	M
+5 min	5 min	M
+10 min	10 min	M
+30 min	30 min	M
+On	On	M
+Off	Off	M
+ON	ON	M
+OFF	OFF	M
+Cancel	Annuler	M
+OK	OK	M
+Yes	Oui	M
+No	Non	M
+Back	Retour	M
+< Back	< Retour	M
+< Prev	< Préc	M
+Next >	Suiv >	M
+Save	Sauver	M
+Delete	Supprimer	M
+Clear	Effacer	M
+Default	Défaut	M
+Reset	RAZ	M
+Start	Démarrer	M
+Auto	Auto	M
+Normal	Normal	M
+Single	Monoc.	M
+Rising	Montant	M
+Falling	Desc.	M
+Edge	Front	M
+Pulse	Impuls.	M
+Trigger	Déclench.	M
+Measure	Mesure	M
+Decode	Décodage	M
+Window	Fenêtre	M
+Sine	Sinus	M
+Square	Carré	M
+Triangle	Triangle	M
+Ramp	Rampe	M
+Frequency	Fréquence	M
+Freq	Fréq	M
+Duty	Duty	E
+Coupling	Couplage	M
+Probe	Sonde	M
+Type:	Type :	M
+Mode:	Mode :	M
+Mode	Mode	M
+Edge:	Front :	M
+Persist:	Persistance :	M
+Roll:	Défilement :	M
+Brightness:	Luminosité :	M
+Grid intensity:	Luminosité grille :	M
+FFT Unit	Unité FFT	M
+Source:	Source :	M
+Threshold:	Seuil :	M
+Width:	Largeur :	M
+Offset	Décalage	M
+Color	Couleur	M
+Save CSV	Sauver CSV	M
+Save CSV OK	CSV sauvé	M
+CSV save failed	Erreur CSV	M
+Screenshot	Capture	M
+Screenshot failed	Erreur capture	M
+Stop the scope first	Arrêter d'abord	M
+Sampling	Acquisition	M
+Vendor	Fabricant	M
+Model	Modèle	M
+SN	N. série	M
+Bootloader	Bootloader	M
+Software	Logiciel	M
+Hardware	Matériel	M
+Voltage Settings	Réglages tension	M
+Current Settings	Réglages courant	M
+Resistor Settings	Réglages résist.	M
+Capacitance Settings	Réglages capacité	M
+Temperature Settings	Réglages temp.	M
+Power Settings	Réglages puissance	M
+Power off	Arrêt	M
+Power off?	Éteindre ?	M
+Range	Calibre	M
+Manual	Manuel	M
+Autorange	Calibre auto	M
+Auto Hold	Maintien auto	M
+Hold & Limits	Maintien et limites	M
+Limits	Limites	M
+Lower	Bas	M
+Upper	Haut	M
+Lower limit	Limite basse	M
+Upper limit	Limite haute	M
+Clear limits	Effacer limites	M
+Fail beep	Bip hors limite	M
+Record	Enreg.	M
+Interval	Intervalle	M
+Change	Variation	M
+Duration	Durée	M
+Free	Libre	M
+Every reading	Chaque mesure	M
+On change	Si variation	M
+Fast	Rapide	M
+Until stopped	Jusqu'à l'arrêt	M
+Start recording	Démarrer enreg.	M
+Stop recording	Arrêter enreg.	M
+Stop the recording	Arrêter enreg.	M
+Stop the recording first	Arrêter l'enreg. d'abord	M
+Recording	Enregistrement	M
+Recording CSV	Enreg. CSV	M
+Saving ...	Sauvegarde...	M
+Saving CSV...	Sauv. CSV...	M
+Saved	Sauvegardé	M
+Wave	Onde	M
+History	Historique	M
+Bargraph	Barre	M
+Zero	Zéro	M
+Inrush	I appel	M
+Inrush Current	Courant d'appel	M
+Arm	Armer	M
+Wiring	Schéma	M
+Generator is off	Générateur éteint	M
+Gallery	Galerie	M
+Gallery: screenshots and logs	Galerie : captures et logs	M
+No screenshots or logs	Aucune capture ni log	M
+Delete screenshot?	Supprimer la capture ?	M
+Delete this log?	Supprimer ce log ?	M
+Delete failed	Échec suppr.	M
+Cannot delete	Suppr. impossible	M
+Log	Log	M
+Log failed	Erreur log	M
+No data	Aucune donnée	M
+No disk	Pas de disque	M
+Disk full	Disque plein	M
+Disk busy	Disque occupé	M
+Disk busy, try again	Disque occupé, réessayer	M
+Disk read error	Erreur lecture disque	M
+Read error	Erreur lecture	M
+Empty file	Fichier vide	M
+File not found	Fichier introuvable	M
+Loading...	Chargement...	M
+Try again	Réessayer	M
+Again	Répéter	M
+Stopped	Arrêté	M
+Discharging...	Décharge...	M
+Check leads	Vérifier cordons	M
+Fuse check	Test fusible	M
+Fuse OK	Fusible OK	M
+Fuse open	Fusible grillé	M
+Install it now?	Installer ?	M
+Installing firmware...	Installation...	M
+Touch calibration	Calibrage tactile	M
+Calibrate	Calibrer	M
+Top bar	Barre haut	M
+Off (stock)	Off (origine)	M
+OFF (stock)	OFF (origine)	M
+Halves (stock)	Moitiés (origine)	M
+Corners	Coins	M
+Auto (per view)	Auto (par vue)	M
+Both always	Toujours les deux	M
+Files live	Lecture seule	M
+PC can edit	PC modifie	M
+Files live (replug)	Lecture (rebr.)	M
+PC can edit (replug)	Écriture (rebr.)	M
+Loud	Fort	M
+Volume	Volume	M
+Measuring ...	Mesure...	M
+Temp	Temp	E
+Cap	Cap	E
+Diode	Diode	E
+Upper = reading	Haut = mesure	M
+Lower = reading	Bas = mesure	M
+AUTO starts on mV: AUTO+ is safer	AUTO part de mV : AUTO+ plus sûr	M
+AUTO+ recommended: never steps to mV	AUTO+ conseillé : jamais en mV	M
+Reset Wh	RAZ Wh	M
+Current in A jack: check leads	Courant en A : voir cordons	M
+A jack current: 10 A shunt on	Courant en A : shunt 10 A	M
+Overload: 10 A shunt selected	Surcharge : shunt 10 A	M
+Voltage on V jack, no current	Tension sur V, sans courant	M
+Voltage on circuit - power off	Couper la tension du circuit	M
+DC voltage here: use DC V?	Tension continue : DC V ?	M
+AC voltage here: use AC V?	Tension alternative : AC V ?	M
+0 A for 60 s: check the fuse?	0 A pendant 60 s : fusible ?	M
+Current too high: reduce it	Courant trop élevé : réduire	M
+Lead from V/ohm jack to A	Cordon de V/Ω vers A	M
+nothing else connected	rien d'autre de branché	M
+OL: no path from V to A	OL : pas de liaison V-A	M
+Replace: 10 A ceramic fuse	Remplacer : céram. 10 A	M
+One lead V/ohm to A only	Un seul cordon : V/Ω vers A	M
+A input path intact	Entrée A : circuit intact	M
+No ohm reading	Pas de mesure en Ω	M
+expect ~48 \u{3a9}	attendu ~48 \u{3a9}	M
+Runt	Runt	E
+Reset settings	Réinitialiser les réglages	M
+Reset settings?	Réglages par défaut ?	M
+Calibration, files stay	Calibrage, fichiers gardés	M
+Select	Choisir	M
+Delete selected	Suppr. sélection	M
+Delete selected?	Supprimer la sélection ?	M
+Deleting	Suppression	M
+Selection cleared	Sélection effacée	M
+Files changed	Fichiers modifiés	M
+Some skipped	Certains ignorés	M
+Type	Type	E
+Vol	Tens	M
+Cur	Cour	M

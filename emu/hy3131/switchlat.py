@@ -4,7 +4,7 @@ input step under AUTO range) to the first reading and to the reading within
 0.1 % of its final value, for opendm40 and for the stock firmware, on one
 scripted timeline per firmware (docs/history/switch-latency.md).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/hy3131/switchlat.py fwrs --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 \
       --port 45010 --rate MED --json emu/out/swl-fwrs-med.json
   emu/hy3131/switchlat.py stock --json emu/out/swl-stock.json

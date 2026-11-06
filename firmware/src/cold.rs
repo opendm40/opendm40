@@ -8,13 +8,15 @@
 /// (link-native.x), not an anonymous constant (those go to region B, even
 /// when only region C code reads them). Only for text that region C code
 /// alone reads: never on a path that runs while an AD2 stream does.
+/// `$s`: a literal or a `crate::tr!` of one (UI text, src/lang.rs).
 #[macro_export]
 macro_rules! cold_str {
-    ($s:literal) => {{
+    ($s:expr) => {{
+        const T: &str = $s;
         #[cfg_attr(target_os = "none", link_section = ".rodata.cold")]
-        static S: [u8; $s.len()] = {
-            let b = $s.as_bytes();
-            let mut a = [0u8; $s.len()];
+        static S: [u8; T.len()] = {
+            let b = T.as_bytes();
+            let mut a = [0u8; T.len()];
             let mut i = 0;
             while i < b.len() {
                 a[i] = b[i];

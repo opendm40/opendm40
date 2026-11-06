@@ -1293,8 +1293,8 @@ as on `test/scope-chain-0.4`, commit 33dd4cb9) builds it:
 
 ### AC+DC methods behind a feature (2026-10-31, feat/acdc-meth)
 
-The AC+DC prototype methods B and C ([acdcm.rs](../src/acdcm.rs),
-[acdc-approaches.md](acdc-approaches.md) section 10) are debug code: the
+The AC+DC prototype methods B and C (`acdcm.rs`, removed since:
+[acdc-approaches.md](acdc-approaches.md) section 10.0) are debug code: the
 cargo feature `acdc-meth` (off by default) builds them. Without it
 `dmm.rs` has an empty `am` module (`am_on()` constant false, so method A's
 code is as before and the hooks are dropped), no `AM` static, and
@@ -1359,6 +1359,45 @@ only through an address.
 | region C free | 15 368 B | 12 216 B |
 | stack headroom (static worst path) | 20 872 B | 20 872 B |
 | SRAM free | 8 948 B | 8 948 B |
+
+### Region B audit #11 (2026-11-06, feat/release-no-dbg-dev)
+
+The release images leave the developer `DBG:` commands out (owner,
+2026-11-06): Cargo feature `dbg-dev`, off by default, `./build.sh --dev`
+([firmware/README.md](../README.md#build)). Each row: the release build with
+that group alone against the build with none (LTO places code differently
+per build, so the rows do not add up exactly).
+
+| group | region B | region C |
+|---|---|---|
+| DBG:VIEW? (kept in the release image: the install procedure checks the page) | 528 | 0 |
+| DBG:READout? | 480 | 0 |
+| DBG:ALARm? | 328 | -8 |
+| DBG:DRAG | 1 328 | -144 |
+| DBG:CHG? / :PIN / :LOG? / :OUT | 960 | -48 |
+| DBG:IDLE[?] | -32 | 184 |
+| DBG:FLASH? | 352 | 152 |
+| DBG:ISR? | 752 | 0 |
+| DBG:FAST? | 16 | -8 |
+| DBG:CAP? and DBG:CAP:... (7) | 2 884 | 16 |
+| DBG:SCANLINE..., DBG:TE? | 1 048 | 392 |
+| DBG:VDISK:... (6) | 816 | 0 |
+| DBG:PINCH, DBG:GEST? (and the 256 B drag log in SRAM) | 1 616 | -8 |
+| DBG:SENTinel:LOG? / VARiant / PRECond | 912 | -8 |
+| DBG:GENTRIG:..., DBG:CH2:LAG | 968 | 256 |
+| DBG:HWTRIG... (5) | 2 072 | 856 |
+| DBG:POWer:ROW? / RAW? / POKE / STAT / DISC | 1 632 | 16 |
+| all (the developer image) | 15 052 | 1 592 |
+
+| | release/0.5.0 (1a804cc7) | release image | developer image |
+|---|---|---|---|
+| region A2 free | 2 324 B | 2 324 B | 2 324 B |
+| region B free | 18 672 B | 33 196 B | 18 672 B |
+| region C free | 7 568 B | 9 160 B | 7 568 B |
+| SRAM free | 9 324 B | 9 580 B | 9 324 B |
+| stack headroom (static worst path) | 21 108 B | 21 136 B | 21 108 B |
+
+The developer image has the sizes of release/0.5.0's default image (its bytes differ slightly; not investigated).
 
 ### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
 

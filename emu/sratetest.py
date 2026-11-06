@@ -3,7 +3,7 @@
 its time, src/scope_ui.rs draw_tb / tb_rate) in the emulator, against the
 host renders of tools/ui-render (scenes s07-srate-*).
 
-  cd firmware && ./build.sh && tools/ui-render/run.sh /tmp/ur
+  cd firmware && ./build.sh --dev && tools/ui-render/run.sh /tmp/ur
   emu/sratetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --refs /tmp/ur [--shots DIR]
 
 The list's rows (DBG:LCD?) equal the host render with the same centre

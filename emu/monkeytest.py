@@ -4,7 +4,7 @@ drags, view swipes and SCPI commands (edge values included) across every
 page, menu and dialog, with health checks between them. Optional tool, not
 in CI.
 
-  cd firmware && ./build.sh --features mute
+  cd firmware && ./build.sh --dev --features mute
   emu/monkeytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 \
       --seed 1 --minutes 20
 
