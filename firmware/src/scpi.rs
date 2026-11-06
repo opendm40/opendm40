@@ -762,7 +762,7 @@ pub enum Dbg {
     /// (dmm.rs `fast_info`).
     #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Fast,
-    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 22 numbers.
+    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 27 numbers.
     #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Cap,
     /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class

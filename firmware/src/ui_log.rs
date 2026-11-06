@@ -56,6 +56,7 @@ pub struct Top<'a> {
     pub inv: bool,
     pub battery: u8,
     pub charging: bool,
+    pub bat_low: bool,
 }
 
 const PROTO_BADGE: Rect = rect(79, 1, 62, 17);
@@ -101,7 +102,7 @@ pub fn top_key(k: usize, t: &Top) -> u32 {
         2 => h(t.rate),
         3 => h(t.thr),
         4 => t.inv as u32,
-        _ => t.battery as u32 | (t.charging as u32) << 8,
+        _ => t.battery as u32 | (t.charging as u32) << 8 | (t.bat_low as u32) << 9,
     }
 }
 
@@ -133,7 +134,7 @@ pub fn top_item(k: usize, t: &Top) {
                 lcd::fill_rect(INV_BADGE.x as u16, INV_BADGE.y as u16, INV_BADGE.w as u16, INV_BADGE.h as u16, C_BAR);
             }
         }
-        _ => battery_lv(t.battery, t.charging, 0),
+        _ => battery_lv(t.battery, t.charging, t.bat_low, 0),
     }
 }
 

@@ -774,7 +774,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, rec_dim: false, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, bat_low: false, locked: false, rec: true, csv: true, rec_dim: false, page }
 }
 
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
@@ -1831,6 +1831,10 @@ fn main() {
         let mut m = base;
         m.usb = true;
         v.push(("usb", m));
+        let mut low = base;
+        low.battery = 1;
+        low.bat_low = true;
+        v.push(("bat-low", low));
         m.charging = true;
         m.battery = 5;
         v.push(("usb-charged", m));
@@ -2047,7 +2051,8 @@ fn main() {
         std::fs::create_dir_all(&dir).unwrap();
         // (name, bt, usb, csv, locked, bars, charging)
         // `charging` = on a charger (green); the blink is the caller's level.
-        let states: [(&str, bool, bool, bool, bool, u8, bool); 10] = [
+        let states: [(&str, bool, bool, bool, bool, u8, bool); 11] = [
+            ("bat-low", false, false, false, false, 1, false),
             ("plain", false, false, false, false, 4, false),
             ("charged", false, true, false, false, 5, true),
             ("usb", false, true, false, false, 4, false),
@@ -2085,7 +2090,7 @@ fn main() {
                 ck.same_as(&format!("statusbar/blink/{gen}/{dim}"), &want);
             }
         }
-        let states: Vec<_> = states.into_iter().map(|s| (s, false)).chain(std::iter::once((states[4], true))).collect();
+        let states: Vec<_> = states.into_iter().map(|s| (s, false)).chain(std::iter::once((states[5], true))).collect();
         for ((name, bt, usb, csv, locked, bars, charging), dim) in states {
             for gen in [false, true] {
                 host::reset(0);
@@ -2100,6 +2105,7 @@ fn main() {
                 }
                 let mut st = status(0);
                 (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging, st.rec_dim) = (bt, usb, csv, locked, bars, charging, dim);
+                st.bat_low = name == "bat-low";
                 let name = if dim { "all-rec-off" } else { name };
                 let h = if gen { 36 } else { ui::BAR_H as usize };
                 if gen {
@@ -3017,6 +3023,8 @@ fn main() {
         (crate::tr!("Screenshot failed"), false),
         (dialog::AUTO_DC, true),
         ("Auto power-off in 30 s", false),
+        (dialog::LOW_BATTERY, false),
+        (dialog::low_battery_off(30), false),
         // Tap on the DMM value (resolution / rate), widest variants.
         (rate_widest, true),
         (rate_fast, true),
@@ -3447,14 +3455,14 @@ fn main() {
                     save(&out, &format!("x{:02}-{tag}-{}", i + 1, if ext { "ext" } else { "noext" }));
                     bufs.push(emu().fb.clone());
                 }
-                // Nothing but the extra digit's cell (341..398 + the box's
-                // end to 400, rows 68..147) differs.
+                // Nothing but the extra digit's cell (345..402, rows
+                // 68..147) differs.
                 ck.cases += 1;
                 let mut bx = EMPTY;
                 let mut n = 0;
                 for i in 0..W * 320 {
                     let (x, y) = (i % W, i / W);
-                    if bufs[0][i] != bufs[1][i] && !((341..400).contains(&x) && (68..148).contains(&y)) {
+                    if bufs[0][i] != bufs[1][i] && !((345..402).contains(&x) && (68..148).contains(&y)) {
                         bx.add(x as i32, y as i32);
                         n += 1;
                     }
@@ -3871,6 +3879,24 @@ fn main() {
         }
     }
 
+    // Function buttons with remembered sub-modes (dmm::submem), another
+    // function in force: the page and the combined view's band.
+    for (tag, mem) in [("ac-cont-temp", 0x35u8), ("acdc", 0x0A), ("auto", 0x0F)] {
+        let (r, l) = find("ohm_k");
+        ui::set_btn_mem(mem);
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.draw_static(Button::Ohm, r.mode, false, false);
+        dv.bar_update(&r);
+        dv.reading(&r, 0, 0);
+        ck.check(&format!("btn-mem/{tag}"), &dmm_page_regions);
+        save(&out, &format!("d30-btn-mem-{tag}"));
+        combined(&r, l, 0, 0, false, false, true, "");
+        let area = Bx::new(0, ui::FUNC_Y as i32, 480, 301 - ui::FUNC_Y as i32);
+        ck.check_area(&format!("btn-mem/{tag}/band"), &[("band", area)], true, Some(area));
+        save(&out, &format!("d31-btn-mem-band-{tag}"));
+    }
+    ui::set_btn_mem(0);
     // Beeper indicator (continuity / diode, App::beep_ind): every style
     // (bit 0 the SHORT / BEEP band, bit 1 the digits green) x SHORT / BEEP
     // x bargraph / history row x limit badge, layout checked; on -> off
@@ -3905,7 +3931,7 @@ fn main() {
         for style in 1..=3u8 {
             ui::set_short_style(style);
             for (name, r, b) in &short_cases {
-                let k = if *name == "diode-pn" { 2 } else { 1 };
+                let k = match *name { "diode-pn" => 2, "diode" => 3, _ => 1 };
                 for bar in [true, false] {
                     for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
                         page(r, *b, k, bar, lim);
@@ -3937,7 +3963,7 @@ fn main() {
         // Renders: off, then each style; continuity, a diode short, a
         // diode pattern (BEEP).
         let mut n = 1;
-        for (name, k) in [("cont", 1u8), ("diode", 1), ("diode-pn", 2)] {
+        for (name, k) in [("cont", 1u8), ("diode", 3), ("diode-pn", 2)] {
             let (_, r, b) = short_cases.iter().find(|c| c.0 == name).unwrap();
             for style in [0u8, 1, 2, 3] {
                 if style == 0 && name == "diode-pn" {

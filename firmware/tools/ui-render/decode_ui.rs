@@ -497,7 +497,7 @@ fn log_snippet(ck: &mut Checker, name: &str, modbus: bool) {
     host::reset(0);
     ul::chrome(&mut || {});
     ul::panel(false, true, &mut || {});
-    let t = ul::Top { state: 2, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 9600 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
+    let t = ul::Top { state: 2, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 9600 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false, bat_low: false };
     for k in 0..ul::TOP_ITEMS {
         ul::top_item(k, &t);
     }
@@ -540,7 +540,7 @@ fn log_screen(ck: &mut Checker, name: &str, modbus: bool) {
         host::reset(0);
         ul::chrome(&mut || {});
         ul::panel(true, false, &mut || {});
-        let t = ul::Top { state: 1, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 115200 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
+        let t = ul::Top { state: 1, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 115200 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false, bat_low: false };
         for k in 0..ul::TOP_ITEMS {
             ul::top_item(k, &t);
         }

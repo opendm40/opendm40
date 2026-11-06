@@ -554,6 +554,7 @@ impl App {
             ycur: if self.cur.y_on { Some([self.cur.y[0] as i16, self.cur.y[1] as i16]) } else { None },
             battery: self.power.shown_bars(now / 1000 & 1 == 1),
             charging: self.power.on_charger(),
+            bat_low: self.power.low.low(),
             usb: self.usb_host,
             bt: self.bt_on && self.power.bt_connected(),
             roll: self.scope.rolling(),
@@ -684,7 +685,7 @@ impl App {
         ui::strip_acc(&mut d, &r, self.acc_ctx());
         if self.dmm_view.short != 0 && r.alert == crate::sentinel::Alert::None {
             // The beeper indicator (`beep_ind`): the badge and the value green.
-            d.badge = if self.dmm_view.short == 1 { "SHORT" } else { "BEEP" };
+            d.badge = if self.dmm_view.short == 2 { "BEEP" } else { "SHORT" };
             d.badge_col = ui::SHORT_BG;
             d.short = true;
         }

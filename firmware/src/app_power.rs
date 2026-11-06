@@ -57,14 +57,17 @@ impl App {
         }
     }
 
-    /// The dialog's OK: enter the power meter on the DMM page.
+    /// The dialog's OK: enter the power meter; the combined view stays (as
+    /// the W button once the wiring was confirmed), else the DMM page.
     pub(super) fn pw_enter(&mut self, clk: &mut Clock) {
         self.overlay = None;
         self.dmm.pw.wired = true;
         self.dmm.select(clk, pw::FUNC);
         self.func_changed();
         self.last_raw = None;
-        self.show(View::Dmm, clk);
+        if self.view != View::DmmScope {
+            self.show(View::Dmm, clk);
+        }
     }
 
     /// DMM page / settings page taps of the power meter; true = consumed.

@@ -139,9 +139,6 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
-        /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
-         * loop and asm are `.text.a2.*` (zero-wait region A2). */
-        *(.text.*8opendm408memprobe*);
         /* The decoder's frame log: a frame's waveform, drawn on a tap, the
          * top bar / counters, the page draw, the setup popup and the
          * view's touches (app_log.rs `.text.log_cold`; ui_log.rs's panel
@@ -274,6 +271,9 @@ SECTIONS
          * 1000;...'), so they stay in B. */
         *(.text.*8opendm407new_app*);
         *(.text.*8opendm403app*3App11fuse_dialog*);
+        /* The low-battery messages (once per level; never during a stream). */
+        *(.text.*8opendm403app*3App11low_battery*);
+        *(.text.*8opendm403app*3App15low_battery_off*);
         *(.text.*8opendm403app*3App11limits_page*);
         *(.text.*8opendm403app*3App7kp_open*);
         *(.text.*8opendm403app9app_power*3App13pw_open_entry*);
@@ -484,6 +484,10 @@ SECTIONS
         __cold_end = .;
     } > FLASH_C
 
+    /* Feature memprobe (DBG:PEEK? etc., debug builds only) is not claimed
+     * by .cold: its ~3 KB put region C under the 4 KiB floor (2026-11-06,
+     * C 7 KB free in the default build). Its timing loop and asm are
+     * `.text.a2.*` (zero-wait region A2). */
     .text ORIGIN(FLASH_B) :
     {
         __stext = .;
