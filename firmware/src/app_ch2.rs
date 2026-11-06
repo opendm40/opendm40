@@ -31,6 +31,9 @@ pub struct Ch2 {
     /// Vertical position: the zero row - 140 (rows of the 280-row model,
     /// as CH1's `Settings::pos`; the '2' marker, scope_ui::CH2_LEVEL).
     pub pos: i16,
+    /// The next `ch2_lost` starts the stream again at once (a function
+    /// change from the Display tab's V / A), not after 2 s.
+    pub quick: bool,
 }
 
 /// CH2's highest stream rate (S/s): the 38 400 rung at 2 ms/div and
@@ -43,7 +46,7 @@ pub struct Ch2 {
 pub const CH2_MAX_FS: u32 = 38_400;
 
 impl Ch2 {
-    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, pos: 0 };
+    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, pos: 0, quick: false };
 }
 
 /// The CH2 V/div label ("1.5V", "200mA").
@@ -132,7 +135,8 @@ impl App {
     /// stopped it on a DMM change, the bus guard): again in 2 s.
     pub fn ch2_lost(&mut self, now: u64) {
         self.ch2.live = false;
-        self.ch2.retry_at = now + 2000;
+        self.ch2.retry_at = if self.ch2.quick { now } else { now + 2000 };
+        self.ch2.quick = false;
     }
 
     /// The stream into the CH2 store (every scope pass and between its
@@ -194,6 +198,53 @@ impl App {
         }
         self.scope_set(st, now);
         self.update_rails(clk);
+    }
+
+    /// The multimeter's function as CH2's unit (MF > Display V / A): 0 V,
+    /// 1 A, 2 another function (neither shown selected).
+    pub(super) fn ch2_func_idx(&self) -> u8 {
+        match self.dmm.button() {
+            _ if self.dmm.pw.on => 2,
+            Button::Volt => 0,
+            Button::Amp => 1,
+            _ => 2,
+        }
+    }
+
+    /// MF > Display CH2 "V / A": the multimeter into the V or the A function,
+    /// in a coupling CH2 can stream (V: DC / AC, not AC+DC / AUTO; A: AC A,
+    /// DC-coupled), so that CH2's unit and the multimeter agree. The DMM
+    /// write stops a running stream (hy3131 `guard`); it starts again at
+    /// once on the new row (`ch2_lost`).
+    // Region B, not .cold: the tap comes while CH2's stream runs (the ISR).
+    #[inline(never)]
+    pub(super) fn ch2_func(&mut self, clk: &mut Clock, amps: bool) {
+        let now = clk.now_ms();
+        let why = if self.scope.wave_on() {
+            Some("CH2: not in the Wave view")
+        } else if crate::csvlog::active() {
+            Some("CH2: recording runs")
+        } else if crate::hy3131::streaming() && !self.ch2.live {
+            // The data logger or the inrush capture owns the DMM chip.
+            Some("CH2: data logger running")
+        } else {
+            None
+        };
+        if let Some(t) = why {
+            self.toast(now, t, false);
+            return;
+        }
+        let b = if amps { Button::Amp } else { Button::Volt };
+        if self.dmm.pw.on || self.dmm.button() != b {
+            self.dmm.press(clk, b);
+        }
+        let sub = self.dmm.sub();
+        if sub >= 2 || (amps && sub == 0) {
+            self.dmm.set_sub(clk, amps as u8);
+        }
+        self.ch2.quick = self.ch2.live;
+        self.func_changed();
+        self.last_raw = None;
     }
 
     /// MF > Display CH2 V/div - / +: the next `scope::wave_steps` value
