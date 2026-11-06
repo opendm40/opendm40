@@ -7,30 +7,43 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
-- **Scope:** the MF menu leaves nothing on the right panel, and the panel is no longer drawn over it after a tab change.
+## v0.4.1 (2026-11-06)
+
+A bug-fix release: an update or a restart from the scope or generator page
+no longer turns the meter off; capacitance works with a USB charger; a
+low-battery warning and power-off; the scope's MF menu leaves no leftovers;
+the probe factor is kept.
+
 ### Fixed
 
-- **Capacitance with a laptop charger on the USB cable:** mains ripple no
-  longer sends a large capacitor (about 50–600 µF) back and forth between
-  ranges with "Discharging..." and a wrong value. Moderate ripple now
-  measures. When the ripple is too strong to measure, the meter shows
-  dashes and "Unstable: unplug USB?". The ripple case is checked in the
-  emulator only.
 - A firmware update or a restart from the scope or generator page could
   turn the meter off; it now restarts as from the multimeter page.
+- **Capacitance with a laptop charger on the USB cable:** mains ripple no
+  longer sends a large capacitor (about 50–600 µF) between ranges with
+  "Discharging..." and a wrong value; too strong ripple shows dashes and
+  **Unstable: unplug USB?** (checked with ripple in the emulator only;
+  [manual](docs/manual/README.md#capacitance)).
+- **Low battery:** a 3 s **Low battery! Please charge** message and a beep at
+  about 17 % and 8 %, and a red battery symbol; below about 1 % a 30 s
+  countdown, then a clean power-off. Not on USB power
+  ([manual](docs/manual/README.md#power-battery-and-sleep)).
+- **Battery level on the charger:** no jump up at plug-in; it rises slowly
+  with the real charge.
+- **Scope:** the MF menu leaves no pixels on the right panel, and the panel
+  is no longer drawn over it after a tab change.
+- **Scope:** the probe factor is kept after a power-off also with Mode
+  Remember OFF.
+- **Scope:** the trigger badge takes the new source's colour at once.
+- **Diode:** the resistance stays on screen while the SHORT / BEEP band is on
+  (0.4.0 hid it below 22 mV).
+- **Function buttons:** V and A show the remembered DC / AC / AC+DC / AUTO;
+  continuity / diode and Hz / °C put the remembered sub-mode first.
+- **Power meter from the combined view:** the wiring notice returns to the
+  combined view, not the multimeter page.
+
+### Changed
 
 - **Multimeter:** the reading with the extra digit sits 4 px further right.
-- **Scope:** the trigger badge takes the new source's colour at once.
-- **Scope:** the probe factor is kept after a power-off also with Mode Remember OFF.
-- Function buttons: V and A show the remembered AC / DC / AC+DC / AUTO; continuity / diode and Hz / °C put the remembered sub-mode first.
-
-- Diode: the resistance stays on screen while the SHORT / BEEP band is on (0.4.0 hid it below 22 mV).
-
-- Battery level: no longer jumps up on the charger; it rises slowly with the real charge.
-
-- Low-battery warning: a 3 s message and a beep at about 17 % and 8 %, and a red battery symbol; not on USB power, and it waits for a recording to end. Below about 1 % a 30 s countdown, then a clean power-off.
-
-- Power meter from the combined view: the wiring notice returns to the combined view, not the multimeter page.
 
 ## v0.4.0 (2026-11-02)
 
