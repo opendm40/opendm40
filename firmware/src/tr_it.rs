@@ -5,6 +5,15 @@
 macro_rules! tr {
     ("0 A for 60 s: check the fuse?") => { "0 A per 60 s: fusibile?" };
     ("1 hour") => { "1 ora" };
+    ("10 hours") => { "10 ore" };
+    ("2 hours") => { "2 ore" };
+    ("3 hours") => { "3 ore" };
+    ("4 hours") => { "4 ore" };
+    ("5 hours") => { "5 ore" };
+    ("6 hours") => { "6 ore" };
+    ("7 hours") => { "7 ore" };
+    ("8 hours") => { "8 ore" };
+    ("9 hours") => { "9 ore" };
     ("< Back") => { "< Indietro" };
     ("< Prev") => { "< Prec" };
     ("A input path intact") => { "Ingresso A integro" };
@@ -220,6 +229,15 @@ macro_rules! tr {
 pub const PAIRS: &[(&str, &str)] = &[
     ("0 A for 60 s: check the fuse?", "0 A per 60 s: fusibile?"),
     ("1 hour", "1 ora"),
+    ("10 hours", "10 ore"),
+    ("2 hours", "2 ore"),
+    ("3 hours", "3 ore"),
+    ("4 hours", "4 ore"),
+    ("5 hours", "5 ore"),
+    ("6 hours", "6 ore"),
+    ("7 hours", "7 ore"),
+    ("8 hours", "8 ore"),
+    ("9 hours", "9 ore"),
     ("< Back", "< Indietro"),
     ("< Prev", "< Prec"),
     ("A input path intact", "Ingresso A integro"),
