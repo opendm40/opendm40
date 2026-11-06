@@ -47,6 +47,7 @@ the source URL.
 | [hongfa-hfd4.pdf](hongfa-hfd4.pdf) | HFD4 Subminiature Signal Relay, 2026 Rev. 1.00 (single side stable and latching versions; the PDF's text layer is scrambled, read it as an image) | Xiamen Hongfa Electroacoustic | https://source.hongfa.com/Uploads/Product/PDF/HFD4_en.pdf | photo marking HFD4/3-LS |
 | [3peak-3pa1030-reva1.pdf](3peak-3pa1030-reva1.pdf) | 3PA1030 Complete 10-Bit, 50-MSPS, CMOS ADC, Rev.A.1 (2024-12-30) | 3PEAK | https://static.3peak.com/res/doc/ds/Datasheet_3PA1030.pdf | BOM only (under the scope shield); 10-bit bus in code |
 | [gainsil-gs8091.pdf](gainsil-gs8091.pdf) | GS8091/8092/8094/8091N/8092N 350 MHz CMOS Rail-to-Rail Output Opamps, March 2020 REV_V1 | Gainsil | http://www.gainsil.com/images/product/28_2.pdf | BOM only ("8091"), unconfirmed |
+| *link only* | AC6328A Datasheet, Version V1.4 (public copy in the Jieli SDK): SOP8 Bluetooth 5.0 dual-mode SoC, pinout and electrical data only | Zhuhai Jieli Technology | https://github.com/Jieli-Tech/fw-AC63_BT_SDK/tree/master/doc/datasheet/AC632N/AC6328A (the owner also holds a V1.0 copy marked "Confidential", kept out of the repo) | the 8-pin Jieli chip next to the antenna; its flash image names the AC632N family |
 | [ti-cd74hc4051-schs122o.pdf](ti-cd74hc4051-schs122o.pdf) | CDx4HC405x, CD4HCT405x analog multiplexer, SCHS122O (rev. January 2026) | Texas Instruments | https://www.ti.com/lit/ds/symlink/cd74hc4051.pdf | BOM "HC4051" / RE header "HCF4051": the maker of the actual chip is unknown; this is a generic 4051 reference |
 
 Not included:
@@ -55,7 +56,7 @@ Not included:
   https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf
   (not stored; download it by hand).
 - TC1746B6 divider network: maker not identified.
-- Hynitron CST touch controller (exact model unknown), Goodix GT1158, Jieli
-  BP2A838: no official public datasheets found.
+- Hynitron CST touch controller (exact model unknown), Goodix GT1158: no
+  official public datasheets found.
 - SGM3157, RUH30J51M, EL3H7, FMMT619, LT61-1xx transformers, the power-path
   parts: not searched yet (markings from the BOM / chat reports only).
