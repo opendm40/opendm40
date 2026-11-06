@@ -202,6 +202,7 @@ Board temp
 Burden
 CAP
 CH1
+CH2
 CH2 (DMM):
 CH2: DMM in V or A
 CH2: data logger running
@@ -587,6 +588,7 @@ settings: one value per setting
 shunt
 source DMM 
 t_s,raw,value_A,lost_before\r\n
+the CH2 view's ring is the store's
 the value column is 
 the value column is amperes (CH1 type Cur; probe factor = A per input volt)\r\n
 uA

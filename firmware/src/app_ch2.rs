@@ -277,6 +277,28 @@ impl App {
         }
     }
 
+    /// CH2's scope measurements over the frame's time window (the CH2
+    /// samples taken while CH1's visible samples were): all NaN while CH2
+    /// is off, rolling, or holds no sample of that window. The cursor items
+    /// (7 / 8 / 17) are `cursor_values`'. Not inlined: its 2 KB
+    /// histogram (`scope_meas::compute_codes`) must not join the frame of
+    /// `run` (main.rs; tools/stack-depth headroom), where CH1's already is.
+    #[inline(never)]
+    pub(super) fn ch2_meas(&self, f: &scope::Frame) -> crate::scope_meas::Results {
+        let none = crate::scope_meas::Results { v: [f32::NAN; 20] };
+        if !self.ch2.on || self.scope.wave_on() || f.cols.is_some() || f.data.len() < 2 {
+            return none;
+        }
+        let Some((t0, step)) = self.scope.rec_time() else { return none };
+        let Some(off) = self.scope.record().offset_of(&f.data) else { return none };
+        let st = scope_ch2::store();
+        let t0 = t0.wrapping_add((off as f64 * step as f64) as u64 as u32);
+        let len = f.data.len() as f32 * step as f32;
+        let Some((ia, ib)) = st.range_run(&mut st.run(), t0, len) else { return none };
+        let (src, v_0, v_k) = st.meas_src(ia, ib);
+        crate::scope_meas::compute_codes(&src, st.fs(), v_0, v_k)
+    }
+
     /// CH2 rows of a frame (model rows per engine column, 0 V on the
     /// centre row at the CH2 V/div): from the stored record's time
     /// (`Scope::rec_time`, the frame's offset in it), or the live roll's
