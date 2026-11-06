@@ -1,11 +1,12 @@
 """Glyphs for the alphabetic languages of tools/mklang.py (ru, it, fr).
 
-Latin accents: the stock base letter of each font plus an accent (ACC), so the
-face stays the stock one. Cyrillic: letters shaped like a Latin one are that
-stock glyph (the text holds the ASCII byte); the others are rendered from
-Liberation Sans (SIL OFL 1.1, i18n/OFL-Liberation.txt; the font file is not in
-the repo, Debian: fonts-liberation) at the size that best matches the stock
-face (fit_size). Per font only the characters its strings use: i18n/font-use.tsv
+Latin accents: the base letter of each font plus an accent (ACC), so the
+face stays the font's. Cyrillic: letters shaped like a Latin one are that
+glyph (the text holds the ASCII byte); the others are DM40 Term's in its fonts
+(tools/mkterm.py: TEXT22, F14, SC_F12, SC_F16), in the stock ASCII26 rendered
+from Liberation Sans (SIL OFL 1.1, i18n/OFL.txt; the font file is not in the
+repo, Debian: fonts-liberation) at the size that best matches the stock face
+(fit_size). Per font only the characters its strings use: i18n/font-use.tsv
 (from ui-render with LANG_LOG); a translation whose glyph is missing in its
 font stays English at run time. 1 bpp glyphs are BIT1, 4 bpp HUF with the stock
 fonts' shared tables (tools/mkstockfont.py).
@@ -20,6 +21,7 @@ import re
 import struct
 
 import mkstockfont as msf
+import mkterm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FW = os.path.dirname(HERE)
@@ -191,6 +193,22 @@ def render(ch, size, f, lh, de, four, _):
     return [r[:w] for r in m], w, w + 1
 
 
+# The text fonts of DM40 Term (tools/mkterm.py): the accents go on its
+# letters, its Cyrillic is used as it is.
+TERM = None
+
+
+def term_font(nm, f, lh, de, four):
+    """`load`'s glyphs of font `nm` in DM40 Term, as tools/mkstockfont.py
+    emits them."""
+    global TERM
+    TERM = TERM or mkterm.Face()
+    gl = [(c, g[0], g[1], g[2], g[3], mkterm.pack(g[4], g[0], g[1], four)) for c, g in sorted(f.items())]
+    cls = 'B' if all(g[1] == lh for g in f.values()) else 'A'
+    out = TERM.restyle(nm, lh, de, four, gl, cls)
+    return {g[0]: (g[1], g[2], g[3], g[4], mkterm.unpack(g[5], g[1], g[2], four)) for g in out}
+
+
 def huf_lens():
     t = open(os.path.join(FW, 'src', 'stockfont_data.rs'), encoding='utf-8').read()
     cnt = [[int(v) for v in r.split(',') if v.strip()] for r in re.findall(r'\[([0-9, ]+)\],', t.split('pub static HUF_CNT')[1].split(' = [')[1].split('];')[0] + ',')]
@@ -272,14 +290,17 @@ def build(lang, rows, check, rs_bytes):
             continue
         src, nm = FONTS[a]
         f, lh, de, four = load(img, src)
-        size = fit_size(f, lh, de, four) if lang == 'ru' else 0
+        faced = nm in mkterm.FACE
+        if faced:
+            f = term_font(nm, f, lh, de, four)
+        size = fit_size(f, lh, de, four) if lang == 'ru' and not faced else 0
         es, blob = [], bytearray()
         for ch in sorted(need[a], key=lambda c: code.get(c, ord(c))):
             if ch in COMPOSE:
                 m, w, adv = compose(ch, f, lh, de)
             else:
                 assert lang == 'ru', ch
-                m, w, adv = render(ch, size, f, lh, de, four, 0)
+                m, w, adv = TERM.line(nm, ord(ch)) if faced else render(ch, size, f, lh, de, four, 0)
             gw, gh, gadv, yoff, data = emit_glyph(m, w, adv, lh, de, four)
             es.append('E(%d,%d,%d,%d,%d,%d,0,%d)' % (code.get(ch, ord(ch)), len(blob), gw, gh, gadv, yoff, gh))
             blob += data

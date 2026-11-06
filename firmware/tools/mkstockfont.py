@@ -413,6 +413,12 @@ def main():
         ('SC_F16', 0x0804F260, lambda: load(0x080534C4)),                     # 16 px popup ASCII (wrapper)
     ]]
     loaded = [(name, a, src()) for name, a, src in fonts]
+    # The text fonts in DM40 Term (tools/mkterm.py, Terminus Font bitmaps);
+    # its W / k / ℃ / ℉ of those fonts into stockfont_w.rs.
+    sys.path.insert(0, HERE)
+    import mkterm
+    loaded, face = mkterm.restyle(loaded)
+    mkterm.own_glyphs(face, os.path.join(FW, 'src', 'stockfont_w.rs'))
     # The 4 bpp glyphs of every font, in emit order: one token parse and one
     # set of Huffman tables for all of them.
     four_gl = [(gw, gh, pixels(data, gw, gh, True)) for _, _, (_, _, four, gl, _) in loaded if four

@@ -1,13 +1,14 @@
 # Fonts: the stock bitmap fonts, their storage and cost
 
-Every text and icon on the opendm40 screens is drawn with the stock DM40 V2.6
-bitmap fonts, copied into the image at build time and stored compressed.
+The icons, the big readings and the dialogs are drawn with the stock DM40
+V2.6 bitmap fonts, the menu and label texts with DM40 Term (section 1a); both
+are copied into the image at build time and stored compressed.
 This page describes where they come from, the storage format, where they
 live in flash, and why the storage is lossless.
 
 ## 1. stockfont
 
-The stock look is the baseline of the UI, so the fonts are the stock ones.
+The stock look is the baseline of the UI, so the other fonts are the stock ones.
 They used to be read live from the stock app at 0x0805xxxx..0x0806xxxx; once
 opendm40 is flashed over 0x08004000 that app is gone, so
 [`tools/mkstockfont.py`](../tools/mkstockfont.py) copies them out of
@@ -19,6 +20,42 @@ placement rules), anti-aliased blend through a 16-step colour ramp, the stock
 threshold compositing of the scope page (`Ink`), the half-size +1 digit
 (`label_half`) and opendm40's own W / k glyphs
 ([`src/stockfont_w.rs`](../src/stockfont_w.rs)) for the power meter.
+
+## 1a. DM40 Term
+
+The text fonts are DM40 Term, based on [Terminus Font](https://terminus-font.sourceforge.net/)
+4.49.1 by Dimitar Zhekov (SIL OFL 1.1, [`fonts/OFL-DM40Term.txt`](../fonts/OFL-DM40Term.txt)).
+It has its own name because we changed glyphs: the OFL reserves the name
+"Terminus Font" for the unmodified font.
+
+| font | draws | DM40 Term from |
+|---|---|---|
+| TEXT22 | menus, settings, the generator page | `ter-u22b` |
+| HIST | the DMM history row | `ter-u20b` |
+| F14 | small labels, MAX / AVG / MIN | `ter-u12b` |
+| SC_F12, SC_F16 | the scope page's texts | `ter-u12b` |
+
+ASCII26 (dialogs), the big digits and units (F78, UNIT, LETTERS, F21,
+K_FONT) and the icons stay stock.
+
+[`tools/mkterm.py`](../tools/mkterm.py) (called by `mkstockfont.py` and
+`mklang_x.py`) places each BDF glyph at its native size, never scaled: the
+ink on the stock baseline, moved up or down until the ascenders and
+descenders fit the line box; digits share one advance; in the fixed-cell
+fonts F14 and HIST a glyph wider than its stock cell stays stock (HIST: M).
+Our changes:
+
+* the 0 without Terminus's dot: an oval with rounder ends than the O
+  (20 / 22 px). At 12 px it has the O's shape;
+* the stock Ω (Terminus's is narrow: "600Ω" read "6000"), moved to the face's
+  baseline;
+* ℃ / ℉: Terminus's ring and C / F, the ring on the caps' top row.
+
+Cyrillic: Terminus's, with its alternatives alt/ij1 and alt/dv1 (и й д в in
+the Russian shapes). The BDF files are not in the repo:
+[`tools/fetch-terminus.sh`](../tools/fetch-terminus.sh) downloads the release
+tarball (SHA-256 checked), applies the two alternatives and puts the files in
+`target/terminus-font-4.49.1`; `mkterm.py` checks each file's SHA-256.
 
 ## 2. The stock fonts
 
@@ -53,7 +90,8 @@ What can be dropped or packed without changing a pixel:
 The unit fonts without a lowercase k (UNIT, LETTERS, F21, K_FONT, HIST) take
 ours ([`tools/mkwglyph.py`](../tools/mkwglyph.py), `stockfont_w.rs`): "kW",
 "kΩ", "kHz" instead of the stock "KW"; ASCII26 (the dialogs) an Ω; TEXT22
-(the menu text) ℃ and ℉: its own C / F after a 4 x 4 ring, 1 bpp.
+(the menu text) ℃ and ℉; in the DM40 Term fonts (section 1a) mkterm.py
+replaces HIST's W / k and TEXT22's ℃ / ℉ with its own.
 
 ## 3. Storage
 
@@ -140,8 +178,10 @@ image (features `zh`, `ru`, `it`, `fr`), resolved at build time (`tr!`); none in
 the default image.
 Chinese: 14 px 1 bpp glyphs in one set for every font of 15 px and up, each hanzi
 stored as U+0400 + its index. Russian: letters shaped like a Latin one use the
-stock glyph (and one byte of text); the others per font, sized by `fit_size` in
-[`mklang_x.py`](../tools/mklang_x.py). Italian, French: stock letter plus accent.
+Latin glyph (and one byte of text); the others are DM40 Term's in its fonts, in
+ASCII26 Liberation Sans sized by `fit_size` in
+[`mklang_x.py`](../tools/mklang_x.py). Italian, French: the font's letter plus
+an accent.
 
 ## 4. Options not taken
 
