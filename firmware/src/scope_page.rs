@@ -153,6 +153,8 @@ struct Cache {
     /// (docs/scope-gen-channel.md).
     gseg: [(i16, i16); scope::COLS],
     c2seg: [(i16, i16); scope::COLS],
+    /// `Ch2::pos` the c2seg rows were made at (a drag previews the move).
+    c2pos: i16,
     valid: bool,
     pos: i32,
     hpos: i32,
@@ -172,6 +174,7 @@ static mut CACHE: Cache = Cache {
     seg: [su::EMPTY; scope::COLS],
     gseg: [su::EMPTY; scope::COLS],
     c2seg: [su::EMPTY; scope::COLS],
+    c2pos: 0,
     valid: false,
     pos: 0,
     hpos: 200,
@@ -540,7 +543,8 @@ impl App {
             probe: probe_idx(s.probe) as u8,
             ac: s.ac,
             trig_row: s.trig_row as i16,
-            trig_v: self.scope.trig_volts(),
+            trig_v: if s.tsrc == scope::TSRC_CH2 && !wave { self.scope.ch2_level() } else { self.scope.trig_volts() },
+            trig_a: crate::scope_ch2::store().scale().amps,
             rising: s.rising,
             trig_px: su::col_of_eng(s.hpos) as i16,
             pos: s.pos as i16,
@@ -596,6 +600,7 @@ impl App {
             tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
             ch2_on: self.ch2.on && !wave,
             ch2_txt: self.ch2_label(),
+            ch2_pos: self.ch2.pos,
             gen_on: self.scope.gen_trace,
             gen_txt: self.gen_label(),
         }
@@ -874,6 +879,7 @@ impl App {
         c.tb = s.tb;
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
+        c.c2pos = self.ch2.pos;
         // The protocol decoder's band (app_decode.rs).
         self.dec_frame(f);
         self.sp_math_frame(f);
@@ -903,7 +909,7 @@ impl App {
             // Owner 2026-11-01: both vanished while a stopped record was
             // panned.
             g.gn[j] = fy(preview_rows(c, &c.gseg, j as i32, d_pos, hpos, gky, kx, zr));
-            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, 0, hpos, 1.0, kx, 0.0));
+            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, (self.ch2.pos - c.c2pos) as i32, hpos, 1.0, kx, 0.0));
             let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
             let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
             g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
@@ -1689,9 +1695,12 @@ impl App {
         let mut st = self.scope.s;
         match id {
             0 => {
-                // CH1 position; the trigger row moves with it (same voltage).
+                // CH1 position; the trigger row moves with it (same voltage;
+                // not with source DMM, whose level is on CH2's scale).
                 let p = (st.pos + rows).clamp(-392, 392);
-                st.trig_row += p - st.pos;
+                if st.tsrc != scope::TSRC_CH2 {
+                    st.trig_row += p - st.pos;
+                }
                 st.runt_row += p - st.pos;
                 st.pos = p;
                 self.sp_code(3);
@@ -1721,6 +1730,23 @@ impl App {
                 self.cur.y[i] = (self.cur.y[i] + rows).clamp(1, 279);
                 self.cursor_values();
                 self.sp_code(5 + 10 * i as u8);
+                return;
+            }
+            su::CH2_LEVEL if self.ch2.on => {
+                // The DMM CH2 trace's position (screen only, as its V/div);
+                // source DMM: the trigger row moves with it (same level).
+                let p = (self.ch2.pos as i32 + rows).clamp(-392, 392);
+                let d = p - self.ch2.pos as i32;
+                self.ch2.pos = p as i16;
+                self.scope.ch2_pos = self.ch2.pos;
+                self.sp_code(16);
+                self.sp_settings_changed();
+                if st.tsrc == scope::TSRC_CH2 && d != 0 {
+                    st.trig_row = (st.trig_row + d).clamp(-10, 290);
+                    self.sp_preview(st);
+                } else {
+                    self.sp_render();
+                }
                 return;
             }
             _ => return,
@@ -1811,7 +1837,7 @@ impl App {
                 self.gest_log.copy_within(1.., 0);
                 GEST_N - 1
             };
-            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15) as u8;
+            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15 | 16) as u8;
             self.gest_log[i] = (t.code, v, t.travel.clamp(-999, 999) as i16, now.saturating_sub(t.t0).min(9999) as u16);
         }
         if self.sp.frozen {
@@ -1989,6 +2015,32 @@ impl App {
                     st.trig_row -= st.pos;
                     st.runt_row -= st.pos;
                     st.pos = 0;
+                }
+                su::CH2_LEVEL if self.ch2.on => {
+                    // CH2 back on the centre line (source DMM: the level too).
+                    if self.scope.s.tsrc == scope::TSRC_CH2 {
+                        let mut s2 = self.scope.s;
+                        s2.trig_row = (s2.trig_row - self.ch2.pos as i32).clamp(-10, 290);
+                        self.scope_set(s2, now);
+                    }
+                    self.ch2.pos = 0;
+                    self.scope.ch2_pos = 0;
+                    self.sp_render();
+                    self.sp_settings_changed();
+                    self.beep(now, 60);
+                    self.sp.touch = None;
+                    self.sp.guide_until = now + GUIDE_MS;
+                    return;
+                }
+                1 if self.scope.s.tsrc == scope::TSRC_CH2 && self.ch2.on => {
+                    // Source DMM: the middle of the CH2 trace (its rows on
+                    // screen, at the present position), not of CH1's.
+                    let c = cache();
+                    let (lo, hi) = c.c2seg.iter().fold((i32::MAX, i32::MIN), |(lo, hi), &(a, b)| if (a, b) == su::EMPTY { (lo, hi) } else { (lo.min(a as i32), hi.max(b as i32)) });
+                    if lo > hi {
+                        return;
+                    }
+                    st.trig_row = ((lo + hi) / 2 + (self.ch2.pos - c.c2pos) as i32).clamp(-10, 290);
                 }
                 1 => {
                     let (hi, lo) = (self.meas_res.v[12], self.meas_res.v[13]);
@@ -2653,10 +2705,18 @@ impl App {
                 // The page height is the same, the rows below change.
             }
             su::MfHit::TSrc(t) => {
-                st.tsrc = t.min(1);
-                self.scope_set(st, now);
-                if st.tsrc == scope::TSRC_GEN && !self.gen.s.on {
+                // GEN with the generator off: the source stays, a toast
+                // says why. DMM with CH2 off: CH2 on (its own toast if it
+                // cannot be).
+                let t = t.min(scope::TSRC_CH2);
+                if t == scope::TSRC_CH2 && !self.ch2.on && self.ch2_on_for_trig(clk) {
+                    st = self.scope.s;
+                }
+                if t == scope::TSRC_GEN && !self.gen.s.on {
                     self.toast(now, crate::tr!("Generator is off"), false);
+                } else if t != scope::TSRC_CH2 || self.ch2.on {
+                    st.tsrc = t;
+                    self.scope_set(st, now);
                 }
             }
             su::MfHit::Ch2(on) => {
@@ -3006,10 +3066,14 @@ impl App {
             | (s.tsrc as u32 & 1) << 4
             | (self.scope.gen_trace as u32) << 5
             | (self.ch2.on as u32) << 6
+            // Bit 7: source DMM (CH2; bit 4 then 0).
+            | ((s.tsrc == scope::TSRC_CH2) as u32) << 7
             // Bits 8..12: the GEN V/div index + 1 (0: not set yet).
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
+        // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
+        p[5] |= self.ch2.pos as u16 as u32;
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3033,10 +3097,12 @@ impl App {
         let dd = scope::Settings::DEFAULT;
         st.ttype = (p[3] & 3).min(2) as u8;
         st.pcond = (p[3] >> 2 & 3).min(2) as u8;
-        st.tsrc = (p[3] >> 4 & 1) as u8;
+        st.tsrc = if p[3] >> 7 & 1 != 0 { scope::TSRC_CH2 } else { (p[3] >> 4 & 1) as u8 };
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
+        self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
+        self.scope.ch2_pos = self.ch2.pos;
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };

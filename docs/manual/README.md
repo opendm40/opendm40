@@ -1376,7 +1376,7 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 | **Edge** | Rising, Falling. |
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
-| **Source** | **CH1**, or **GEN**: the generator's own output. |
+| **Source** | **CH1**, **GEN**: the generator's own output, or **DMM**: the multimeter channel (CH2). |
 
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
@@ -1399,10 +1399,15 @@ from the generator's timers when its output crosses the trigger level, and
 places the trigger there. The level is in the generator's volts (0 to
 3 V; a square above 50 kHz switches between 0 and 3 V); a level outside
 the output's swing never triggers. It is an edge trigger (Rising / Falling);
-the trigger badge turns cyan. Useful when the circuit's response to the
+the trigger badge and T markers turn cyan. Useful when the circuit's response to the
 generator is on CH1 and too noisy or too small to trigger on. With the
-generator off, nothing triggers (Auto still shows frames). SCPI
-`TRIGger:SOURce GENerator`.
+generator off, **GEN** cannot be picked; turned off later, nothing triggers
+(Auto still shows frames). SCPI `TRIGger:SOURce GENerator`.
+
+**Source DMM** triggers on the multimeter channel ([CH2 (DMM)](#display-settings)),
+edge only, as exact as one CH2 sample (at most 38.4 k samples/s). The level is on
+CH2's scale and moves with its **2** marker; the badge and T markers turn magenta.
+Picking **DMM** turns CH2 on; turning CH2 off puts the trigger back on CH1. SCPI `TRIGger:SOURce CHANnel2`.
 
 ![Runt trigger: the second level, the orange T](img/scope-trig-runt.png)
 
@@ -1554,7 +1559,8 @@ not use the trigger hardware.
 **CH2 (DMM)** draws the multimeter's input as a second channel (magenta)
 over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
 signal, alongside the scope. Its on / off and V/div (A/div) are also on the
-**DMM** block; 0 is the centre line. It works in V, mV and
+**DMM** block. Drag its **2** marker on the left to move the trace (long
+press: back to the centre); kept in the settings. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
