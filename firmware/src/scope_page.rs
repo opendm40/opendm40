@@ -2705,14 +2705,17 @@ impl App {
                 // The page height is the same, the rows below change.
             }
             su::MfHit::TSrc(t) => {
-                // Not a channel that is off: the source stays, a toast says
-                // why.
+                // GEN with the generator off: the source stays, a toast
+                // says why. DMM with CH2 off: CH2 on (its own toast if it
+                // cannot be).
                 let t = t.min(scope::TSRC_CH2);
+                if t == scope::TSRC_CH2 && !self.ch2.on {
+                    self.ch2_set(clk, true);
+                    st = self.scope.s;
+                }
                 if t == scope::TSRC_GEN && !self.gen.s.on {
                     self.toast(now, crate::tr!("Generator is off"), false);
-                } else if t == scope::TSRC_CH2 && !self.ch2.on {
-                    self.toast(now, crate::tr!("CH2 (DMM) is off"), false);
-                } else {
+                } else if t != scope::TSRC_CH2 || self.ch2.on {
                     st.tsrc = t;
                     self.scope_set(st, now);
                 }

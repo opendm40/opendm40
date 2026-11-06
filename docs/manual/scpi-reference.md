@@ -555,10 +555,10 @@ and `MEASure:POWer?` then give the real power P in W.
 | `CHANnel1:SCALe[?]` | V/div at the probe tip, 0.002 .. 10 (times the probe factor; 0.005 / 0.002 are a digital zoom of 0.01) | `+1.000000E+00` | both |
 | `CHANnel1:COUPling[?]` | `AC` or `DC` | `AC` or `DC` | both |
 | `CHANnel1:OFFSet[?]` | V added to the signal (positive moves the trace up) | `+0.000000E+00` | both |
-| `TRIGger[:EDGE]:LEVel[?]` | V at the probe tip | `+5.000000E-01` | both |
+| `TRIGger[:EDGE]:LEVel[?]` | V at the probe tip; source `CHAN2`: on CH2's scale (A when CH2 measures current), to one screen row | `+5.000000E-01` | both |
 | `TRIGger[:EDGE]:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
 | `TRIGger:SWEep[?]` | `AUTO`, `NORMal` or `SINGle` | `AUTO`, `NORM` or `SING` | both |
-| `TRIGger[:EDGE]:SOURce[?]` | `CHANnel1`, `GENerator` (the generator's output, computed from its timers: edge only, no wire needed) or `CHANnel2` (the multimeter channel, CH2 on: edge only, the level on its scale) | `CHAN1`, `GEN` or `CHAN2` | both |
+| `TRIGger[:EDGE]:SOURce[?]` | `CHANnel1`, `GENerator` (the generator's output, computed from its timers: edge only, no wire needed) or `CHANnel2` (the multimeter channel: edge only, the level on its scale; turns CH2 on, `Settings conflict` where the DMM function has no CH2) | `CHAN1`, `GEN` or `CHAN2` | both |
 | `GENerator:DISPlay[?]` | `ON` or `OFF` (`1` / `0`): the GEN trace (the generator's output) on the scope page | `1` or `0` | both |
 | `GENerator:SCALe[?]` | V/div of the GEN trace, 0.001 .. 10000 (1-2-5 steps); CHANnel1's V/div until it is set | `+1.000000E+00` | both |
 | `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07`; stopped, the stored record's, also after a zoom (1 / the record preamble's xinc; the screen preamble's xinc follows the shown timebase) | both |

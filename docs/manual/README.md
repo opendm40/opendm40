@@ -1407,8 +1407,7 @@ generator off, **GEN** cannot be picked; turned off later, nothing triggers
 **Source DMM** triggers on the multimeter channel ([CH2 (DMM)](#display-settings)),
 edge only, as exact as one CH2 sample (at most 38.4 k samples/s). The level is on
 CH2's scale and moves with its **2** marker; the badge and T markers turn magenta.
-With CH2 off **DMM** cannot be picked; turning CH2 off puts the trigger back on
-CH1. SCPI `TRIGger:SOURce CHANnel2`.
+Picking **DMM** turns CH2 on; turning CH2 off puts the trigger back on CH1. SCPI `TRIGger:SOURce CHANnel2`.
 
 ![Runt trigger: the second level, the orange T](img/scope-trig-runt.png)
 

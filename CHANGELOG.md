@@ -7,7 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
-- **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; a channel that is off cannot be picked.
+- **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; DMM turns CH2 on; GEN cannot be picked while the generator is off.
 - **Scope:** drag the DMM channel's 2 marker to move its trace.
 - DMM: 2 px more between the big digits and the bargraph.
 

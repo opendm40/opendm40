@@ -38,7 +38,6 @@ macro_rules! tr {
     ("Both always") => { "Toujours les deux" };
     ("Brightness:") => { "Luminosit\u{1} :" };
     ("Burden voltage") => { "Chute tension" };
-    ("CH2 (DMM) is off") => { "CH2 (DMM) \u{1}teint" };
     ("CSV save failed") => { "Erreur CSV" };
     ("Calibrate") => { "Calibrer" };
     ("Calibration, files stay") => { "Calibrage, fichiers gard\u{1}s" };
@@ -270,7 +269,6 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Both always", "Toujours les deux"),
     ("Brightness:", "Luminosit\u{1} :"),
     ("Burden voltage", "Chute tension"),
-    ("CH2 (DMM) is off", "CH2 (DMM) \u{1}teint"),
     ("CSV save failed", "Erreur CSV"),
     ("Calibrate", "Calibrer"),
     ("Calibration, files stay", "Calibrage, fichiers gard\u{1}s"),

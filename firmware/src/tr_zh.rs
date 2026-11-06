@@ -3,7 +3,7 @@
 /// literal with one, else the literal (src/lang.rs).
 #[macro_export]
 macro_rules! tr {
-    ("0 A for 60 s: check the fuse?") => { "60 \u{4ab}\u{478}\u{4a2}\u{492}, \u{486}\u{481}\u{414}\u{4ee}\u{407}?" };
+    ("0 A for 60 s: check the fuse?") => { "60 \u{4ab}\u{478}\u{4a2}\u{492}, \u{486}\u{481}\u{414}\u{4ed}\u{407}?" };
     ("1 hour") => { "1\u{450}\u{479}" };
     ("1 min") => { "1\u{423}\u{4e5}" };
     ("10 hours") => { "10\u{450}\u{479}" };
@@ -19,12 +19,12 @@ macro_rules! tr {
     ("8 hours") => { "8\u{450}\u{479}" };
     ("9 hours") => { "9\u{450}\u{479}" };
     ("< Back") => { "< \u{4dc}\u{441}" };
-    ("< Prev") => { "< \u{403}\u{400}\u{4f4}" };
+    ("< Prev") => { "< \u{403}\u{400}\u{4f3}" };
     ("A input path intact") => { "A \u{4d9}\u{41c}\u{4df}\u{4d4}\u{44d}\u{448}" };
     ("A jack current: 10 A shunt on") => { "A \u{471}\u{44a}\u{47f}\u{4a2}\u{492}: \u{454}\u{424}\u{426} 10 A \u{423}\u{492}\u{440}" };
     ("AC voltage here: use AC V?") => { "\u{4dd}\u{4e2}\u{47a}\u{40b}\u{492}, \u{472}\u{4a1} AC V?" };
     ("AUTO starts on mV: AUTO+ is safer") => { "AUTO \u{40e} mV \u{4d2}\u{48c}: AUTO+ \u{47e}\u{44c}\u{41d}" };
-    ("AUTO+ recommended: never steps to mV") => { "\u{470}\u{4bf} AUTO+: \u{405}\u{4eb}\u{426} mV" };
+    ("AUTO+ recommended: never steps to mV") => { "\u{470}\u{4bf} AUTO+: \u{405}\u{4ea}\u{426} mV" };
     ("Accuracy") => { "\u{420}\u{4a8}\u{45b}" };
     ("Again") => { "\u{4e3}\u{493}" };
     ("Alerts") => { "\u{43d}\u{4c9}" };
@@ -42,15 +42,14 @@ macro_rules! tr {
     ("Bluetooth") => { "\u{4c1}\u{49c}\u{45c}\u{41e}" };
     ("Brightness:") => { "\u{491}\u{460}\u{40d}\u{45b}:" };
     ("Burden voltage") => { "\u{4d1}\u{4c0}\u{4a2}\u{430}" };
-    ("CH2 (DMM) is off") => { "CH2 (DMM) \u{454}\u{41e}\u{4e8}" };
     ("Calibration, files stay") => { "\u{483}\u{420}\u{43e}\u{475}\u{410}\u{414}\u{4a4}" };
     ("Cancel") => { "\u{433}\u{494}" };
     ("Capacitance Settings") => { "\u{4a2}\u{44e}\u{493}\u{4e4}\u{4cc}\u{4b7}" };
     ("Change") => { "\u{434}\u{429}\u{4e4}" };
     ("Check leads") => { "\u{486}\u{481}\u{4c4}\u{4b0}" };
-    ("Clear") => { "\u{496}\u{4ed}" };
-    ("Clear limits") => { "\u{496}\u{4ed}\u{4ec}\u{416}" };
-    ("Color") => { "\u{4f6}\u{4be}" };
+    ("Clear") => { "\u{496}\u{4ec}" };
+    ("Clear limits") => { "\u{496}\u{4ec}\u{4eb}\u{416}" };
+    ("Color") => { "\u{4f5}\u{4be}" };
     ("Coupling") => { "\u{4b9}\u{439}" };
     ("Current Settings") => { "\u{4a2}\u{492}\u{493}\u{4e4}\u{4cc}\u{4b7}" };
     ("Current in A jack: check leads") => { "A \u{471}\u{44a}\u{47f}\u{4a2}\u{492}, \u{4ce}\u{486}\u{481}\u{4c4}\u{4b0}" };
@@ -58,17 +57,17 @@ macro_rules! tr {
     ("DC voltage here: use DC V?") => { "\u{4dd}\u{4e2}\u{47a}\u{4a6}\u{492}, \u{472}\u{4a1} DC V?" };
     ("DMM rate") => { "\u{493}\u{4e4}\u{4e0}\u{49e}" };
     ("DMM row") => { "DMM \u{4c3}" };
-    ("Danger alarm") => { "\u{42d}\u{4ee}\u{4c9}\u{469}" };
+    ("Danger alarm") => { "\u{42d}\u{4ed}\u{4c9}\u{469}" };
     ("Decode") => { "\u{4c7}\u{4a7}" };
-    ("Default") => { "\u{4f9}\u{4ca}" };
-    ("Delete") => { "\u{425}\u{4ed}" };
-    ("Delete screenshot?") => { "\u{425}\u{4ed}\u{466}\u{442}?" };
-    ("Delete selected") => { "\u{425}\u{4ed}\u{467}\u{4de}" };
-    ("Delete selected?") => { "\u{425}\u{4ed}\u{467}\u{4de}\u{475}\u{410}?" };
-    ("Delete this log?") => { "\u{425}\u{4ed}\u{4cb}\u{45f}?" };
-    ("Deleting") => { "\u{48b}\u{443}\u{425}\u{4ed}" };
+    ("Default") => { "\u{4f8}\u{4ca}" };
+    ("Delete") => { "\u{425}\u{4ec}" };
+    ("Delete screenshot?") => { "\u{425}\u{4ec}\u{466}\u{442}?" };
+    ("Delete selected") => { "\u{425}\u{4ec}\u{467}\u{4de}" };
+    ("Delete selected?") => { "\u{425}\u{4ec}\u{467}\u{4de}\u{475}\u{410}?" };
+    ("Delete this log?") => { "\u{425}\u{4ec}\u{4cb}\u{45f}?" };
+    ("Deleting") => { "\u{48b}\u{443}\u{425}\u{4ec}" };
     ("Device info") => { "\u{40c}\u{43f}\u{415}\u{465}" };
-    ("Dim screen") => { "\u{47d}\u{453}\u{479}\u{4e9}" };
+    ("Dim screen") => { "\u{47d}\u{453}\u{479}\u{4e8}" };
     ("Discharging...") => { "\u{473}\u{4a2}\u{409}..." };
     ("Disk busy") => { "\u{4a9}\u{4a5}\u{462}" };
     ("Disk busy, try again") => { "\u{4a9}\u{4a5}\u{462}, \u{4ce}\u{4e3}\u{4cd}" };
@@ -79,36 +78,36 @@ macro_rules! tr {
     ("Edge:") => { "\u{4da}\u{490}:" };
     ("Every reading") => { "\u{48d}\u{408}\u{4cf}\u{474}" };
     ("FFT Unit") => { "FFT\u{42b}\u{411}" };
-    ("Fail beep") => { "\u{4d3}\u{4ec}\u{4c2}\u{4f8}" };
-    ("Falling") => { "\u{404}\u{4eb}\u{490}" };
+    ("Fail beep") => { "\u{4d3}\u{4eb}\u{4c2}\u{4f7}" };
+    ("Falling") => { "\u{404}\u{4ea}\u{490}" };
     ("Fast") => { "\u{463}\u{4e0}" };
     ("Files changed") => { "\u{475}\u{410}\u{454}\u{47e}\u{472}" };
     ("Files live") => { "\u{435}\u{4cf}" };
     ("Files live (replug)") => { "\u{435}\u{4cf} (\u{4e3}\u{471})" };
     ("Free") => { "\u{436}\u{4a1}" };
-    ("Freq") => { "\u{4f5}\u{49e}" };
-    ("Frequency") => { "\u{4f5}\u{49e}" };
-    ("Fuse OK") => { "\u{414}\u{4ee}\u{407}\u{48b}\u{456}" };
-    ("Fuse check") => { "\u{414}\u{4ee}\u{407}\u{4bd}\u{486}" };
-    ("Fuse open") => { "\u{414}\u{4ee}\u{407}\u{49b}\u{476}" };
+    ("Freq") => { "\u{4f4}\u{49e}" };
+    ("Frequency") => { "\u{4f4}\u{49e}" };
+    ("Fuse OK") => { "\u{414}\u{4ed}\u{407}\u{48b}\u{456}" };
+    ("Fuse check") => { "\u{414}\u{4ed}\u{407}\u{4bd}\u{486}" };
+    ("Fuse open") => { "\u{414}\u{4ed}\u{407}\u{49b}\u{476}" };
     ("Gallery") => { "\u{442}\u{459}" };
     ("Gallery: screenshots and logs") => { "\u{442}\u{459}: \u{466}\u{442}\u{43e}\u{4cb}\u{45f}" };
     ("Grid intensity:") => { "\u{4b6}\u{485}\u{40d}\u{45b}:" };
     ("History") => { "\u{42f}\u{437}" };
-    ("Hold & Limits") => { "\u{414}\u{46c}/\u{4ec}\u{416}" };
+    ("Hold & Limits") => { "\u{414}\u{46c}/\u{4eb}\u{416}" };
     ("Inrush") => { "\u{495}\u{492}" };
     ("Inrush Current") => { "\u{495}\u{492}" };
-    ("Interval") => { "\u{4e9}\u{4f0}" };
+    ("Interval") => { "\u{4e8}\u{4ef}" };
     ("Jack alerts") => { "\u{471}\u{44a}\u{43d}\u{4c9}" };
-    ("Key/alert volume") => { "\u{4c2}\u{4f8}\u{440}\u{4f3}\u{4e4}" };
+    ("Key/alert volume") => { "\u{4c2}\u{4f7}\u{440}\u{4f2}\u{4e4}" };
     ("Lead from V/ohm jack to A") => { "\u{4c4}\u{4b0}\u{40e} V/\u{3a9} \u{471}\u{44a}\u{46f}\u{426} A" };
-    ("Limits") => { "\u{4ec}\u{416}" };
-    ("Loud") => { "\u{4f7}" };
+    ("Limits") => { "\u{4eb}\u{416}" };
+    ("Loud") => { "\u{4f6}" };
     ("Low battery! Please charge") => { "\u{4a2}\u{4e4}\u{412}! \u{4ce}\u{419}\u{4a2}" };
-    ("Lower") => { "\u{404}\u{4ec}" };
-    ("Lower = reading") => { "\u{404}\u{4ec}=\u{4cf}\u{474}" };
-    ("Lower limit") => { "\u{404}\u{4ec}" };
-    ("Main menu") => { "\u{40a}\u{4a3}\u{4f2}" };
+    ("Lower") => { "\u{404}\u{4eb}" };
+    ("Lower = reading") => { "\u{404}\u{4eb}=\u{4cf}\u{474}" };
+    ("Lower limit") => { "\u{404}\u{4eb}" };
+    ("Main menu") => { "\u{40a}\u{4a3}\u{4f1}" };
     ("Manual") => { "\u{468}\u{428}" };
     ("Measure") => { "\u{493}\u{4e4}" };
     ("Measuring ...") => { "\u{493}\u{4e4}\u{409} ..." };
@@ -118,9 +117,9 @@ macro_rules! tr {
     ("Model") => { "\u{444}\u{438}" };
     ("Multimeter") => { "\u{401}\u{4a1}\u{4c4}" };
     ("Never") => { "\u{40e}\u{405}" };
-    ("Next >") => { "\u{404}\u{400}\u{4f4} >" };
+    ("Next >") => { "\u{404}\u{400}\u{4f3} >" };
     ("No") => { "\u{43b}" };
-    ("No ohm reading") => { "\u{478}\u{4a2}\u{4ea}\u{4cf}\u{474}" };
+    ("No ohm reading") => { "\u{478}\u{4a2}\u{4e9}\u{4cf}\u{474}" };
     ("Normal") => { "\u{47c}\u{4df}" };
     ("OFF") => { "\u{41e}" };
     ("OFF (stock)") => { "\u{41e} (\u{431}\u{42e})" };
@@ -145,17 +144,17 @@ macro_rules! tr {
     ("Power off?") => { "\u{41e}\u{480}?" };
     ("Probe") => { "\u{46e}\u{447}" };
     ("Pulse") => { "\u{4bc}\u{44f}" };
-    ("Ramp") => { "\u{4e6}\u{4fa}\u{491}" };
+    ("Ramp") => { "\u{4e6}\u{4f9}\u{491}" };
     ("Range") => { "\u{4e4}\u{4ad}" };
     ("Record") => { "\u{4cb}\u{45f}" };
     ("Recording") => { "\u{48b}\u{443}\u{4cb}\u{45f}" };
     ("Recording CSV") => { "\u{48b}\u{443}\u{4cb}\u{45f}" };
-    ("Replace: 10 A ceramic fuse") => { "\u{47e}\u{46d} 10 A \u{4ef}\u{49f}\u{414}\u{4ee}\u{407}" };
+    ("Replace: 10 A ceramic fuse") => { "\u{47e}\u{46d} 10 A \u{4ee}\u{49f}\u{414}\u{4ed}\u{407}" };
     ("Reset") => { "\u{4e3}\u{4b7}" };
-    ("Reset Wh") => { "\u{4a2}\u{4bb}\u{496}\u{4f1}" };
-    ("Reset settings") => { "\u{464}\u{445}\u{4f9}\u{4ca}\u{4cc}\u{4b7}" };
-    ("Reset settings?") => { "\u{464}\u{445}\u{4f9}\u{4ca}\u{4cc}\u{4b7}?" };
-    ("Resistor Settings") => { "\u{4a2}\u{4ea}\u{493}\u{4e4}\u{4cc}\u{4b7}" };
+    ("Reset Wh") => { "\u{4a2}\u{4bb}\u{496}\u{4f0}" };
+    ("Reset settings") => { "\u{464}\u{445}\u{4f8}\u{4ca}\u{4cc}\u{4b7}" };
+    ("Reset settings?") => { "\u{464}\u{445}\u{4f8}\u{4ca}\u{4cc}\u{4b7}?" };
+    ("Resistor Settings") => { "\u{4a2}\u{4e9}\u{493}\u{4e4}\u{4cc}\u{4b7}" };
     ("Rising") => { "\u{403}\u{42a}\u{490}" };
     ("Roll:") => { "\u{49a}\u{428}:" };
     ("Runt") => { "\u{488}\u{457}" };
@@ -167,9 +166,9 @@ macro_rules! tr {
     ("Scope") => { "\u{4aa}\u{491}\u{440}" };
     ("Screenshot") => { "\u{466}\u{442}" };
     ("Select") => { "\u{4de}\u{46b}" };
-    ("Selection cleared") => { "\u{454}\u{496}\u{4ed}\u{4de}\u{46b}" };
+    ("Selection cleared") => { "\u{454}\u{496}\u{4ec}\u{4de}\u{46b}" };
     ("Settings") => { "\u{4cc}\u{4b7}" };
-    ("Shutdown") => { "\u{41e}\u{480}\u{479}\u{4e9}" };
+    ("Shutdown") => { "\u{41e}\u{480}\u{479}\u{4e8}" };
     ("Signal") => { "\u{415}\u{438}\u{432}\u{4a0}\u{440}" };
     ("Sine") => { "\u{48b}\u{45e}\u{491}" };
     ("Single") => { "\u{42b}\u{489}" };
@@ -178,7 +177,7 @@ macro_rules! tr {
     ("Source:") => { "\u{4c8}\u{432}\u{498}:" };
     ("Square") => { "\u{477}\u{491}" };
     ("Start") => { "\u{45c}\u{449}" };
-    ("Start page") => { "\u{43c}\u{428}\u{4a3}\u{4f2}" };
+    ("Start page") => { "\u{43c}\u{428}\u{4a3}\u{4f1}" };
     ("Start recording") => { "\u{45c}\u{449}\u{4cb}\u{45f}" };
     ("Stop recording") => { "\u{418}\u{48a}\u{4cb}\u{45f}" };
     ("Stop the recording") => { "\u{418}\u{48a}\u{4cb}\u{45f}" };
@@ -194,19 +193,19 @@ macro_rules! tr {
     ("Type:") => { "\u{4b1}\u{444}:" };
     ("USB disk") => { "U\u{4a5}\u{487}\u{45d}" };
     ("Until stopped") => { "\u{468}\u{428}\u{418}\u{48a}" };
-    ("Upper") => { "\u{403}\u{4ec}" };
-    ("Upper = reading") => { "\u{403}\u{4ec}=\u{4cf}\u{474}" };
-    ("Upper limit") => { "\u{403}\u{4ec}" };
+    ("Upper") => { "\u{403}\u{4eb}" };
+    ("Upper = reading") => { "\u{403}\u{4eb}=\u{4cf}\u{474}" };
+    ("Upper limit") => { "\u{403}\u{4eb}" };
     ("Voltage Settings") => { "\u{4a2}\u{430}\u{493}\u{4e4}\u{4cc}\u{4b7}" };
     ("Voltage on V jack, no current") => { "V \u{471}\u{44a}\u{47f}\u{4a2}\u{430}, \u{478}\u{4a2}\u{492}" };
     ("Voltage on circuit - power off") => { "\u{4a2}\u{4d4}\u{455}\u{4a2}, \u{4ce}\u{41a}\u{476}\u{4a2}" };
-    ("Volume") => { "\u{4f3}\u{4e4}" };
+    ("Volume") => { "\u{4f2}\u{4e4}" };
     ("Wave") => { "\u{491}\u{460}" };
     ("Width:") => { "\u{44f}\u{45b}:" };
     ("Window") => { "\u{4af}\u{422}\u{474}" };
     ("Wiring") => { "\u{46f}\u{4b3}" };
     ("Yes") => { "\u{47a}" };
-    ("Zero") => { "\u{4d0}\u{4f1}" };
+    ("Zero") => { "\u{4d0}\u{4f0}" };
     ("expect ~48 \u{3a9}") => { "\u{45a}\u{4b2} 48 \u{3a9}" };
     ("nothing else connected") => { "\u{405}\u{46f}\u{41f}\u{40f}\u{406}\u{4c5}" };
     ($s:literal) => { $s };
@@ -215,7 +214,7 @@ macro_rules! tr {
 /// ui-render (UIR_LANG): (English, translation), the check of stockfont.rs `ui_text`.
 #[cfg(lang_log)]
 pub const PAIRS: &[(&str, &str)] = &[
-    ("0 A for 60 s: check the fuse?", "60 \u{4ab}\u{478}\u{4a2}\u{492}, \u{486}\u{481}\u{414}\u{4ee}\u{407}?"),
+    ("0 A for 60 s: check the fuse?", "60 \u{4ab}\u{478}\u{4a2}\u{492}, \u{486}\u{481}\u{414}\u{4ed}\u{407}?"),
     ("1 hour", "1\u{450}\u{479}"),
     ("1 min", "1\u{423}\u{4e5}"),
     ("10 hours", "10\u{450}\u{479}"),
@@ -231,12 +230,12 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("8 hours", "8\u{450}\u{479}"),
     ("9 hours", "9\u{450}\u{479}"),
     ("< Back", "< \u{4dc}\u{441}"),
-    ("< Prev", "< \u{403}\u{400}\u{4f4}"),
+    ("< Prev", "< \u{403}\u{400}\u{4f3}"),
     ("A input path intact", "A \u{4d9}\u{41c}\u{4df}\u{4d4}\u{44d}\u{448}"),
     ("A jack current: 10 A shunt on", "A \u{471}\u{44a}\u{47f}\u{4a2}\u{492}: \u{454}\u{424}\u{426} 10 A \u{423}\u{492}\u{440}"),
     ("AC voltage here: use AC V?", "\u{4dd}\u{4e2}\u{47a}\u{40b}\u{492}, \u{472}\u{4a1} AC V?"),
     ("AUTO starts on mV: AUTO+ is safer", "AUTO \u{40e} mV \u{4d2}\u{48c}: AUTO+ \u{47e}\u{44c}\u{41d}"),
-    ("AUTO+ recommended: never steps to mV", "\u{470}\u{4bf} AUTO+: \u{405}\u{4eb}\u{426} mV"),
+    ("AUTO+ recommended: never steps to mV", "\u{470}\u{4bf} AUTO+: \u{405}\u{4ea}\u{426} mV"),
     ("Accuracy", "\u{420}\u{4a8}\u{45b}"),
     ("Again", "\u{4e3}\u{493}"),
     ("Alerts", "\u{43d}\u{4c9}"),
@@ -254,15 +253,14 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Bluetooth", "\u{4c1}\u{49c}\u{45c}\u{41e}"),
     ("Brightness:", "\u{491}\u{460}\u{40d}\u{45b}:"),
     ("Burden voltage", "\u{4d1}\u{4c0}\u{4a2}\u{430}"),
-    ("CH2 (DMM) is off", "CH2 (DMM) \u{454}\u{41e}\u{4e8}"),
     ("Calibration, files stay", "\u{483}\u{420}\u{43e}\u{475}\u{410}\u{414}\u{4a4}"),
     ("Cancel", "\u{433}\u{494}"),
     ("Capacitance Settings", "\u{4a2}\u{44e}\u{493}\u{4e4}\u{4cc}\u{4b7}"),
     ("Change", "\u{434}\u{429}\u{4e4}"),
     ("Check leads", "\u{486}\u{481}\u{4c4}\u{4b0}"),
-    ("Clear", "\u{496}\u{4ed}"),
-    ("Clear limits", "\u{496}\u{4ed}\u{4ec}\u{416}"),
-    ("Color", "\u{4f6}\u{4be}"),
+    ("Clear", "\u{496}\u{4ec}"),
+    ("Clear limits", "\u{496}\u{4ec}\u{4eb}\u{416}"),
+    ("Color", "\u{4f5}\u{4be}"),
     ("Coupling", "\u{4b9}\u{439}"),
     ("Current Settings", "\u{4a2}\u{492}\u{493}\u{4e4}\u{4cc}\u{4b7}"),
     ("Current in A jack: check leads", "A \u{471}\u{44a}\u{47f}\u{4a2}\u{492}, \u{4ce}\u{486}\u{481}\u{4c4}\u{4b0}"),
@@ -270,17 +268,17 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("DC voltage here: use DC V?", "\u{4dd}\u{4e2}\u{47a}\u{4a6}\u{492}, \u{472}\u{4a1} DC V?"),
     ("DMM rate", "\u{493}\u{4e4}\u{4e0}\u{49e}"),
     ("DMM row", "DMM \u{4c3}"),
-    ("Danger alarm", "\u{42d}\u{4ee}\u{4c9}\u{469}"),
+    ("Danger alarm", "\u{42d}\u{4ed}\u{4c9}\u{469}"),
     ("Decode", "\u{4c7}\u{4a7}"),
-    ("Default", "\u{4f9}\u{4ca}"),
-    ("Delete", "\u{425}\u{4ed}"),
-    ("Delete screenshot?", "\u{425}\u{4ed}\u{466}\u{442}?"),
-    ("Delete selected", "\u{425}\u{4ed}\u{467}\u{4de}"),
-    ("Delete selected?", "\u{425}\u{4ed}\u{467}\u{4de}\u{475}\u{410}?"),
-    ("Delete this log?", "\u{425}\u{4ed}\u{4cb}\u{45f}?"),
-    ("Deleting", "\u{48b}\u{443}\u{425}\u{4ed}"),
+    ("Default", "\u{4f8}\u{4ca}"),
+    ("Delete", "\u{425}\u{4ec}"),
+    ("Delete screenshot?", "\u{425}\u{4ec}\u{466}\u{442}?"),
+    ("Delete selected", "\u{425}\u{4ec}\u{467}\u{4de}"),
+    ("Delete selected?", "\u{425}\u{4ec}\u{467}\u{4de}\u{475}\u{410}?"),
+    ("Delete this log?", "\u{425}\u{4ec}\u{4cb}\u{45f}?"),
+    ("Deleting", "\u{48b}\u{443}\u{425}\u{4ec}"),
     ("Device info", "\u{40c}\u{43f}\u{415}\u{465}"),
-    ("Dim screen", "\u{47d}\u{453}\u{479}\u{4e9}"),
+    ("Dim screen", "\u{47d}\u{453}\u{479}\u{4e8}"),
     ("Discharging...", "\u{473}\u{4a2}\u{409}..."),
     ("Disk busy", "\u{4a9}\u{4a5}\u{462}"),
     ("Disk busy, try again", "\u{4a9}\u{4a5}\u{462}, \u{4ce}\u{4e3}\u{4cd}"),
@@ -291,36 +289,36 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Edge:", "\u{4da}\u{490}:"),
     ("Every reading", "\u{48d}\u{408}\u{4cf}\u{474}"),
     ("FFT Unit", "FFT\u{42b}\u{411}"),
-    ("Fail beep", "\u{4d3}\u{4ec}\u{4c2}\u{4f8}"),
-    ("Falling", "\u{404}\u{4eb}\u{490}"),
+    ("Fail beep", "\u{4d3}\u{4eb}\u{4c2}\u{4f7}"),
+    ("Falling", "\u{404}\u{4ea}\u{490}"),
     ("Fast", "\u{463}\u{4e0}"),
     ("Files changed", "\u{475}\u{410}\u{454}\u{47e}\u{472}"),
     ("Files live", "\u{435}\u{4cf}"),
     ("Files live (replug)", "\u{435}\u{4cf} (\u{4e3}\u{471})"),
     ("Free", "\u{436}\u{4a1}"),
-    ("Freq", "\u{4f5}\u{49e}"),
-    ("Frequency", "\u{4f5}\u{49e}"),
-    ("Fuse OK", "\u{414}\u{4ee}\u{407}\u{48b}\u{456}"),
-    ("Fuse check", "\u{414}\u{4ee}\u{407}\u{4bd}\u{486}"),
-    ("Fuse open", "\u{414}\u{4ee}\u{407}\u{49b}\u{476}"),
+    ("Freq", "\u{4f4}\u{49e}"),
+    ("Frequency", "\u{4f4}\u{49e}"),
+    ("Fuse OK", "\u{414}\u{4ed}\u{407}\u{48b}\u{456}"),
+    ("Fuse check", "\u{414}\u{4ed}\u{407}\u{4bd}\u{486}"),
+    ("Fuse open", "\u{414}\u{4ed}\u{407}\u{49b}\u{476}"),
     ("Gallery", "\u{442}\u{459}"),
     ("Gallery: screenshots and logs", "\u{442}\u{459}: \u{466}\u{442}\u{43e}\u{4cb}\u{45f}"),
     ("Grid intensity:", "\u{4b6}\u{485}\u{40d}\u{45b}:"),
     ("History", "\u{42f}\u{437}"),
-    ("Hold & Limits", "\u{414}\u{46c}/\u{4ec}\u{416}"),
+    ("Hold & Limits", "\u{414}\u{46c}/\u{4eb}\u{416}"),
     ("Inrush", "\u{495}\u{492}"),
     ("Inrush Current", "\u{495}\u{492}"),
-    ("Interval", "\u{4e9}\u{4f0}"),
+    ("Interval", "\u{4e8}\u{4ef}"),
     ("Jack alerts", "\u{471}\u{44a}\u{43d}\u{4c9}"),
-    ("Key/alert volume", "\u{4c2}\u{4f8}\u{440}\u{4f3}\u{4e4}"),
+    ("Key/alert volume", "\u{4c2}\u{4f7}\u{440}\u{4f2}\u{4e4}"),
     ("Lead from V/ohm jack to A", "\u{4c4}\u{4b0}\u{40e} V/\u{3a9} \u{471}\u{44a}\u{46f}\u{426} A"),
-    ("Limits", "\u{4ec}\u{416}"),
-    ("Loud", "\u{4f7}"),
+    ("Limits", "\u{4eb}\u{416}"),
+    ("Loud", "\u{4f6}"),
     ("Low battery! Please charge", "\u{4a2}\u{4e4}\u{412}! \u{4ce}\u{419}\u{4a2}"),
-    ("Lower", "\u{404}\u{4ec}"),
-    ("Lower = reading", "\u{404}\u{4ec}=\u{4cf}\u{474}"),
-    ("Lower limit", "\u{404}\u{4ec}"),
-    ("Main menu", "\u{40a}\u{4a3}\u{4f2}"),
+    ("Lower", "\u{404}\u{4eb}"),
+    ("Lower = reading", "\u{404}\u{4eb}=\u{4cf}\u{474}"),
+    ("Lower limit", "\u{404}\u{4eb}"),
+    ("Main menu", "\u{40a}\u{4a3}\u{4f1}"),
     ("Manual", "\u{468}\u{428}"),
     ("Measure", "\u{493}\u{4e4}"),
     ("Measuring ...", "\u{493}\u{4e4}\u{409} ..."),
@@ -330,9 +328,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Model", "\u{444}\u{438}"),
     ("Multimeter", "\u{401}\u{4a1}\u{4c4}"),
     ("Never", "\u{40e}\u{405}"),
-    ("Next >", "\u{404}\u{400}\u{4f4} >"),
+    ("Next >", "\u{404}\u{400}\u{4f3} >"),
     ("No", "\u{43b}"),
-    ("No ohm reading", "\u{478}\u{4a2}\u{4ea}\u{4cf}\u{474}"),
+    ("No ohm reading", "\u{478}\u{4a2}\u{4e9}\u{4cf}\u{474}"),
     ("Normal", "\u{47c}\u{4df}"),
     ("OFF", "\u{41e}"),
     ("OFF (stock)", "\u{41e} (\u{431}\u{42e})"),
@@ -357,17 +355,17 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Power off?", "\u{41e}\u{480}?"),
     ("Probe", "\u{46e}\u{447}"),
     ("Pulse", "\u{4bc}\u{44f}"),
-    ("Ramp", "\u{4e6}\u{4fa}\u{491}"),
+    ("Ramp", "\u{4e6}\u{4f9}\u{491}"),
     ("Range", "\u{4e4}\u{4ad}"),
     ("Record", "\u{4cb}\u{45f}"),
     ("Recording", "\u{48b}\u{443}\u{4cb}\u{45f}"),
     ("Recording CSV", "\u{48b}\u{443}\u{4cb}\u{45f}"),
-    ("Replace: 10 A ceramic fuse", "\u{47e}\u{46d} 10 A \u{4ef}\u{49f}\u{414}\u{4ee}\u{407}"),
+    ("Replace: 10 A ceramic fuse", "\u{47e}\u{46d} 10 A \u{4ee}\u{49f}\u{414}\u{4ed}\u{407}"),
     ("Reset", "\u{4e3}\u{4b7}"),
-    ("Reset Wh", "\u{4a2}\u{4bb}\u{496}\u{4f1}"),
-    ("Reset settings", "\u{464}\u{445}\u{4f9}\u{4ca}\u{4cc}\u{4b7}"),
-    ("Reset settings?", "\u{464}\u{445}\u{4f9}\u{4ca}\u{4cc}\u{4b7}?"),
-    ("Resistor Settings", "\u{4a2}\u{4ea}\u{493}\u{4e4}\u{4cc}\u{4b7}"),
+    ("Reset Wh", "\u{4a2}\u{4bb}\u{496}\u{4f0}"),
+    ("Reset settings", "\u{464}\u{445}\u{4f8}\u{4ca}\u{4cc}\u{4b7}"),
+    ("Reset settings?", "\u{464}\u{445}\u{4f8}\u{4ca}\u{4cc}\u{4b7}?"),
+    ("Resistor Settings", "\u{4a2}\u{4e9}\u{493}\u{4e4}\u{4cc}\u{4b7}"),
     ("Rising", "\u{403}\u{42a}\u{490}"),
     ("Roll:", "\u{49a}\u{428}:"),
     ("Runt", "\u{488}\u{457}"),
@@ -379,9 +377,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Scope", "\u{4aa}\u{491}\u{440}"),
     ("Screenshot", "\u{466}\u{442}"),
     ("Select", "\u{4de}\u{46b}"),
-    ("Selection cleared", "\u{454}\u{496}\u{4ed}\u{4de}\u{46b}"),
+    ("Selection cleared", "\u{454}\u{496}\u{4ec}\u{4de}\u{46b}"),
     ("Settings", "\u{4cc}\u{4b7}"),
-    ("Shutdown", "\u{41e}\u{480}\u{479}\u{4e9}"),
+    ("Shutdown", "\u{41e}\u{480}\u{479}\u{4e8}"),
     ("Signal", "\u{415}\u{438}\u{432}\u{4a0}\u{440}"),
     ("Sine", "\u{48b}\u{45e}\u{491}"),
     ("Single", "\u{42b}\u{489}"),
@@ -390,7 +388,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Source:", "\u{4c8}\u{432}\u{498}:"),
     ("Square", "\u{477}\u{491}"),
     ("Start", "\u{45c}\u{449}"),
-    ("Start page", "\u{43c}\u{428}\u{4a3}\u{4f2}"),
+    ("Start page", "\u{43c}\u{428}\u{4a3}\u{4f1}"),
     ("Start recording", "\u{45c}\u{449}\u{4cb}\u{45f}"),
     ("Stop recording", "\u{418}\u{48a}\u{4cb}\u{45f}"),
     ("Stop the recording", "\u{418}\u{48a}\u{4cb}\u{45f}"),
@@ -406,19 +404,19 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Type:", "\u{4b1}\u{444}:"),
     ("USB disk", "U\u{4a5}\u{487}\u{45d}"),
     ("Until stopped", "\u{468}\u{428}\u{418}\u{48a}"),
-    ("Upper", "\u{403}\u{4ec}"),
-    ("Upper = reading", "\u{403}\u{4ec}=\u{4cf}\u{474}"),
-    ("Upper limit", "\u{403}\u{4ec}"),
+    ("Upper", "\u{403}\u{4eb}"),
+    ("Upper = reading", "\u{403}\u{4eb}=\u{4cf}\u{474}"),
+    ("Upper limit", "\u{403}\u{4eb}"),
     ("Voltage Settings", "\u{4a2}\u{430}\u{493}\u{4e4}\u{4cc}\u{4b7}"),
     ("Voltage on V jack, no current", "V \u{471}\u{44a}\u{47f}\u{4a2}\u{430}, \u{478}\u{4a2}\u{492}"),
     ("Voltage on circuit - power off", "\u{4a2}\u{4d4}\u{455}\u{4a2}, \u{4ce}\u{41a}\u{476}\u{4a2}"),
-    ("Volume", "\u{4f3}\u{4e4}"),
+    ("Volume", "\u{4f2}\u{4e4}"),
     ("Wave", "\u{491}\u{460}"),
     ("Width:", "\u{44f}\u{45b}:"),
     ("Window", "\u{4af}\u{422}\u{474}"),
     ("Wiring", "\u{46f}\u{4b3}"),
     ("Yes", "\u{47a}"),
-    ("Zero", "\u{4d0}\u{4f1}"),
+    ("Zero", "\u{4d0}\u{4f0}"),
     ("expect ~48 \u{3a9}", "\u{45a}\u{4b2} 48 \u{3a9}"),
     ("nothing else connected", "\u{405}\u{46f}\u{41f}\u{40f}\u{406}\u{4c5}"),
 ];

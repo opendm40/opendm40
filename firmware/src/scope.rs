@@ -1959,6 +1959,15 @@ impl Scope {
         (140 + self.ch2_pos as i32 - self.s.trig_row) as f32 * 4.0 * vd / 141.0
     }
 
+    /// TRIG:LEV with source DMM: the trigger row of level `v` on CH2's
+    /// scale (the inverse of `ch2_level`, rounded to a row, clamped to the
+    /// marker rows -10..290).
+    pub fn ch2_level_row(&self, v: f32) -> i32 {
+        let vd = crate::scope_ch2::store().scale().vdiv;
+        let r = 140.0 + self.ch2_pos as f32 - 141.0 * v / (4.0 * vd);
+        if r.is_finite() { (if r >= 0.0 { r + 0.5 } else { r - 0.5 }).clamp(-10.0, 290.0) as i32 } else { self.s.trig_row }
+    }
+
     /// CH2 trigger: the first sample index (absolute, of the acquisition in
     /// flight) in [n0, n1) at CH2's crossing of `ch2_level`, and the index
     /// up to which CH2's samples have been searched (its store lags the

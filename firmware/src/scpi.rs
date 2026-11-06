@@ -934,7 +934,7 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   TRIGger[:EDGE]:LEVel <V>   TRIGger[:EDGE]:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
 ///   TRIGger[:EDGE]:SOURce CHANnel1|GENerator|CHANnel2 (GEN: the generator's
 ///   output computed from its timers; CHAN2: the DMM channel's samples, the
-///   level on its scale; docs/scope-gen-channel.md)
+///   level (TRIG:LEV) on its scale; turns CH2 on; docs/scope-gen-channel.md)
 ///   CHANnel1:OFFSet <V> (the vertical position as a voltage added to the
 ///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s; stopped:
 ///   the stored record's rate)

@@ -5529,6 +5529,12 @@ impl App {
                 out.put_bytes(if sc.ac { b"AC" } else { b"DC" });
                 Some(())
             }
+            C::TrigLevel(Some(v)) if sc.tsrc == scope::TSRC_CH2 && !self.scope.wave_on() => {
+                // Source DMM: the level on CH2's scale, as the badge (a
+                // row: the level is the T marker against the CH2 trace).
+                sc.trig_row = self.scope.ch2_level_row(v);
+                None
+            }
             C::TrigLevel(Some(v)) => {
                 // Volts at the probe tip, as TRIG:LEV? answers (probe
                 // applied), kept as given: the row was the one below the
@@ -5538,7 +5544,7 @@ impl App {
                 None
             }
             C::TrigLevel(None) => {
-                out.put_f32(self.scope.trig_volts());
+                out.put_f32(if sc.tsrc == scope::TSRC_CH2 && !self.scope.wave_on() { self.scope.ch2_level() } else { self.scope.trig_volts() });
                 Some(())
             }
             C::TrigSlope(Some(r)) => {
@@ -5562,7 +5568,19 @@ impl App {
                 Some(())
             }
             C::TrigSource(Some(t)) => {
-                sc.tsrc = t.min(scope::TSRC_CH2);
+                // CHAN2 with CH2 off: CH2 on first (as the Trigger tab);
+                // refused there (a DMM function without CH2): an error, the
+                // source stays.
+                let t = t.min(scope::TSRC_CH2);
+                if t == scope::TSRC_CH2 && !self.ch2.on {
+                    self.ch2_set(clk, true);
+                    sc = self.scope.s;
+                }
+                if t == scope::TSRC_CH2 && !self.ch2.on {
+                    out.set_err("Settings conflict");
+                } else {
+                    sc.tsrc = t;
+                }
                 None
             }
             C::TrigSource(None) => {
