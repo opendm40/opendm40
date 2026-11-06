@@ -4,7 +4,7 @@ tools/mkstockfont.py (src/stockfont_data.rs, src/stockfont_w.rs) and
 tools/mklang_x.py (the accented and Cyrillic letters of src/lang_*.rs).
 
 Based on Terminus Font 4.49.1 by Dimitar Zhekov (SIL OFL 1.1,
-../fonts/OFL-DM40Term.txt). Modified (our 0, the placement in the stock
+../fonts/OFL-DM40Term.txt). Modified (the 12 px 0, the placement in the stock
 cells, the stock Omega), so under its own name: the OFL reserves the name
 "Terminus Font".
 
@@ -17,10 +17,11 @@ the big and 4 bpp fonts, the icons).
   (`bdf_base`) so the ascenders and descenders fit the line box. Digits share
   one advance. In the cell fonts (F14, HIST) a glyph wider than its stock
   cell stays stock (listed in the log).
-* Our edits: the 0 is a plain oval without Terminus's dot (ZERO; at 12 px it
-  is the shape of the O); the Omega stays stock (Terminus's is narrow: "600Ω"
-  read "6000"), moved by the baseline difference; ℃ / ℉ are Terminus's ring
-  and C / F, the ring's top on the caps' top row (no taller than the caps).
+* Our edits: at 12 px the 0 without Terminus's slash, one column narrower
+  than the O (ZERO; 20 / 22 px keep Terminus's 0); the Omega stays stock
+  (Terminus's is narrow: "600Ω" read "6000"), its feet on the face's
+  baseline; ℃ / ℉ are Terminus's ring and C / F, the ring's top on the
+  caps' top row (no taller than the caps).
 * A code the face lacks, or one not text (0x7F), stays stock.
 
 Input: the BDF files of terminus-font-4.49.1.tar.gz with its alternative
@@ -55,69 +56,23 @@ OHM = 0x3A9
 TEXTS = {0x2103: [0xB0, 0x43], 0x2109: [0xB0, 0x46]}
 DIGITS = [ord(c) for c in '0123456789']
 
-# Our 0 (the full BDF cell): Terminus's 0 has a dot in the middle. 20 / 22 px:
-# an oval, rounder at the ends than the O (same stems, same width); 12 px:
-# five columns leave no room for a second shape, it is the O.
+# Our 0 at 12 px (the full BDF cell): Terminus's has a slash, too small to
+# read there. The O is five columns wide, so the 0 is four: narrower than the
+# O. At 20 / 22 px (TEXT22, HIST) the 0 is Terminus's own.
 ZERO = {
     'ter-u12b.bdf': """
 ......
 ......
-.###..
-#...#.
-#...#.
-#...#.
-#...#.
-#...#.
-#...#.
-.###..
+.##...
+#..#..
+#..#..
+#..#..
+#..#..
+#..#..
+#..#..
+.##...
 ......
 ......
-""",
-    'ter-u20b.bdf': """
-..........
-..........
-..........
-...####...
-..##..##..
-.##....##.
-.##....##.
-.##....##.
-.##....##.
-.##....##.
-.##....##.
-.##....##.
-.##....##.
-.##....##.
-..##..##..
-...####...
-..........
-..........
-..........
-..........
-""",
-    'ter-u22b.bdf': """
-...........
-...........
-...........
-....###....
-...##.##...
-..##...##..
-.##.....##.
-.##.....##.
-.##.....##.
-.##.....##.
-.##.....##.
-.##.....##.
-.##.....##.
-.##.....##.
-..##...##..
-...##.##...
-....###....
-...........
-...........
-...........
-...........
-...........
 """,
 }
 
@@ -133,7 +88,7 @@ class Ink:
 
 
 class Bdf:
-    """A BDF bitmap font (one size), with ZERO applied."""
+    """A BDF bitmap font (one size), with ZERO applied (12 px)."""
 
     def __init__(self, name):
         path = os.path.join(DIR, name)
@@ -171,10 +126,11 @@ class Bdf:
                 if cur.get('enc', -1) >= 0 and 'rows' in cur:
                     self.g[cur['enc']] = cur
                 cur = None
-        z = self.g[ord('0')]
-        rows = [[15 if c == '#' else 0 for c in r] for r in ZERO[name].split()]
-        assert len(rows) == z['bbx'][1] and all(len(r) == z['bbx'][0] for r in rows), name
-        z['rows'] = rows
+        if name in ZERO:
+            z = self.g[ord('0')]
+            rows = [[15 if c == '#' else 0 for c in r] for r in ZERO[name].split()]
+            assert len(rows) == z['bbx'][1] and all(len(r) == z['bbx'][0] for r in rows), name
+            z['rows'] = rows
 
     def has(self, code):
         return code in self.g
@@ -318,6 +274,13 @@ def shift_stock(g, dy, line_h, descent, four, cls):
     return (code, w, h, adv, yoff, pack(rows, w, h, four))
 
 
+def ink_bottom(g, line_h, descent, four, cls):
+    """Line-box row of a stock glyph's lowest ink."""
+    code, w, h, adv, yoff, data = g
+    r = [y for y, row in enumerate(unpack(data, w, h, four)) if any(row)]
+    return (line_h - descent - h - yoff if cls == 'A' else 0) + r[-1]
+
+
 class Face:
     """The faced fonts of one generator run; `info[font]` their placement."""
 
@@ -368,7 +331,10 @@ class Face:
         code, gw, gh, sadv, syoff, data = g
         keep = lambda: shift_stock(g, s['base'] - s['sbase'], s['line_h'], s['descent'], s['four'], s['cls'])
         if code == OHM:
-            return keep()
+            # The stock Omega with its feet on the face's baseline (the row
+            # above `base`, as the digits).
+            return shift_stock(g, s['base'] - 1 - ink_bottom(g, s['line_h'], s['descent'], s['four'], s['cls']),
+                               s['line_h'], s['descent'], s['four'], s['cls'])
         if not self.text(code) or not all(s['r'].has(c) for c in TEXTS.get(code, [code])):
             return g
         i = self.render(fname, code)

@@ -45,10 +45,10 @@ descenders fit the line box; digits share one advance; in the fixed-cell
 fonts F14 and HIST a glyph wider than its stock cell stays stock (HIST: M).
 Our changes:
 
-* the 0 without Terminus's dot: an oval with rounder ends than the O
-  (20 / 22 px). At 12 px it has the O's shape;
-* the stock Ω (Terminus's is narrow: "600Ω" read "6000"), moved to the face's
-  baseline;
+* at 12 px (F14, scope) the 0 without Terminus's slash, one column narrower
+  than the O; TEXT22 and HIST keep Terminus's 0;
+* the stock Ω (Terminus's is narrow: "600Ω" read "6000"), its feet on the
+  digits' baseline;
 * ℃ / ℉: Terminus's ring and C / F, the ring on the caps' top row.
 
 Cyrillic: Terminus's, with its alternatives alt/ij1 and alt/dv1 (и й д в in
