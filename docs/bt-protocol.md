@@ -60,7 +60,7 @@ Response:  DF 05 03 [CMD] [LEN] [DATA...] [CRC]
 | 04  | 1 byte       | 1 byte        | HOLD: non-zero = on, 0 = off |
 | 05  | 1 byte       | 1 byte        | REL: non-zero = on, 0 = off (ignored while HOLD is active) |
 | 06  | 1 byte       | 1 byte        | Select measurement mode, see mode byte below |
-| 07  | 20 bytes     | 1 byte        | Set Bluetooth name (null padded). The meter sends `AT+SBN<name>` to the BT module |
+| 07  | 20 bytes     | 1 byte        | Set Bluetooth name (null padded). The meter sends `AT+SBN<name>` to the BT module ([module AT commands](../hw/README.md#module-at-commands)) |
 | 08  | -            | 20 bytes      | Get Bluetooth name (null padded) |
 | 09  | -            | 11 bytes      | Read measurement |
 

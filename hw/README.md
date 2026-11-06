@@ -355,7 +355,7 @@ scope and generator ground (*inferred*).
   version `VER2.1-20240615` (its start text); it matches the SDK's `spp_and_le` example
   (*inferred* from the strings). It has 25 `AT+` commands, of which the meter
   uses `AT+SBN`, `AT+CBN`, `AT+SLED`, `AT+RESET`; the public KT6368A manual describes a different
-  command set. Chip key, flash layout and the full command table: `stock/re/docs/bt-module-ac6328a.md`.
+  command set. Command table: [Module AT commands](#module-at-commands); chip key and flash layout: `stock/re/docs/bt-module-ac6328a.md`.
 - UART4: TX PA0, RX PA1 (AF8), 115200 8N1, no RTS/CTS ([`bt.rs`](../firmware/src/bt.rs)). On the
   chip this is UART1 on pins 7/8 (USB0DM = RX, USB0DP = TX) and PC14 reads pin 2 (PA9), the
   only other GPIO (*inferred* from the pinout, not traced).
@@ -364,6 +364,43 @@ scope and generator ground (*inferred*).
 - PC14 = link status input, high = connected ([`power.rs`](../firmware/src/power.rs), [`bt.rs`](../firmware/src/bt.rs)).
 - AT commands the firmware sends: `AT+SBN<name>`, `AT+SLED0`, `AT+RESET`,
   `AT+CBN` ([`bt.rs`](../firmware/src/bt.rs), [`docs/bt-protocol.md`](../docs/bt-protocol.md)).
+
+### Module AT commands
+
+All 25 commands of the module firmware, from its disassembly (`stock/re/docs/bt-module-ac6328a.md`).
+Syntax `AT+<CMD><param>\r\n`. A set command answers `OK\r\n`; a query answers its `C…+` line and
+no `OK`. Errors: `ER+1` no `AT`, `ER+2` unknown command, `ER+3` no CRLF, `ER+4` bad parameter.
+`nn` = two decimal digits, `hhhh` = four hex digits. Settings survive a power cycle.
+
+| Command | Parameter | Effect |
+|---|---|---|
+| `AT+SBN<name>` | up to 30 bytes | BLE name (default `BLE03_BLE`). The meter sends `AT+SBNDM40<model letter>` and power-cycles the module after a change |
+| `AT+SSN<name>` | up to 30 bytes | SPP name (default `BLE03_SPP`) |
+| `AT+SBMAC<hhhhhhhhhhhh>` | 12 hex digits | Bluetooth address |
+| `AT+SBSW<0/1>` | 1 char | BLE off / on (default 1) |
+| `AT+SSSW<0/1>` | 1 char | SPP off / on (default 1) |
+| `AT+SSPW<pppp>` | 4 chars | PIN (default `1234`); also turns the PIN switch on |
+| `AT+SSPSW<0/1>` | 1 char | PIN switch (default 0) |
+| `AT+STXP<nn>` | 00..09 | TX power index (default 9) |
+| `AT+SADVT<nn>` | 00..07 | advertising interval index (default 1; meaning *inferred*) |
+| `AT+SUART<nn>` | 00..16 | UART baud index: 00 115200, 01 2400, 02 4800, 03 9600, 04 19200, 05 31250, 06 38400, 07 57600, 08 115200 (default), 09 230400, 10 256000, 11 460800, 12 512000, 13 750000, 14 800000, 15 921600, 16 1000000 |
+| `AT+SU0<hhhh>` .. `AT+SU3<hhhh>` | 4 hex digits | four 16-bit values (defaults FFF0..FFF3; GATT UUIDs, *inferred*) |
+| `AT+SPR<0/1>` | 1 char | switch, meaning unknown |
+| `AT+SLED<0/1>` | 1 char | LED off / on (*inferred*); the stock sends `AT+SLED0` once |
+| `AT+RESET` | none | restart; the start text follows |
+| `AT+RELOAD` | none | factory defaults for everything above, then restart |
+| `AT+CUART` | none | `CUART+nn` baud index |
+| `AT+CBN` | none | `CBN+<BLE name>` |
+| `AT+CSN` | none | `CSN+<SPP name>` |
+| `AT+CBMAC` | none | `CBMAC+<address>` |
+| `AT+CBSW` | none | `CBSW+<0/1>` |
+| `AT+CSSW` | none | `CSSW+<0/1>` |
+| `AT+CVER` | none | `CVER+VER2.1-20240615` |
+
+Start text after power-up or `AT+RESET`, one line each: `BLE03:VER2.1-20240615`,
+`CBN:<BLE name>`, `CBMAC:<address>`, `CSN:<SPP name>`, `CSMAC:<address>`, `CBSW:1`, `CSSW:1`
+([`bt.rs`](../firmware/src/bt.rs)). `AT+SUART` and `AT+RELOAD` change the UART rate or the
+names: the meter firmware would lose the module until it is set back.
 
 ## DMM front end (HY3131)
 
