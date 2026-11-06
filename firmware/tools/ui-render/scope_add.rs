@@ -742,7 +742,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             let mut pa = pv;
             pa.ch2_func = 1;
             draw(&m, scope_ui::Popup::Mf(1), &pa, true);
-            ck.check_add("gen/ch2-func/tab1", &[("page", Bx::new(14, 161, 399, 99))], &[rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)], Bx::new(13, 20, 401, 241));
+            ck.check_add("gen/ch2-func/tab1", &[("page", Bx::new(scope_ui::MF_X as i32 + 1, 161, scope_ui::MF_W as i32 - 2, 99))], &[rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)], Bx::new(scope_ui::MF_X as i32, 20, scope_ui::MF_W as i32, 241));
             save(out, "s08-ch2-func-a");
         }
         if !combined {
