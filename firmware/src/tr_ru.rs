@@ -40,7 +40,7 @@ macro_rules! tr {
     ("Capacitance Settings") => { "Hac\u{3}po\u{14}\u{4}a C" };
     ("Change") => { "\u{1d}\u{e}\u{b}e\u{2}e\u{2}\u{1}e" };
     ("Check leads") => { "\u{f}po\u{c}ep\u{8}\u{3}e \u{1e}y\u{6}\u{11}" };
-    ("Clear") => { "O\u{15}\u{1}c\u{3}\u{1}\u{3}\u{8}" };
+    ("Clear") => { "C\u{10}poc" };
     ("Clear limits") => { "C\u{2}\u{12}\u{3}\u{8} \u{6}pe\u{7}e\u{5}\u{11}" };
     ("Color") => { "\u{426}\u{c}e\u{3}" };
     ("Corners") => { "\u{18}\u{13}\u{5}\u{11}" };
@@ -274,7 +274,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Capacitance Settings", "Hac\u{3}po\u{14}\u{4}a C"),
     ("Change", "\u{1d}\u{e}\u{b}e\u{2}e\u{2}\u{1}e"),
     ("Check leads", "\u{f}po\u{c}ep\u{8}\u{3}e \u{1e}y\u{6}\u{11}"),
-    ("Clear", "O\u{15}\u{1}c\u{3}\u{1}\u{3}\u{8}"),
+    ("Clear", "C\u{10}poc"),
     ("Clear limits", "C\u{2}\u{12}\u{3}\u{8} \u{6}pe\u{7}e\u{5}\u{11}"),
     ("Color", "\u{426}\u{c}e\u{3}"),
     ("Corners", "\u{18}\u{13}\u{5}\u{11}"),

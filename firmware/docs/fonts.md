@@ -33,7 +33,8 @@ It has its own name because we changed glyphs: the OFL reserves the name
 | TEXT22 | menus, settings, the generator page | `ter-u22b` |
 | HIST | the DMM history row | `ter-u20b` |
 | F14 | small labels, MAX / AVG / MIN | `ter-u12b` |
-| SC_F12, SC_F16 | the scope page's texts | `ter-u12b` |
+| SC_F16 | the scope menus, popups and right panel | `ter-u16b` (the stock 8 px pitch) |
+| SC_F12 | the scope bars, measurement cells, decode log | `ter-u12b` |
 
 ASCII26 (dialogs), the big digits and units (F78, UNIT, LETTERS, F21,
 K_FONT) and the icons stay stock.
@@ -45,8 +46,8 @@ descenders fit the line box; digits share one advance; in the fixed-cell
 fonts F14 and HIST a glyph wider than its stock cell stays stock (HIST: M).
 Our changes:
 
-* at 12 px (F14, scope) the 0 without Terminus's slash, one column narrower
-  than the O; TEXT22 and HIST keep Terminus's 0;
+* at 12 px (F14, SC_F12) the 0 without Terminus's slash, one column
+  narrower than the O; the larger fonts keep Terminus's 0;
 * the stock Ω (Terminus's is narrow: "600Ω" read "6000"), its feet on the
   digits' baseline;
 * ℃ / ℉: Terminus's ring and C / F, the ring on the caps' top row.
