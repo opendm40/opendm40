@@ -2172,10 +2172,19 @@ impl App {
                 su::BLK_CH1 if wave => self.wave_coupling_note(now),
                 su::BLK_CH1 => {
                     // As the math label: CH1 off -> on with its popup.
-                    if self.sp.ch1_off {
+                    let show = self.sp.ch1_off;
+                    if show {
                         self.sp_ch1_show(true);
                     }
-                    self.sp_popup_open(su::Popup::Ch1(0))
+                    self.sp_popup_open(su::Popup::Ch1(0));
+                    if show && !self.redraw {
+                        // The magnifiers out of their dimmed look at once
+                        // (the title: sp_popup_open; the trace once the
+                        // popup closes).
+                        let m = self.sp_model(self.now);
+                        su::panel_part(&m, 3 * su::BLK_CH1 + 1);
+                        su::panel_part(&m, 3 * su::BLK_CH1 + 2);
+                    }
                 }
                 // The wave view: back to the OSC (MCX) input.
                 su::BLK_DMM if wave => self.wave_badge_close(clk),
