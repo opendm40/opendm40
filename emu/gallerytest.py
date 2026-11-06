@@ -4,7 +4,7 @@ open, page scroll, the full-screen viewer, file steps, the Delete dialog
 (Cancel, then Delete), back, driven like a user (DBG:KEY / DBG:TAP /
 DBG:SWIPE) and checked over SCPI (MMEM:CAT?, DBG:LCD?).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/gallerytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 The disk is a private copy (per process: port + pid) of the 2026-10-13 MSC

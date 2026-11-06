@@ -69,8 +69,8 @@ pub struct Vals<'a> {
 pub fn page(v: &Vals) {
     lcd::fill_rect(0, 0, lcd::W, 40, BTN);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Inrush Current", STATUS_FG, BTN, 8, 0);
-    sf::glyphs(sf::TEXT22, THR_LABEL, "Trigger", STATUS_FG, BG, 1, 0);
+    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), crate::tr!("Inrush Current"), STATUS_FG, BTN, 8, 0);
+    sf::glyphs(sf::TEXT22, THR_LABEL, crate::tr!("Trigger"), STATUS_FG, BG, 1, 0);
     for (r, t) in [(THR_MINUS, "-"), (THR_PLUS, "+")] {
         sf::rbox(r, 6, BTN, BG);
         sf::glyphs(sf::TEXT22, r, t, STATUS_FG, BTN, 8, 0);
@@ -89,7 +89,7 @@ pub fn page(v: &Vals) {
         sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), t, STATUS_FG, BTN, 8, 1);
     }
     sf::rbox(BACK_BTN, 6, BTN, BG);
-    sf::glyphs(sf::TEXT22, BACK_BTN, "Back", STATUS_FG, BTN, 8, 0);
+    sf::glyphs(sf::TEXT22, BACK_BTN, crate::tr!("Back"), STATUS_FG, BTN, 8, 0);
     button(v.btn, v.btn_bg, v.enabled);
 }
 

@@ -4,7 +4,7 @@ session in each format (ROWS 12 B per sample, PACKed ~3 B, DLG ~1-3 B;
 src/logger.rs "Compact LOG:DATA?") for --dur seconds of device time and
 the replies are decoded afterwards by tools/dm40scpi.py `log_reply`.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/logfmttest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Per rate (--rates, AD2 in AC V, the model's 0.5 V 50 Hz sine) and format

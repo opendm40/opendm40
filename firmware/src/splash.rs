@@ -63,7 +63,7 @@ pub fn draw() {
     b[1..1 + n].copy_from_slice(&v[..n]);
     let ver = core::str::from_utf8(&b[..1 + n]).unwrap_or("");
     sf::label(sf::ASCII26, rect(0, TOP + 32, lcd::W as i16, 30), ver, DIM, BG, 8, 1);
-    sf::label(sf::ASCII26, rect(0, TOP + 74, lcd::W as i16, 30), "Loading...", DIM, BG, 8, 1);
+    sf::label(sf::ASCII26, rect(0, TOP + 74, lcd::W as i16, 30), crate::tr!("Loading..."), DIM, BG, 8, 1);
     let (x, y, w, h) = BAR;
     lcd::fill_rect(x as u16, y as u16, w as u16, h as u16, DIM);
     lcd::fill_rect(x as u16 + 1, y as u16 + 1, w as u16 - 2, h as u16 - 2, BG);

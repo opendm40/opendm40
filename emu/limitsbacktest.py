@@ -8,7 +8,7 @@ temperature page / Power Settings (their Record button). Start on the Record
 page returns to the multimeter, the range page's Record button turns red
 while recording, Stop ends it.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/limitsbacktest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Keys and taps through DBG:KEY / DBG:TAP, the page through DBG:VIEW?.

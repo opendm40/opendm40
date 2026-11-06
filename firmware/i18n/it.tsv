@@ -1,0 +1,237 @@
+# opendm40 Italian UI strings; tools/mklang.py. English<TAB>Italian<TAB>M machine-written, needs a native review.
+Multimeter	Multimetro	M
+Oscilloscope	Oscilloscopio	M
+Signal	Generatore	M
+Settings	Impostaz.	M
+Scope	Oscillosc.	M
+Main menu	Menu principale	M
+Display	Schermo	M
+Alerts	Avvisi	M
+Power	Alim.	M
+Other	Altro	M
+Dim screen	Oscuramento	M
+Shutdown	Spegnimento	M
+Backlight	Retroillum.	M
+Key/alert volume	Volume tasti	M
+Bluetooth	Bluetooth	M
+Start page	Pagina iniziale	M
+Analog power	Alim. analog.	M
+DMM rate	Velocità DMM	M
+Smoothing	Livellamento	M
+DMM row	Riga DMM	M
+Temp unit	Unità temp.	M
+Swipe	Swipe	M
+Press effect	Effetto tocco	M
+Tap step	Passo tocco	M
+Help	Aiuto	M
+Jack alerts	Avvisi boccole	M
+Danger alarm	Allarme pericolo	M
+USB disk	Disco USB	M
+Burden voltage	Caduta tens.	M
+Device info	Info dispositivo	M
+Touch test	Test tocco	M
+Accuracy	Precisione	M
+Negative ohm	Ohm negativi	M
+Mode Remember	Ricorda modo	M
+Never	Mai	M
+1 hour	1 ora	M
+1 min	1 min	M
+5 min	5 min	M
+10 min	10 min	M
+30 min	30 min	M
+On	On	M
+Off	Off	M
+ON	ON	M
+OFF	OFF	M
+Cancel	Annulla	M
+OK	OK	M
+Yes	Sì	M
+No	No	M
+Back	Indietro	M
+< Back	< Indietro	M
+< Prev	< Prec	M
+Next >	Succ >	M
+Save	Salva	M
+Delete	Elimina	M
+Clear	Cancella	M
+Default	Predef.	M
+Reset	Reset	M
+Start	Avvia	M
+Auto	Auto	M
+Normal	Normale	M
+Single	Singolo	M
+Rising	Salita	M
+Falling	Discesa	M
+Edge	Fronte	M
+Pulse	Impulso	M
+Trigger	Trigger	M
+Measure	Misure	M
+Decode	Decodifica	M
+Window	Finestra	M
+Sine	Sinusoide	M
+Square	Quadra	M
+Triangle	Triangolo	M
+Ramp	Rampa	M
+Frequency	Frequenza	M
+Freq	Freq	M
+Duty	Duty	M
+Coupling	Accopp.	M
+Probe	Sonda	M
+Type:	Tipo:	M
+Mode:	Modo:	M
+Mode	Modo	M
+Edge:	Fronte:	M
+Persist:	Persistenza:	M
+Roll:	Scorrimento:	M
+Brightness:	Luminosità:	M
+Grid intensity:	Luminosità griglia:	M
+FFT Unit	Unità FFT	M
+Source:	Sorgente:	M
+Threshold:	Soglia:	M
+Width:	Larghezza:	M
+Offset	Offset	M
+Color	Colore	M
+Save CSV	Salva CSV	M
+Save CSV OK	CSV salvato	M
+CSV save failed	Errore CSV	M
+Screenshot	Schermata	M
+Screenshot failed	Errore schermata	M
+Stop the scope first	Prima ferma	M
+Sampling	Acquisizione	M
+Vendor	Produttore	M
+Model	Modello	M
+SN	S/N	M
+Bootloader	Bootloader	M
+Software	Software	M
+Hardware	Hardware	M
+Voltage Settings	Impost. tensione	M
+Current Settings	Impost. corrente	M
+Resistor Settings	Impost. resistenza	M
+Capacitance Settings	Impost. capacità	M
+Temperature Settings	Impost. temperatura	M
+Power Settings	Impost. potenza	M
+Power off	Spegni	M
+Power off?	Spegnere?	M
+Range	Portata	M
+Manual	Manuale	M
+Autorange	Portata auto	M
+Auto Hold	Hold auto	M
+Hold & Limits	Hold e limiti	M
+Limits	Limiti	M
+Lower	Inf.	M
+Upper	Sup.	M
+Lower limit	Limite inf.	M
+Upper limit	Limite sup.	M
+Clear limits	Azzera limiti	M
+Fail beep	Bip limiti	M
+Record	Reg.	M
+Interval	Intervallo	M
+Change	Variazione	M
+Duration	Durata	M
+Free	Libero	M
+Every reading	Ogni lettura	M
+On change	Se varia	M
+Fast	Veloce	M
+Until stopped	Fino a stop	M
+Start recording	Avvia registraz.	M
+Stop recording	Ferma registraz.	M
+Stop the recording	Ferma registraz.	M
+Stop the recording first	Prima ferma regist.	M
+Recording	Registrazione	M
+Recording CSV	Registraz. CSV	M
+Saving ...	Salvataggio...	M
+Saving CSV...	Salvataggio CSV	M
+Saved	Salvato	M
+Wave	Onda	M
+History	Storico	M
+Bargraph	Barra	M
+Zero	Zero	M
+Inrush	Spunto	M
+Inrush Current	Corrente di spunto	M
+Arm	Arma	M
+Wiring	Schema	M
+Generator is off	Generatore spento	M
+Gallery	Galleria	M
+Gallery: screenshots and logs	Galleria: schermate e log	M
+No screenshots or logs	Nessuna schermata o log	M
+Delete screenshot?	Eliminare schermata?	M
+Delete this log?	Eliminare log?	M
+Delete failed	Errore elimin.	M
+Cannot delete	Non eliminabile	M
+Log	Log	M
+Log failed	Errore log	M
+No data	Nessun dato	M
+No disk	Nessun disco	M
+Disk full	Disco pieno	M
+Disk busy	Disco occupato	M
+Disk busy, try again	Disco occupato, riprova	M
+Disk read error	Errore lettura disco	M
+Read error	Errore lettura	M
+Empty file	File vuoto	M
+File not found	File non trovato	M
+Loading...	Caricamento...	M
+Try again	Riprova	M
+Again	Ripeti	M
+Stopped	Fermato	M
+Discharging...	Scarica...	M
+Check leads	Controlla puntali	M
+Fuse check	Test fusibile	M
+Fuse OK	Fusibile OK	M
+Fuse open	Fusibile bruciato	M
+Install it now?	Installare ora?	M
+Installing firmware...	Installazione...	M
+Touch calibration	Calibrazione tocco	M
+Calibrate	Calibra	M
+Top bar	Barra sup.	M
+Off (stock)	Off (orig.)	M
+OFF (stock)	OFF (orig.)	M
+Halves (stock)	Metà (orig.)	M
+Corners	Angoli	M
+Auto (per view)	Auto (vista)	M
+Both always	Sempre entrambi	M
+Files live	Sola lett.	M
+PC can edit	PC scrive	M
+Files live (replug)	Sola lett. (reins.)	M
+PC can edit (replug)	Scrittura (reins.)	M
+Loud	Forte	M
+Volume	Volume	M
+Measuring ...	Misura...	M
+Temp	Temp	E
+Cap	Cap	E
+Diode	Diode	E
+Upper = reading	Sup. = lettura	M
+Lower = reading	Inf. = lettura	M
+AUTO starts on mV: AUTO+ is safer	AUTO parte da mV: AUTO+ più sicuro	M
+AUTO+ recommended: never steps to mV	Meglio AUTO+: mai su mV	M
+Reset Wh	Reset Wh	M
+Current in A jack: check leads	Corrente in A: vedi puntali	M
+A jack current: 10 A shunt on	Corrente in A: shunt 10 A	M
+Overload: 10 A shunt selected	Sovraccarico: shunt 10 A	M
+Voltage on V jack, no current	Tensione su V, no corrente	M
+Voltage on circuit - power off	Togliere tensione al circuito	M
+DC voltage here: use DC V?	Tensione continua: DC V?	M
+AC voltage here: use AC V?	Tensione alternata: AC V?	M
+0 A for 60 s: check the fuse?	0 A per 60 s: fusibile?	M
+Current too high: reduce it	Corrente alta: riducila	M
+Lead from V/ohm jack to A	Puntale da V/Ω ad A	M
+nothing else connected	nient'altro collegato	M
+OL: no path from V to A	OL: circuito aperto V-A	M
+Replace: 10 A ceramic fuse	Sostituire: ceramico 10 A	M
+One lead V/ohm to A only	Un solo puntale: V/Ω ad A	M
+A input path intact	Ingresso A integro	M
+No ohm reading	Nessuna lettura Ω	M
+expect ~48 \u{3a9}	attesi ~48 \u{3a9}	M
+Runt	Runt	E
+Reset settings	Ripristina impostazioni	M
+Reset settings?	Ripristino impostazioni?	M
+Calibration, files stay	Calibrazione e file salvi	M
+Select	Scegli	M
+Delete selected	Elimina scelti	M
+Delete selected?	Eliminare i selezionati?	M
+Deleting	Eliminazione	M
+Selection cleared	Selezione annullata	M
+Files changed	File modificati	M
+Some skipped	Alcuni saltati	M
+Continuity beep	Bip continuità	M
+Always	Sempre	M
+With volume	Con il volume	M

@@ -3,7 +3,7 @@
 _SETTING.BIN on the SPI disk; the backup SRAM is not powered while the meter
 is off, device 2026-10-24).
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/settingstest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 The power cycle: two emulator runs. The first one's SPI flash is saved at

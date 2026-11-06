@@ -57,14 +57,17 @@ impl App {
         }
     }
 
-    /// The dialog's OK: enter the power meter on the DMM page.
+    /// The dialog's OK: enter the power meter; the combined view stays (as
+    /// the W button once the wiring was confirmed), else the DMM page.
     pub(super) fn pw_enter(&mut self, clk: &mut Clock) {
         self.overlay = None;
         self.dmm.pw.wired = true;
         self.dmm.select(clk, pw::FUNC);
         self.func_changed();
         self.last_raw = None;
-        self.show(View::Dmm, clk);
+        if self.view != View::DmmScope {
+            self.show(View::Dmm, clk);
+        }
     }
 
     /// DMM page / settings page taps of the power meter; true = consumed.
@@ -198,7 +201,7 @@ impl App {
             }
         }
         if self.dmm.pw_over_expired() {
-            self.toast(now, "Current too high: reduce it", false);
+            self.toast(now, crate::tr!("Current too high: reduce it"), false);
             self.alert_beep_t0 = Some(now);
         }
         if self.alert_beep_t0.is_some() && self.dmm.pw_state().over != 2 {
@@ -579,6 +582,7 @@ impl App {
                 }
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgRow => {
                 // 22 row bytes R20..R35 then R36, hex; the R34 in force.
                 const H: &[u8; 16] = b"0123456789ABCDEF";
@@ -592,29 +596,37 @@ impl App {
                 out.put_bytes(if on { b";ON" } else { b";OFF" });
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgPoke(i, v) => {
                 if !self.dmm.pw_poke(clk, i, v) {
                     out.set_err("Illegal parameter value");
                 }
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgStat(s) => {
                 self.dmm.pw_freeze(clk, s);
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgRaw => {
                 let n = self.dmm.pw.ring_text(&mut out.buf[..]);
                 out.len = n;
                 true
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgDisc(Some(d)) => {
                 self.dmm.pw.disc = d;
                 false
             }
+            #[cfg(feature = "dbg-dev")]
             Pow::DbgDisc(None) => {
                 put_i(out, &mut t, self.dmm.pw.disc as i64);
                 true
             }
+            // Without the feature `dbg-dev` never parsed (scpi.rs).
+            #[cfg(not(feature = "dbg-dev"))]
+            Pow::DbgRow | Pow::DbgPoke(..) | Pow::DbgStat(_) | Pow::DbgRaw | Pow::DbgDisc(_) => false,
         }
     }
 

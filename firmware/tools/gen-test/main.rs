@@ -4,6 +4,14 @@
 // single-period optimum), the per-wave clamp (UF-14), the PWM path, table
 // contents (rising ramp, UF-16), and levels/offset (FR-28).
 
+// src/lang.rs `tr!` as in the English image (stockfont.rs, which has it, is not here).
+#[macro_export]
+macro_rules! tr {
+    ($s:literal) => {
+        $s
+    };
+}
+
 #[path = "../../src/genplan.rs"]
 mod genplan;
 

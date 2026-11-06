@@ -3,7 +3,8 @@
 #
 #   tools/reload.sh [options] [build args...]     e.g. --features keep-screen
 #
-# Default: ./build.sh [build args], check the image (tools/dm40dbg.py
+# Default: ./build.sh --dev [build args] (the developer image, Cargo.toml
+# dbg-dev: device checks and test scripts use its DBG: commands), check the image (tools/dm40dbg.py
 # image: CRCs, size, no short last block the loader mis-decodes), upload it
 # over USBTMC into the SPI disk's root as DM40FW.BIN (tools/dm40dbg.py upload
 # = DBG:UPLOAD, src/upload.rs: any other dm40*.bin there is removed, the file
@@ -18,6 +19,7 @@
 # dm40*.bin name installs: the loader takes the first one in the root.
 #
 # Options:
+#   --release       build the release image instead (./build.sh without --dev)
 #   --no-build      do not build, use the existing image
 #   --image FILE    install FILE instead of opendm40.bin (implies --no-build)
 #   --stock FILE    install a stock / patched stock update file the same way
@@ -44,10 +46,11 @@ STOCK_ID=28e9:028f
 usage() { sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; }
 die() { echo "reload.sh: $*" >&2; exit 1; }
 
-BUILD=1 IMAGE= STOCK= FROM_STOCK=0 WAIT=90 ARGS=() UPLOAD=0
+BUILD=1 IMAGE= STOCK= FROM_STOCK=0 WAIT=90 ARGS=() UPLOAD=0 DEV=(--dev)
 while (($#)); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
+        --release) DEV=() ;;
         --no-build) BUILD=0 ;;
         --image) (($# > 1)) || die "--image needs a file"; IMAGE=$2; BUILD=0; shift ;;
         --stock) (($# > 1)) || die "--stock needs a file"; STOCK=$2; BUILD=0; shift ;;
@@ -204,7 +207,7 @@ if [ -n "$STOCK" ]; then
     shopt -u nocasematch
 else
     if ((BUILD)); then
-        "$FW/build.sh" "${ARGS[@]}"
+        "$FW/build.sh" "${DEV[@]}" "${ARGS[@]}"
     elif ((${#ARGS[@]})); then
         die "build arguments given with --no-build/--image: ${ARGS[*]}"
     fi
@@ -283,11 +286,16 @@ EOF
     exec "${DBG[@]}" boot --expect "$IMG"
 fi
 
-# Device-side check: the SPI flash reports no block write error.
-FLASH=$("${DBG[@]}" scpi 'DBG:FLASH?')
-echo "DBG:FLASH? -> $FLASH (JEDEC id, blocks, write error, then the screenshot prep fields)"
-[ "$(echo "$FLASH" | cut -d, -f3)" = 0 ] || die "the meter reports an SPI flash write error: the staged file may be
+# Device-side check: the SPI flash reports no block write error. DBG:FLASH?
+# is in the developer image only: a release image does not answer it (~5 s),
+# the check is skipped (the upload's CRC-32 re-read on the meter stands).
+if FLASH=$("${DBG[@]}" scpi 'DBG:FLASH?' 2>/dev/null) && [ -n "$FLASH" ]; then
+    echo "DBG:FLASH? -> $FLASH (JEDEC id, blocks, write error, then the screenshot prep fields)"
+    [ "$(echo "$FLASH" | cut -d, -f3)" = 0 ] || die "the meter reports an SPI flash write error: the staged file may be
 corrupt. Do not update; reset the meter (tools/dm40dbg.py reset) and run again."
+else
+    echo "DBG:FLASH?: no reply (a release image runs): SPI flash check skipped"
+fi
 
 if [ -n "$STOCK" ]; then
     "${DBG[@]}" update
