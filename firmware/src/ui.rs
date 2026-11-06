@@ -3227,8 +3227,13 @@ pub const SET_TABS: [(&str, &[u8]); 6] = [
     (crate::tr!("Power"), &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     (crate::tr!("Multimeter"), &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     (crate::tr!("Scope"), &[S_SWIPE, S_PRESS, S_TAP_STEP]),
-    (crate::tr!("Other"), if cfg!(feature = "vdisk-one") { &[S_BT, S_DEVICE, S_TOUCH, S_HELP, S_RESET] } else { &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP, S_RESET] }),
+    (crate::tr!("Other"), OTHER_ROWS),
 ];
+/// Settings > Other; the one USB disk mode (vdisk-one) has no USB disk row.
+#[cfg(not(feature = "vdisk-one"))]
+const OTHER_ROWS: &[u8] = &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP, S_RESET];
+#[cfg(feature = "vdisk-one")]
+const OTHER_ROWS: &[u8] = &[S_BT, S_DEVICE, S_TOUCH, S_HELP, S_RESET];
 /// The section of the USB disk row (its value follows the bus), the
 /// Device / touch test / help rows (their pages return to it).
 pub const TAB_OTHER: u8 = 5;
