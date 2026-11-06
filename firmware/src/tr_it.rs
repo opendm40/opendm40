@@ -121,6 +121,7 @@ macro_rules! tr {
     ("No ohm reading") => { "Nessuna lettura \u{3a9}" };
     ("No screenshots or logs") => { "Nessuna schermata o log" };
     ("Normal") => { "Normale" };
+    ("Null: short the leads first") => { "Null: prima cortocircuita i puntali" };
     ("OFF (stock)") => { "OFF (orig.)" };
     ("OL: no path from V to A") => { "OL: circuito aperto V-A" };
     ("Off (stock)") => { "Off (orig.)" };
@@ -331,6 +332,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("No ohm reading", "Nessuna lettura \u{3a9}"),
     ("No screenshots or logs", "Nessuna schermata o log"),
     ("Normal", "Normale"),
+    ("Null: short the leads first", "Null: prima cortocircuita i puntali"),
     ("OFF (stock)", "OFF (orig.)"),
     ("OL: no path from V to A", "OL: circuito aperto V-A"),
     ("Off (stock)", "Off (orig.)"),

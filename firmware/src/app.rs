@@ -2189,7 +2189,7 @@ impl App {
     fn ohm_null_tap(&mut self, now: u64) {
         if self.dmm.ohm_null() > 0.0 {
             self.dmm.set_ohm_null(0.0);
-            self.toast(now, "Null off", true);
+            self.toast(now, crate::tr!("Null off"), true);
             return;
         }
         let r = self.meter.live().copied();
@@ -2202,7 +2202,7 @@ impl App {
                 t.push(" ohm");
                 self.toast(now, t.as_str(), true);
             }
-            _ => self.toast(now, "Null: short the leads first", false),
+            _ => self.toast(now, crate::tr!("Null: short the leads first"), false),
         }
     }
 

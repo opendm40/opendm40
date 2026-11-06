@@ -1726,7 +1726,7 @@ pub fn ohm_null_button(ohm: f32) {
         t.push(" \u{3a9}");
         SEL
     } else {
-        t.push("off");
+        t.push(crate::tr!("off"));
         0x2966
     };
     sf::rbox(NULL_BTN, 6, c, BG);
