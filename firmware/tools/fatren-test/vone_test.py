@@ -395,6 +395,10 @@ cases = [
 for tag, dels, gone, order, lazy in cases:
     v, spi, base, host = fresh('del-' + tag)
     v.lock(True)
+    if tag == 'one':
+        # Windows Explorer: the attribute byte changed with the 0xE5 (it
+        # clears read-only before the delete; device 2026-11-06).
+        mtools(host, ('mattrib', '+a', '+r', dels[0]))
     # The meter adds a screenshot and a log after the host read the volume:
     # the host's copies of SHOTS/ and LOGS/ and of the FAT are stale.
     meter_add(v, spi, 'SHOTS', 'S060    BMP', BMP)

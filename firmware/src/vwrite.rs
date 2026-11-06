@@ -180,6 +180,12 @@ pub struct Stats {
     pub fw_bad: u16,
     /// One mode: host writes accepted and dropped (sectors).
     pub dropped: u32,
+    /// One mode, the last drop (DBG:VDISK:WR?): where (kind << 28 | sector
+    /// of its area: 1 FAT, 2 root, 3 + k a directory of kind k), what (FAT:
+    /// the cluster; root / directory: the slot), the bytes of that entry
+    /// that differ (bit i = byte i; FAT: the host's value), the host's and
+    /// the volume's first byte of it (FAT: the volume's value).
+    pub drop: [u32; 4],
 }
 
 struct W {
@@ -250,7 +256,7 @@ static mut W0: W = W {
     parks: 0,
     purged: false,
     purge: false,
-    n: Stats { ok: 0, refused: 0, busy: 0, last_refused: 0, deleted: 0, fw_ok: 0, fw_bad: 0, dropped: 0 },
+    n: Stats { ok: 0, refused: 0, busy: 0, last_refused: 0, deleted: 0, fw_ok: 0, fw_bad: 0, dropped: 0, drop: [0; 4] },
 };
 /// The logger needs a constant interval (main.rs `disk_writes_blocked`):
 /// no SPI write for a staging meanwhile.
@@ -515,6 +521,18 @@ fn classify_one(lba: u32, d: &[u8]) -> R {
     root_one(lba - ROOT_START, d, &g)
 }
 
+/// One mode: note a dropped entry (`Stats::drop`).
+#[cfg_attr(target_os = "none", link_section = ".text.vwrite_cold")]
+fn note_drop(at: u32, what: u32, g: &[u8], h: &[u8]) {
+    let mut m = 0u32;
+    for i in 0..g.len().min(32) {
+        if g[i] != h[i] {
+            m |= 1 << i;
+        }
+    }
+    w().n.drop = [at, what, m, (h[0] as u32) << 8 | g[0] as u32];
+}
+
 #[cfg_attr(target_os = "none", link_section = ".text.vwrite_cold")]
 fn dropped() -> R {
     w().n.dropped += 1;
@@ -539,26 +557,32 @@ fn fat_one(s: u32, d: &[u8], g: &[u8]) -> R {
             changed = true;
             continue;
         }
-        match vdisk::owner(c) {
-            _ if c < 2 => drop = true,
+        let dr = match vdisk::owner(c) {
+            _ if c < 2 => true,
             Owner::Dyn(j) if ours_live(j, c) => {
                 if n == 0 && frees_all(j, s, d) {
                     vdisk::entries()[j].id |= T_FAT;
                     changed = true;
+                    false
                 } else {
-                    drop = true;
+                    true
                 }
             }
             Owner::Dyn(_) | Owner::Free => {
                 let bad = n != 0 && !(2..vdisk::CLUSTERS + 2).contains(&(n as u32)) && n < 0xFFF8;
                 if bad || (n != 0 && pair_idx(c).is_none() && !w().pair.iter().any(|p| p.c == 0)) {
-                    drop = true;
+                    true
                 } else {
                     set_pair(c, n);
                     changed = true;
+                    false
                 }
             }
-            _ => drop = true,
+            _ => true,
+        };
+        if dr {
+            drop = true;
+            w().n.drop = [1 << 28 | s, c, n as u32, o as u32];
         }
     }
     if drop {
@@ -582,7 +606,10 @@ fn root_one(s: u32, d: &[u8], g: &[u8]) -> R {
             continue;
         }
         if idx <= ROOT_N {
-            drop |= !dates_only(ge, h);
+            if !dates_only(ge, h) {
+                drop = true;
+                note_drop(2 << 28 | s, idx as u32, ge, h);
+            }
             continue;
         }
         let w = w();
@@ -602,7 +629,10 @@ fn root_one(s: u32, d: &[u8], g: &[u8]) -> R {
                 w.rec[k].e.copy_from_slice(h);
                 changed = true;
             }
-            _ => drop = true,
+            _ => {
+                drop = true;
+                note_drop(2 << 28 | s, idx as u32, ge, h);
+            }
         }
     }
     if drop {
@@ -632,6 +662,11 @@ fn dir_one(k: usize, s: u32, d: &[u8], g: &[u8]) -> R {
             let mut x = [0u8; 32];
             x.copy_from_slice(ge);
             x[0] = 0xE5;
+            // The attribute byte may differ in its file bits (read-only,
+            // hidden, system, archive): Windows Explorer clears read-only
+            // before a delete (device 2026-11-06: a 0xE5 with byte 11
+            // changed).
+            x[11] = (x[11] & 0x18) | (he[11] & !0x18);
             if he[0] == 0xE5 && dates_only(&x, he) {
                 ents[j].id |= T_DIR;
                 if moved_ref(ents[j].vstart, ents[j].vsize) {
@@ -644,6 +679,7 @@ fn dir_one(k: usize, s: u32, d: &[u8], g: &[u8]) -> R {
             vdisk::hold_slot(k, slot);
         }
         drop = true;
+        note_drop((3 + k as u32) << 28 | s, slot, ge, he);
     }
     if drop {
         w().n.dropped += 1;

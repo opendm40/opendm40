@@ -942,7 +942,7 @@ Only in the developer image (`./build.sh --dev`, [firmware/README.md](../../firm
 | `DBG:VDISK:RD?` | | USB disk read counters | USB |
 | `DBG:VDISK:MIR?` | | USB disk mirror state | USB |
 | `DBG:VDISK:WR?` | | Host write counters (13 fields; 14 with the `vdisk-one` build: host writes dropped) | USB |
-| `DBG:VDISK:UA[?]` | `0`, `1` or `2` | Build with `vdisk-one` only: which command gets the "files changed" notice to the computer: 0 none, 1 TEST UNIT READY (default), 2 any | USB |
+| `DBG:VDISK:UA[?]` | `0`, `1` or `2` | Build with `vdisk-one` only: which command gets the "files changed" notice to the computer: 0 none, 1 TEST UNIT READY (default), 2 any; the query adds the TEST UNIT READYs seen, notices sent, notices held back | USB |
 
 ### DBG:BOOT?
 

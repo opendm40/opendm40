@@ -162,6 +162,9 @@ static SEEN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::ne
 /// never fails with it), 2 any command; either only after
 /// vwrite::UA_QUIET_MS without a host write.
 pub static UA_MODE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(1);
+/// One mode, DBG:VDISK:UA?: TEST UNIT READYs seen, media-change UNIT
+/// ATTENTIONs sent, commands that found one due but held it back.
+pub static UA_STAT: [core::sync::atomic::AtomicU32; 3] = [const { core::sync::atomic::AtomicU32::new(0) }; 3];
 
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 #[inline(always)]
@@ -733,7 +736,9 @@ pub(crate) fn owner(c: u32) -> Owner {
 /// host writes with it).
 pub(crate) fn dyn_entry(e: &VF, out: &mut [u8]) {
     out[..32].fill(0);
-    dirent(out, &vname(e.id), 0x01, e.vstart as u32, e.vsize);
+    // One mode: no read-only bit (the host may delete them; Windows
+    // Explorer clears the bit before a delete, Linux rm asks for it).
+    dirent(out, &vname(e.id), if ONE { 0x00 } else { 0x01 }, e.vstart as u32, e.vsize);
 }
 
 /// Which generated directory cluster `c` is: Some(kind) for LOGS / SCOPE /
@@ -1146,7 +1151,11 @@ impl BlockDevice for VDisk {
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn take_media_changed(&mut self) -> bool {
-        CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
+        let c = CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed);
+        if ONE && c {
+            UA_STAT[1].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        }
+        c
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn media_change_now(&self, tur: bool) -> bool {
@@ -1158,7 +1167,15 @@ impl BlockDevice for VDisk {
             1 => tur,
             _ => true,
         };
-        ok && crate::vwrite::host_quiet()
+        use core::sync::atomic::Ordering::Relaxed;
+        if tur {
+            UA_STAT[0].fetch_add(1, Relaxed);
+        }
+        let go = ok && crate::vwrite::host_quiet();
+        if !go && CHANGED.load(Relaxed) {
+            UA_STAT[2].fetch_add(1, Relaxed);
+        }
+        go
     }
 }
 
