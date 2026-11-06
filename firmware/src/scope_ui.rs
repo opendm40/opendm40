@@ -646,14 +646,14 @@ fn badge(r: Rect, fill: Color, outside: Color, inner: Option<(Rect, Color)>, ink
 /// 2.1 run-status badge.
 pub fn status_badge(m: &Model) {
     let r = RUN_BADGE;
-    let t = Ink::new(sf::SC_C, r, STATUS[m.status.min(4) as usize], 8, 0);
+    let t = Ink::new(sf::SC_F16, r, STATUS[m.status.min(4) as usize], 8, 0);
     badge(r, if m.status == ST_STOP { C_ORANGE } else { C_PURPLE }, C_BAR, None, &[(&t, C_WHITE)]);
 }
 
 /// 2.2 timebase badge; `tb_flash`: inverted (white box, magenta text), the
 /// opendm40 feedback of a timebase change.
 pub fn tb_badge(m: &Model) {
-    let h = Ink::new(sf::SC_C, rect(83, 1, 12, 17), "H", 1, 0);
+    let h = Ink::new(sf::SC_F16, rect(83, 1, 12, 17), "H", 1, 0);
     let t = Ink::new(sf::SC_F12, rect(95, 1, 46, 17), TB_LABELS[m.tb.min(29) as usize], 8, 0);
     let (fill, fg) = if m.tb_flash { (C_WHITE, C_MAGENTA) } else { (C_MAGENTA, C_WHITE) };
     badge(TB_BADGE, fill, C_BAR, None, &[(&h, fg), (&t, fg)]);

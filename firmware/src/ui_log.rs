@@ -110,7 +110,7 @@ pub fn top_item(k: usize, t: &Top) {
         0 => {
             let r = RUN_BADGE;
             let st = ["WAIT", "RUN", "STOP"][t.state.min(2) as usize];
-            let i = Ink::new(sf::SC_C, r, st, 8, 0);
+            let i = Ink::new(sf::SC_F16, r, st, 8, 0);
             badge(r, if t.state == 2 { C_ORANGE } else { C_PURPLE }, C_BAR, None, &[(&i, C_WHITE)]);
         }
         1 => {

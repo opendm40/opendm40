@@ -428,27 +428,48 @@ mod data {
                 lut_init();
             }
             let code = u16::try_from(code).ok()?;
-            let e = fd.entries;
-            let (mut lo, mut hi) = (0usize, e.len());
-            while lo < hi {
-                let mid = (lo + hi) / 2;
-                let c = e[mid].code;
-                if c == code {
-                    let g = &e[mid];
-                    return Some(Glyph {
-                        blob: fd.blob.get(g.off as usize..).unwrap_or(&[]),
-                        fmt: fd.fmt,
-                        w: g.w,
-                        h: g.h,
-                        adv: g.adv,
-                        yoff: g.yoff,
-                        t: g.t,
-                        ih: g.ih,
-                    });
-                } else if c < code {
-                    lo = mid + 1;
-                } else {
-                    hi = mid;
+            // The font's own glyphs, then those of its base fonts
+            // (font_base: 1 bpp, `dy` rows lower in this font's line box).
+            let (mut f, mut a, mut dy) = (fd, self.0, 0i16);
+            loop {
+                let e = f.entries;
+                let (mut lo, mut hi) = (0usize, e.len());
+                while lo < hi {
+                    let mid = (lo + hi) / 2;
+                    let c = e[mid].code;
+                    if c == code {
+                        let g = &e[mid];
+                        let mut r = Glyph {
+                            blob: f.blob.get(g.off as usize..).unwrap_or(&[]),
+                            fmt: f.fmt,
+                            w: g.w,
+                            h: g.h,
+                            adv: g.adv,
+                            yoff: g.yoff,
+                            t: g.t,
+                            ih: g.ih,
+                        };
+                        if a != self.0 {
+                            // The box of this font's own entries: the whole line.
+                            let top = f.line_h as i16 - f.descent - g.h as i16 - g.yoff as i16 + dy;
+                            r.t = (g.t as i16 + top) as u8;
+                            r.h = fd.line_h as u8;
+                            r.yoff = -fd.descent as i8;
+                        }
+                        return Some(r);
+                    } else if c < code {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                match font_base(a) {
+                    Some((b, d, lim)) if code < lim => {
+                        f = font_data(b)?;
+                        a = b;
+                        dy += d as i16;
+                    }
+                    _ => break,
                 }
             }
             fd_extra(self.0, code)
@@ -1105,7 +1126,6 @@ pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
 
 /// Fonts of the stock scope page (stock font-object addresses; embedded by
 /// tools/mkstockfont.py).
-pub const SC_C: Font = Font(0x0805_4828); // 10x16 status letters ' R U N S T O P W A I D H
 pub const SC_F12: Font = Font(0x0804_F24C); // 12 px texts (ASCII of 0x0805471c + own table)
 pub const SC_F16: Font = Font(0x0804_F260); // 16 px popup texts (ASCII 0x080534c4)
 pub const SC_F22: Font = TEXT22; // 22 px tab labels, toasts
