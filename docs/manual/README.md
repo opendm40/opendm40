@@ -215,7 +215,9 @@ The top line of the multimeter page shows, from left to right:
    Bluetooth;
 7. the USB symbol while a computer has the meter connected (not with a charger);
 8. the battery level; green on the charger: the top segment blinks while
-   the battery charges and stays when it is full.
+   the battery charges and stays when it is full. On the charger the level
+   rises slowly, at most a bar per 15 min, and is exact again seconds after
+   unplugging.
 
 ### Touch lock
 
@@ -252,6 +254,14 @@ the combined view switches to the next sub-mode of the current function
 - To switch off: hold the power key 1.5 s, or swipe down with two fingers
   and tap **Yes**.
 - The battery charges from the USB port.
+- **Low battery** (at about 17 % and again at 8 % of the scale, as the stock
+  firmware): a 3 s **Low battery! Please charge** message and a beep at the
+  key/alert volume, once per level; the battery symbol stays red until USB
+  power is connected. During a recording only the symbol changes; the message
+  comes when it ends.
+- **Empty battery** (below about 1 %, 3.31 V, for 30 s, as the stock firmware):
+  **Battery empty: off in 30 s** (then 20, 10) with a beep, then the meter
+  closes a recording, saves the settings and switches off. USB power stops it.
 
 ![The warning 30 s before the automatic power-off](img/auto-off.png)
 
@@ -483,7 +493,8 @@ sub-mode:
 
 A function always starts in autorange. Each button returns to the sub-mode
 it was last in, also after a power-off (new meter: DC, diode, frequency,
-0.90 mA); SCPI `CONF` sets it too. The coupling can
+0.90 mA), and its icon shows that sub-mode (of two, it comes first); SCPI
+`CONF` sets it too. The coupling can
 also be chosen on the [range page](#ranges-the-range-page-mf).
 
 Right after a change, the new unit appears at once and the value shows grey
@@ -641,8 +652,9 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
   readings only. Silent at Key/alert volume 0 %.
+- Top right: the resistance **V / 0.765 mA**; **0L** above about 0.8 V.
 - The same green band while it beeps: **SHORT** below 22 mV, **BEEP** for a
-  pattern.
+  pattern, left of the resistance.
 
 
 ![A silicon diode](img/dmm-diode.png)
@@ -655,9 +667,11 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   has 3 decimals; from 6 mF it is in µF (4700 µF).
 - From 600 µF the meter first discharges the capacitor (**Discharging... 0.85 V**
   with the voltage on it, **>1.2 V** above that), then updates
-  every 0.25 s; the value is grey until the ramp has run both ways.
+  every 0.2 s; the value is grey until the ramp has run both ways.
 
   ![Discharging before 600 µF and up](img/dmm-cap-dis.png)
+- Mains ripple too strong to measure (e.g. a laptop charger on the USB
+  cable): dashes and **Unstable: unplug USB?**.
 - Open leads end on the 60 nF range; a short shows **0L**.
 
 
@@ -2939,7 +2953,7 @@ measurement as it was.
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
 | All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
-| Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
+| Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep; the scope's probe factor | Scope: the timebase, V/div, coupling, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 

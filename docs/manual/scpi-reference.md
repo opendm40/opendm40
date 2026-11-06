@@ -863,11 +863,11 @@ unless shown otherwise.
 | `DBG:PROF:RESET` | | Clears the timing table. Only in builds with the `dbg-prof` feature. | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
-| `DBG:CAP?` | | Capacitance internals, 22 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF (600 µF and up: the last half ramp's C, negative falling)>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<1 = no final value on this range yet>,<same-range restarts (another capacitor)>,<discharge experiment mode in force>,<node voltage read before the discharge, V (9.91E+37: none)>,<estimate from the discharge, uF>,<experiment fall-backs to mode 0>` | USB |
+| `DBG:CAP?` | | Capacitance internals, 27 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF (600 µF and up: the last half ramp's C, negative falling)>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<1 = no final value on this range yet>,<same-range restarts (another capacitor)>,<discharge experiment mode in force>,<node voltage read before the discharge, V (9.91E+37: none)>,<estimate from the discharge, uF>,<experiment fall-backs to mode 0>,<steps down to the oscillator: comparator counter>,<: slope under the range>,<: value under the range>,<: no ramp / open / hops>,<hunting holds>` | USB |
 | `DBG:CAP:CLASS[?]` | `0` .. `4` | The capacitance ramp comparator class (R21 swing) on 600 µF and up: `0` adaptive (class 2, the next wider class at once when one poll's ramp step is half the ramp's swing or more), `1` .. `3` fixed, `4` the stock choice from the slope. Not stored. | USB |
 | `DBG:CAP:IDIS[?]` | µA | The capacitor discharge current for the rough value during the discharge (C = I / slope; default 375, inferred from one capacitor). Not stored. | USB |
-| `DBG:CAP:JUMPN[?]` | n | Capacitance AUTO: the 600 µF ramp polls (0.25 s each) before one poll clearly over the range steps up at once (0 .. 255, default 0). Not stored. | USB |
-| `DBG:CAP:DISMS[?]` | ms | The poll period during the capacitor discharge (25 .. 1000, default 50; AD1 converts every 25 ms there). Not stored. | USB |
+| `DBG:CAP:JUMPN[?]` | n | Capacitance AUTO: the 600 µF ramp polls (0.2 s each) before one poll clearly over the range steps up at once (0 .. 255, default 0). Not stored. | USB |
+| `DBG:CAP:DISMS[?]` | ms | The poll period during the capacitor discharge (10 .. 1000, default 20: every conversion read; AD1 converts every 25 ms there, the end looks at the mean of 4 samples). Not stored. | USB |
 | `DBG:CAP:DISMODE[?]` | `0` / `1` | The capacitor discharge: `0` the stock constant current (~0.38 mA), `1` (default) a larger constant current set by `DBG:CAP:DISREF` for a capacitor charged above the 1.2 V clamp whose voltage, read first on the DC V row, is 5 V or less; back to `0` if the node rises or after 60 s. Not stored. | USB |
 | `DBG:CAP:DISREF[?]` | `2` .. `6` | The OP3 reference (SFUVR) of discharge mode 1: `2` the stock row's, `3` .. `6` AGNDP9 .. AGNDP6 / AGNDN9 .. AGNDN6. Measured on one unit (~1 mF from 3.2 V): 0.38 / 0.72 / 0.88 / 0.95 / 1.05 mA (the discharge estimate takes 0.685 for `3`, from a second capacitor; inferred). Default 3. Not stored. | USB |
 | `DBG:CAP:DISEND[?]` | mV | The node voltage that ends the discharge and starts the ramp (1 .. 1300, default 30). Not stored. | USB |
@@ -885,10 +885,6 @@ unless shown otherwise.
 | `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md); `dbg-ohm6` builds) | | USB |
 | `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians; `dbg-ohm6` builds) | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic. Only in builds with the `dbg-acdc` feature. | USB |
-| `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A`. Only in builds with the `acdc-meth` feature. | USB |
-| `DBG:ACDC:STAT?` | | AC+DC method state (25 fields). Only in builds with the `acdc-meth` feature. | USB |
-| `DBG:ACDC:ZERO[?]` | `<slot 0..9>,<value>\|AUTO` | `<valid>,<fixed>;<c0>,...,<c9>`. Only in builds with the `acdc-meth` feature. | USB |
-| `DBG:ACDC:R0[?]` | `1` or `2` | `1`. Only in builds with the `acdc-meth` feature. | USB |
 | `DBG:ACDC:RANG` | `<item 0..5>` or `AUTO` | Sets the range item. | USB |
 | `DBG:ACDC:TRACE[?]` | `0`, `1` or `2`; query `[<from>]` | `<n>,<held>,<trig>,<on>;<hex>...`. Only in builds with the `acdc-trace` feature. | USB |
 | `DBG:HWTRIG?` | | Comparator trigger state | USB |

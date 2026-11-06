@@ -5,6 +5,50 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## Unreleased
+
+## v0.4.1 (2026-11-06)
+
+A bug-fix release: an update or a restart from the scope or generator page
+no longer turns the meter off; capacitance works with a USB charger; a
+low-battery warning and power-off; the scope's MF menu leaves no leftovers;
+the probe factor is kept.
+
+### Fixed
+
+- A firmware update or a restart from the scope or generator page could
+  turn the meter off; it now restarts as from the multimeter page.
+- **Capacitance with a laptop charger on the USB cable:** mains ripple no
+  longer sends a large capacitor (about 50–600 µF) between ranges with
+  "Discharging..." and a wrong value; too strong ripple shows dashes and
+  **Unstable: unplug USB?** (checked with ripple in the emulator only;
+  [manual](docs/manual/README.md#capacitance)).
+- **Low battery:** a 3 s **Low battery! Please charge** message and a beep at
+  about 17 % and 8 %, and a red battery symbol; below about 1 % a 30 s
+  countdown, then a clean power-off. Not on USB power
+  ([manual](docs/manual/README.md#power-battery-and-sleep)).
+- **Battery level on the charger:** no jump up at plug-in; it rises slowly
+  with the real charge.
+- **Scope:** the MF menu leaves no pixels on the right panel, and the panel
+  is no longer drawn over it after a tab change.
+- **Scope:** the probe factor is kept after a power-off also with Mode
+  Remember OFF.
+- **Scope:** the trigger badge takes the new source's colour at once.
+- **Diode:** the resistance stays on screen while the SHORT / BEEP band is on
+  (0.4.0 hid it below 22 mV).
+
+  ![The SHORT band with the resistance](docs/changelog/v0.4.1/diode-short.png)
+- **Function buttons:** V and A show the remembered DC / AC / AC+DC / AUTO;
+  continuity / diode and Hz / °C put the remembered sub-mode first.
+
+  ![Function buttons after V AC, A AC, continuity and °C](docs/changelog/v0.4.1/buttons.png)
+- **Power meter from the combined view:** the wiring notice returns to the
+  combined view, not the multimeter page.
+
+### Changed
+
+- **Multimeter:** the reading with the extra digit sits 4 px further right.
+
 ## v0.4.0 (2026-11-02)
 
 ### New

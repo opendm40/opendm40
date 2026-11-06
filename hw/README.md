@@ -805,7 +805,7 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
    current, below the level (~4.06 V) where the charger restarts after the pulse; above it a pulse would
    end the charge (measured above). opendm40 never drives PB10: its charger runs the plain TP4056 cycle
    (charges to termination after a replug, measured); its battery reading on USB power includes the
-   charge current's rise.
+   charge current's rise, and the level shown allows for it ([`battlevel.rs`](../firmware/src/battlevel.rs)).
 6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the

@@ -592,18 +592,23 @@ pub fn finish_disk_writes(now: u64) {
 impl App {
     /// Before a reset (main.rs `reset_at`: DBG:RESET, DBG:UPDATE, an
     /// install from the disk): backlight, generator output and scope
-    /// acquisition off, then 20 ms for the supply to settle. A reset releases
-    /// the power-hold pins (PE2 / PC4) until the ROM drives them again; a
-    /// DBG:UPDATE right after a scope Save CSV sometimes ended in a power
-    /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
-    /// loader never ran; why the load matters is inferred).
+    /// acquisition off, the SPI flash idle, and the rails as on the DMM page:
+    /// PE2 on, PC4 off (`Scope::rails`), then 150 ms for the DMM supply to
+    /// come up. A reset releases the power-hold pins (PE2 / PC4) until the
+    /// ROM drives both high again. With PE2 off (the scope and generator
+    /// pages, SYST:RAIL AUTO) a reset lost the power in 4 of 5 tries (device
+    /// 2026-11-06, on USB: 3 restarts with POR, once the meter stayed off;
+    /// 1 SW), from the DMM page it restarted with SW. That the DMM supply
+    /// starting from off inside the reset is the cause is inferred.
     pub fn quiesce_for_reset(&mut self, clk: &mut Clock) {
         backlight(0);
         let mut g = self.gen.s;
         g.on = false;
         self.gen.apply(g);
         self.scope.stop_hw();
-        clk.delay_ms(20);
+        let _ = crate::spiflash::wait_idle(3000);
+        self.scope.rails(true, false, clk);
+        clk.delay_ms(150);
     }
 }
 
@@ -909,6 +914,7 @@ impl App {
         self.dmm_view.label = self.t_label();
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
+        ui::set_btn_mem(self.dmm.sub_mem());
         // The power meter's AC+DC parts layout (doc 3.17): this page only.
         ui::set_pw_parts(self.view == View::Dmm && self.pw_parts_want());
         // The range pages' Record button: red while recording.
@@ -1134,6 +1140,7 @@ impl App {
             usb: self.usb_host,
             bars: self.power.shown_bars(self.strip_alt),
             charging: self.power.on_charger(),
+            bat_low: self.power.low.low(),
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),
@@ -1147,6 +1154,7 @@ impl App {
         if self.band_until == 0 {
             self.pw_btn_glyph();
             ui::set_cpl_auto(self.dmm.cpl_auto());
+            ui::set_btn_mem(self.dmm.sub_mem());
             ui::func_band(self.dmm.button(), self.dmm.shown_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
         }
         self.band_until = now + BAND_MS;
@@ -1243,11 +1251,9 @@ impl App {
             // AC+DC). Else the wiring dialog until it was confirmed once (owner: no
             // nagging; MF > Power Settings > Wiring shows it again).
             if !self.dmm.pw.on && !self.dmm.pw.wired {
-                // From the combined view's band too: the dialog over the
-                // DMM page (Cancel leaves the DMM page shown).
-                if self.view != View::Dmm {
-                    self.show(View::Dmm, clk);
-                }
+                // On the DMM page or over the combined view (its band): the
+                // page stays below the dialog (no page draws while it is up,
+                // `tick`), and closing it repaints the page.
                 self.pw_open_entry(clk.now_ms());
                 return;
             }
@@ -1739,10 +1745,20 @@ impl App {
             self.persist_now();
             power_off();
         }
+        // The battery is empty (lowbat.rs): as the others, power_off closes
+        // a recording and writes the settings file.
+        if self.power.low.cut_due() {
+            backlight(0);
+            self.persist_now();
+            power_off();
+        }
         // Not while a screenshot reads the panel (its toast would land in the
         // rows not read yet; screenshot.rs "Frozen image").
         if !crate::screenshot::frozen() {
             self.off_warn(now, idle);
+            if self.power.low.cut_warning() && !crate::hy3131::streaming() {
+                self.low_battery_off(now);
+            }
         }
         // RUN held in a DMM view: AutoHold on/off. The key-down already
         // toggled HOLD; set_ahold releases it again. AUTO held: the default
@@ -1890,6 +1906,12 @@ impl App {
         if self.toast_later_n != 0 {
             self.toast_later_show(now);
             return;
+        }
+        if self.power.low.due() && !crate::hy3131::streaming() {
+            self.low_battery(now);
+            if self.overlay.is_some() {
+                return;
+            }
         }
         if self.shot_req && now >= self.repaint_at + SHOT_SETTLE_MS {
             self.shot_req = false;
@@ -2457,6 +2479,14 @@ impl App {
             *c = *w as i32;
         }
         app_touchtest::tc_restore(tc);
+        // The probe factor: a preference (the probe stays on the jack),
+        // kept also without Mode Remember.
+        let pr = f32::from_bits(p[8]);
+        if scope::PROBES.contains(&pr) {
+            let mut sc = self.scope.s;
+            sc.probe = pr;
+            self.scope.apply(sc, 0);
+        }
         // The scope's acquisition, trigger, math and measurements: as the
         // multimeter, kept after a power-off with Mode Remember ON.
         if !cont {
@@ -3287,12 +3317,51 @@ impl App {
     /// watch a bus). Dimming still applies. USB power holds it off through `idle` (`tick`,
     /// autooff.rs).
     fn off_held(&self) -> bool {
-        self.off_ms() == 0
-            || self.meter.stats.rec
+        self.off_ms() == 0 || self.session_runs()
+    }
+
+    /// A recording or another session the user left running.
+    fn session_runs(&self) -> bool {
+        self.meter.stats.rec
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
             || self.scope.log_on()
+    }
+
+    /// The countdown before the power-off on an empty battery: a toast at
+    /// 30, 20 and 10 s and a beep at the key / alert volume, also during a
+    /// recording (it goes on under the toast); not over a stream's page (the
+    /// caller: .cold, link-native.x). A dimmed screen lights up, as for the
+    /// idle power-off's warning.
+    #[inline(never)]
+    fn low_battery_off(&mut self, now: u64) {
+        let Some(secs) = self.power.low.take_cut_warn() else { return };
+        if self.dimmed {
+            backlight(self.backlight);
+        }
+        self.beep(now, 200);
+        let txt = crate::dialog::low_battery_off(secs);
+        if !self.toast_defer(txt, false) {
+            self.toast_draw(now, txt, false);
+        }
+    }
+
+    /// The low-battery warning (lowbat.rs), as the stock's 3 s popup, once
+    /// per level at the key / alert volume. It waits while a recording or a
+    /// stream runs, whose page must stay up; the red symbol shows meanwhile.
+    /// Not an input: the idle timers go on, and a dimmed screen stays dimmed
+    /// (a low battery is no reason for more backlight). .cold (link-native.x);
+    /// the caller checks for a stream.
+    #[inline(never)]
+    fn low_battery(&mut self, now: u64) {
+        if self.toast_hold || self.session_runs() || crate::screenshot::frozen() || crate::dialog::log_panel_shown() {
+            return;
+        }
+        self.power.low.shown();
+        self.toast_draw(now, crate::dialog::LOW_BATTERY, false);
+        self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::LOW_BATTERY_MS });
+        self.beep(now, 150);
     }
 
     fn off_warn(&mut self, now: u64, idle: u64) {
@@ -5206,43 +5275,8 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
-            #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
-            C::DbgAm(op, k, v) => {
+            C::DbgAm(op, k) => {
                 match op {
-                    // METH / STAT / ZERO / R0 (the parser makes no 0..6
-                    // without the feature `acdc-meth`).
-                    #[cfg(feature = "acdc-meth")]
-                    0 => self.dmm.am_set_meth(clk, k),
-                    #[cfg(feature = "acdc-meth")]
-                    1 => out.put_bytes(&[b'A' + self.dmm.am.meth]),
-                    #[cfg(feature = "acdc-meth")]
-                    2 => {
-                        for (i, x) in self.dmm.am_stat().iter().enumerate() {
-                            if i > 0 {
-                                out.put_bytes(b",");
-                            }
-                            if matches!(i, 0..=3 | 6..=8 | 16 | 18) {
-                                out.put_u32(*x as u32);
-                            } else {
-                                out.put_f32(*x);
-                            }
-                        }
-                    }
-                    #[cfg(feature = "acdc-meth")]
-                    3 => self.dmm.am_set_zero(k, v),
-                    #[cfg(feature = "acdc-meth")]
-                    4 => {
-                        let (ok, fixed, c) = self.dmm.am_zero();
-                        out.put_u32(ok as u32);
-                        out.put_bytes(b",");
-                        out.put_u32(fixed as u32);
-                        for (i, x) in c.iter().enumerate() {
-                            out.put_bytes(if i == 0 { b";" } else { b"," });
-                            out.put_f32(*x);
-                        }
-                    }
-                    #[cfg(feature = "acdc-meth")]
-                    5 => self.dmm.am.r0 = k,
                     7 => self.dmm.set_range(clk, Some(k)),
                     // DBG:ACDC:TRACE (the parser makes no 8 / 9 without the
                     // feature `acdc-trace`).
@@ -5254,11 +5288,9 @@ impl App {
                     }
                     #[cfg(feature = "acdc-trace")]
                     9 => self.dmm.tr.arm(k),
-                    #[cfg(feature = "acdc-meth")]
-                    6 => out.put_u32(self.dmm.am.r0 as u32),
                     _ => {}
                 }
-                matches!(op, 1 | 2 | 4 | 6 | 8)
+                op == 8
             }
             #[cfg(feature = "dbg-acdc")]
             C::DbgAcdc => {

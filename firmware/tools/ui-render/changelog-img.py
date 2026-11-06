@@ -113,3 +113,6 @@ elif tag == 'v0.4.0':
     single('mv-div', m2('s07-mcx-2mv'), (0, 0, 480, 300))
     side('decode-log', [(now('scope-decode-log'), FULL, 'Mode Log'),
                         (now('scope-decode-log-wave'), FULL, 'A frame')])
+elif tag == 'v0.4.1':
+    single('diode-short', m2('b06-short-diode-band'), (0, 34, 480, 150))
+    single('buttons', m2('d30-btn-mem-ac-cont-temp'), (0, 276, 480, 320))

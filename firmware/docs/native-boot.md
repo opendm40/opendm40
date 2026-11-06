@@ -1293,8 +1293,8 @@ as on `test/scope-chain-0.4`, commit 33dd4cb9) builds it:
 
 ### AC+DC methods behind a feature (2026-10-31, feat/acdc-meth)
 
-The AC+DC prototype methods B and C ([acdcm.rs](../src/acdcm.rs),
-[acdc-approaches.md](acdc-approaches.md) section 10) are debug code: the
+The AC+DC prototype methods B and C (`acdcm.rs`, removed since:
+[acdc-approaches.md](acdc-approaches.md) section 10.0) are debug code: the
 cargo feature `acdc-meth` (off by default) builds them. Without it
 `dmm.rs` has an empty `am` module (`am_on()` constant false, so method A's
 code is as before and the hooks are dropped), no `AM` static, and

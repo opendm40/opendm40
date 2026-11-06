@@ -46,6 +46,17 @@ pub const TOAST_MS: u64 = 1500;
 /// that answers itself while it is being read is worse than one that stays
 /// (the wiring dialog / the firmware question: 60 s).
 pub const ENERGY_MS: u64 = 60_000;
+/// The low-battery warning (stock text and time; lowbat.rs).
+pub const LOW_BATTERY: &str = "Low battery! Please charge";
+pub const LOW_BATTERY_MS: u64 = 3000;
+/// The countdown before the power-off on an empty battery (lowbat.rs).
+pub fn low_battery_off(secs: u8) -> &'static str {
+    match secs {
+        30 => "Battery empty: off in 30 s",
+        20 => "Battery empty: off in 20 s",
+        _ => "Battery empty: off in 10 s",
+    }
+}
 /// Scope AUTO-set fell back from AC to DC coupling (UF-04, app.rs autoset).
 pub const AUTO_DC: &str = "AUTO: DC (no AC signal)";
 

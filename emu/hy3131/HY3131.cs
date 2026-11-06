@@ -1009,6 +1009,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "capasym": CapAsym = o.Value; break;
                 case "capcmpw": CapCmpW = o.Value; break;
                 case "capvavg": CapVAvg = o.Value; break;
+                case "capnoise": CapNoise = o.Value; break;
+                case "capnoisehz": CapNoiseHz = o.Value; break;
                 case "pb5drift": Pb5DriftV = o.Value; break;
                 case "pb5tau": Pb5DriftTau = o.Value; break;
                 case "senseneg": SenseNegV = o.Value; break;
@@ -1530,6 +1532,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 else if(scmpi == 0) SignalEdgesDc(dc, ac, out f, out duty, CmpHighThreshold, CmpLowThreshold);
                 break;
             }
+            case Role.CapRamp:
+            {
+                // Only with capnoise (opt-in; the ramp's turns are not counted otherwise): the
+                // ramp's own turns, or the ripple's when it spans the comparator window (CHOSEN).
+                if(CapNoise <= 0 || CapNoiseHz <= 0) break;
+                var vh = CmpHighThreshold; var vl = CmpLowThreshold;
+                var w = Math.Abs(vh - vl) * CapCmpW;
+                var cr = Fe.CapRampC(CapK[roleRange] * 1e-6, Math.Max(vh, vl));
+                var fn = cr > 0 && w > 0 ? CalGain(0x170 + 4 * roleRange) * CapK[roleRange] / (cr * 1e6) / (2 * w) : 0;
+                f = CapNoise > 0.5 * w ? Math.Max(fn, CapNoiseHz) : fn;
+                duty = 0.5;
+                break;
+            }
             case Role.AcV: case Role.AcMv: case Role.Freq: case Role.DcV: case Role.DcMv: case Role.AcA: case Role.DcA:
                 // HfNoCnt: the AC mV row's counter does not see a jack above HfBwHz
                 if(HfNoCnt && role == Role.AcMv && HfBwHz > 0 && sigHz > HfBwHz) break;
@@ -1997,7 +2012,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             case Role.CapRamp: case Role.CapDischarge:
                 // node volts -> code with the stock scale 1000 * 1.25 / 0.9 / 8388606 mV per code
-                code = (role == Role.CapRamp && CapVAvg > 0 ? RampMean(ad1Last) : rampV) / (1.25 / 0.9 / 8388606.0) * (ig / rowIg) / (rg / rowRg);
+                code = (role == Role.CapRamp && CapVAvg > 0 ? RampMean(ad1Last) : rampV) + RampNoise(ad1Last);
+                code = code / (1.25 / 0.9 / 8388606.0) * (ig / rowIg) / (rg / rowRg);
                 break;
             case Role.Temp:
             {
@@ -2299,6 +2315,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 rampUp = !rampUp;
                 acpo = !rampUp; // high after reaching the high threshold
                 remaining -= tt;
+            }
+            // The ripple at the comparator too (capnoise): a turn when the node plus the ripple
+            // at `now` is past the threshold the ramp runs to (sampled at each update only).
+            if(CapNoise > 0 && CapNoiseHz > 0)
+            {
+                var n = CapNoise * Math.Sin(2 * Math.PI * CapNoiseHz * now);
+                if(rampUp ? rampV + n >= vh : rampV + n <= vl)
+                {
+                    rampUp = !rampUp;
+                    acpo = !rampUp;
+                }
             }
             if(CapVAvg > 0) RampMark(now);
         }
@@ -2972,6 +2999,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// CHOSEN, not measured; 0: the node at the conversion's end): device 19b6e3b7 read a part
         /// of a poll's dV in the poll after a comparator turn, with no turn seen in that poll.
         public double CapVAvg;
+        /// Mains ripple on the ramp node ("capnoise:Vpk;capnoisehz:Hz", CHOSEN, not measured: a
+        /// user's 470 uF did not settle with a laptop charger on the USB host, 2026-11-02): AD1
+        /// reads its mean over the conversion that ended at `t`.
+        public double CapNoise, CapNoiseHz = 50.0;
+        private double RampNoise(double t)
+        {
+            if(CapNoise <= 0 || CapNoiseHz <= 0) return 0;
+            var w = 2 * Math.PI * CapNoiseHz;
+            var T = Ad1Period;
+            if(T <= 0) return CapNoise * Math.Sin(w * t);
+            return CapNoise * (Math.Cos(w * (t - T)) - Math.Cos(w * t)) / (w * T);
+        }
         private readonly List<double> rampHt = new List<double>(), rampHv = new List<double>();
         private void RampMark(double t)
         {
