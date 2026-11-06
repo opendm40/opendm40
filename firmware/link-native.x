@@ -382,17 +382,6 @@ SECTIONS
         *(.text.*8opendm403dmm*3Dmm14acdc_diag_text*);
         *(.text.*8opendm403dmm*3Dmm8reg_text*);
         *(.text.*8opendm403dmm*3Dmm12precondition*);
-        /* acdcm.rs: the AC+DC methods' entry / range-change / SCPI steps
-           (poll_am, the per-result path, stays in region B) */
-        *(.text.*8opendm403dmm2am*8am_enter*);
-        *(.text.*8opendm403dmm2am*11am_set_meth*);
-        *(.text.*8opendm403dmm2am*11am_set_zero*);
-        *(.text.*8opendm403dmm2am*7am_zero*);
-        *(.text.*8opendm403dmm2am*7am_stat*);
-        *(.text.*8opendm403dmm2am*7am_mode*);
-        *(.text.*8opendm403dmm2am*6am_row*);
-        *(.text.*8opendm403dmm2am*6am_ref*);
-        *(.text.*8opendm403dmm2am*11am_cal_step*);
         *(.text.*8opendm408sentinel*8Sentinel9diag_text*);
         /* The jack check (sentinel.rs JACK CHECK): only while PB1 hits in ohm /
          * continuity / the resistive temperature sensors (a fault), never

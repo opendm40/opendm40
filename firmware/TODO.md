@@ -3617,18 +3617,22 @@ Emulator (emu/):
       **Device 8e5ca2d full set + 9f36bbe confirmation (§10.15): PASS**: 6 V 0 V -0.34..+0.09 mV in 9 of 9
       e8s, gsrc 1 throughout on 6 V, 60 V gsrc 3 every session; e8up, e8, e5, e11, e10, e9 pass. C meets the
       decision rule; A stays the default (owner, next item).
-- [ ] AC+DC: decide the final method (owner, 2026-10-31). Release builds run only the stock method A;
+- [x] AC+DC: decide the final method (owner, 2026-10-31). Release builds run only the stock method A;
       B and C are behind the `acdc-meth` build feature (#196). Either make C the default (item below) and drop
       A's alternation and B, or drop B and C.
-- [ ] Make method C the AC+DC default, after a device check of C on the A / mA / µA ranges with real current
+      **Decided (owner, 2026-11-06): drop B and C**; removed with the feature (acdc-approaches.md §10.0).
+- [x] Make method C the AC+DC default, after a device check of C on the A / mA / µA ranges with real current
       (owner, 2026-10-23). Plan: acdc-approaches.md §10.16 (i8 / i8up e8-style levels per range, imix DC + 50 Hz
       AC, iauto CURR:COUP AUTO, ie5 drift; bench supply + load, a second meter in series as the reference; an
       acdcmeth.py variant driving the supply and the second meter).
-- [ ] C's lag-side creep allowance (CREEP_K 4e-4): the largest lag-side gdis on the device is +16.2 codes
+      **Dropped (owner, 2026-11-06): B and C are removed (acdc-approaches.md §10.0); A stays.**
+- [x] C's lag-side creep allowance (CREEP_K 4e-4): the largest lag-side gdis on the device is +16.2 codes
       against a threshold of 24.6 (9f36bbe). Watch it in later e8s logs (STAT? gdis / bthr); and why the 1 V
       level's lag is ~1/3 of the 3 V level's at the same step is open (§10.14).
-- [ ] C's second reference now comes ~5-8 s after a level change (was ~1.5 s): e8s's 4 s levels may end before
+      **Dropped (owner, 2026-11-06): B and C are removed (acdc-approaches.md §10.0); A stays.**
+- [x] C's second reference now comes ~5-8 s after a level change (was ~1.5 s): e8s's 4 s levels may end before
       it. If the device tail is shorter than the model's, lower SLOPE_MIN (48 results) after the tc6 trace.
+      **Dropped (owner, 2026-11-06): B and C are removed (acdc-approaches.md §10.0); A stays.**
 - [x] The first V tap after `CONF:VOLT:DC` on the 40 Hz square is sometimes lost (C 5 of 6, A 1 of 3; not at 1 V
       DC): device-check doc "80d5b01" 3. Not chased.
       **Cause found (device f6c6e05, device-check doc "f6c6e05" 6):** the tap lands on the grey hint toast "AC
@@ -3641,8 +3645,9 @@ Emulator (emu/):
       touch, swipe or side key dismisses it and goes on to the page; the confirmations stay modal. Device
       c8c2f02 (device-check doc "ad97fd7 / c8c2f02 / a8048ba" 4): toast up, V tap outside it 10 of 10 advanced
       the coupling (and the toast went); a tap on the toast 10 of 10 dismissed it, coupling unchanged.
-- [ ] Method C's internal zero on 60 V (the ~15 codes of ac1e852): repeatability over entries / power cycles,
+- [x] Method C's internal zero on 60 V (the ~15 codes of ac1e852): repeatability over entries / power cycles,
       and 600 / 1000 V (needs > 30 V), if C's first-entry gain is ever to be corrected by a constant.
+      **Dropped (owner, 2026-11-06): B and C are removed (acdc-approaches.md §10.0); A stays.**
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
       3 V reference moved -160 ppm during e5). **Calibrator, not the meter** (device-check doc "DC V at the
       calibrator's 1 V: meter or calibrator?"): no opendm40 state in the DC V path, the factory record unchanged,
