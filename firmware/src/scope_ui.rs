@@ -1392,9 +1392,10 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
         // On CH1's marker (both at the centre by default): beside it, so
         // both show and both can be grabbed.
         let mut mk = level(off_row(m.ch2_pos), FAM_2, m.sel_v == CH2_LEVEL, C_CH2);
-        let a = out[0].1;
-        if (mk.y - a.y).abs() < 12 {
-            mk.x = a.x + 13;
+        if let Some(&(_, a)) = out[..n].iter().find(|i| i.0 == 0) {
+            if (mk.y - a.y).abs() < 12 {
+                mk.x = a.x + 13;
+            }
         }
         out[n] = (CH2_LEVEL, mk);
         n += 1;
