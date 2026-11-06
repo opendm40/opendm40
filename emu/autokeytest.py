@@ -5,7 +5,7 @@ next higher manual range (the MF page's order, 60 mV / 60 ohm included),
 the highest wrapping to the lowest; held 1 s it goes back to the default
 autorange (V: AUTO+). HOLD is released, AutoHold is kept.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/autokeytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Keys through DBG:KEY 2 (a click) and DBG:KEY 2,1200 (held 1.2 s); ranges

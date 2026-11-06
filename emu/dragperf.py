@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """opendm40 scope: trigger-level drag responsiveness in the emulator.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/dragperf.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port N]
 
 The scope page runs on a 90 Hz square (the owner's calibrator case). Real
