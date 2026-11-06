@@ -204,12 +204,9 @@ def eject(v):
     v.idle(7000)
 
 
-def apply(v, before, after, order='asc', seed=1, fat_after_ms=0, split=None):
-    """Write after's sector diff (vs before) through vserve. As
-    vwrite_test.apply: the zero sectors of newly allocated clusters too.
-    `fat_after_ms`: the FAT sectors that long after the rest (a lazy
-    write-back); `split` = (k, fn): fn() after the k-th write. Every
-    write must be accepted."""
+def writes(before, after):
+    """after's sector diff vs before, as a host writes it: with the zero
+    sectors of the clusters it allocated (as vwrite_test.apply)."""
     ws = diff(before, after)
     g = Geo(before)
     fa, fb = g.fat(), Geo(after).fat()
@@ -229,6 +226,16 @@ def apply(v, before, after, order='asc', seed=1, fat_after_ms=0, split=None):
                 f.seek(lba * SECTOR)
                 f.write(z)
     ws.sort()
+    return ws
+
+
+def apply(v, before, after, order='asc', seed=1, fat_after_ms=0, split=None):
+    """Write after's sector diff (vs before) through vserve (`writes`).
+    `fat_after_ms`: the FAT sectors that long after the rest (a lazy
+    write-back); `split` = (k, fn): fn() after the k-th write. Every
+    write must be accepted."""
+    ws = writes(before, after)
+    g = Geo(before)
     kind = lambda w: g.kind(w[0])
     if order == 'desc':
         ws = ws[::-1]
@@ -326,7 +333,7 @@ apply(v, h0, h1)          # the entry
 v.idle(2000)
 v.lock(False)             # FASTFAT's Allow after its first metadata flush (inferred)
 g = Geo(base)
-d = diff(h1, host)
+d = writes(h1, host)
 data = [w for w in d if g.kind(w[0]) == 'data']
 fat = [w for w in d if g.kind(w[0]) == 'fat']
 root = [w for w in d if g.kind(w[0]) == 'root']
