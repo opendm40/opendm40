@@ -835,7 +835,7 @@ impl App {
             };
             if l.note != k {
                 l.note = k;
-                let t = ["", "Stopped", "Waiting for a signal (no swing)", "Measuring the bit rate", "No frames yet", "Bit rate too high for 1.25 MS/s"][k as usize];
+                let t = ["", crate::tr!("Stopped"), "Waiting for a signal (no swing)", "Measuring the bit rate", "No frames yet", "Bit rate too high for 1.25 MS/s"][k as usize];
                 ul::row(0, Some(&ul::Row { time: "", text: t, ascii: "", status: "", fg: 0 }));
                 l.shown[0] = 0;
                 for i in 1..ul::ROWS {
@@ -976,6 +976,7 @@ impl App {
             inv: s.cfg.inverted,
             battery: self.power.bars.min(5),
             charging: self.power.charging(),
+            bat_low: self.power.low.low(),
         };
         let l = lg();
         for k in 0..ul::TOP_ITEMS {

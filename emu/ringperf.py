@@ -2,7 +2,7 @@
 """opendm40 scope: main-loop cost of the coded ring (firmware/src/cring.rs)
 at a slow timebase, and the stopped record's redraw, in the emulator.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/ringperf.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--scope noise,1,8]
 
 At --mips 110 (the device's speed per instruction, emu/README.md) the

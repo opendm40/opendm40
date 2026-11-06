@@ -4,7 +4,7 @@ note_host_activity, DBG:IDLE): a SCPI command over USB or Bluetooth and a
 USB disk READ / WRITE count as activity for the automatic power-off; the
 idle dim counts touches and keys only.
 
-  cd firmware && ./build.sh
+  cd firmware && ./build.sh --dev
   emu/idletest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 DBG:IDLE 20000 sets a 20 s power-off time (instead of the Shutdown setting,

@@ -139,9 +139,6 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
-        /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
-         * loop and asm are `.text.a2.*` (zero-wait region A2). */
-        *(.text.*8opendm408memprobe*);
         /* The decoder's frame log: a frame's waveform, drawn on a tap, the
          * top bar / counters, the page draw, the setup popup and the
          * view's touches (app_log.rs `.text.log_cold`; ui_log.rs's panel
@@ -274,6 +271,9 @@ SECTIONS
          * 1000;...'), so they stay in B. */
         *(.text.*8opendm407new_app*);
         *(.text.*8opendm403app*3App11fuse_dialog*);
+        /* The low-battery messages (once per level; never during a stream). */
+        *(.text.*8opendm403app*3App11low_battery*);
+        *(.text.*8opendm403app*3App15low_battery_off*);
         *(.text.*8opendm403app*3App11limits_page*);
         *(.text.*8opendm403app*3App7kp_open*);
         *(.text.*8opendm403app9app_power*3App13pw_open_entry*);
@@ -379,17 +379,6 @@ SECTIONS
         *(.text.*8opendm403dmm*3Dmm14acdc_diag_text*);
         *(.text.*8opendm403dmm*3Dmm8reg_text*);
         *(.text.*8opendm403dmm*3Dmm12precondition*);
-        /* acdcm.rs: the AC+DC methods' entry / range-change / SCPI steps
-           (poll_am, the per-result path, stays in region B) */
-        *(.text.*8opendm403dmm2am*8am_enter*);
-        *(.text.*8opendm403dmm2am*11am_set_meth*);
-        *(.text.*8opendm403dmm2am*11am_set_zero*);
-        *(.text.*8opendm403dmm2am*7am_zero*);
-        *(.text.*8opendm403dmm2am*7am_stat*);
-        *(.text.*8opendm403dmm2am*7am_mode*);
-        *(.text.*8opendm403dmm2am*6am_row*);
-        *(.text.*8opendm403dmm2am*6am_ref*);
-        *(.text.*8opendm403dmm2am*11am_cal_step*);
         *(.text.*8opendm408sentinel*8Sentinel9diag_text*);
         /* The jack check (sentinel.rs JACK CHECK): only while PB1 hits in ohm /
          * continuity / the resistive temperature sensors (a fault), never
@@ -439,28 +428,18 @@ SECTIONS
         *(.text.*8opendm403app*3App9kp_labels*);
         *(.text.*8opendm403app*3App8lim_unit*);
         /* The generator page's boxes and its 1 s status (Gen / Keypad page
-         * only: no stream runs there) and vwrite's temp-file purge (the
-         * first pass after a start, a host write session's purge). */
+         * only: no stream runs there). */
         *(.text.*8opendm402ui7gen_box*);
         *(.text.*8opendm402ui10gen_status*);
         *(.text.*8opendm402ui13gen_box_frame*);
         *(.text.*8opendm402ui16gen_box_value_bg*);
         *(.text.*8opendm402ui12gen_wave_box*);
         *(.text.*8opendm402ui12gen_box_note*);
-        *(.text.*8opendm406vwrite9purge_tmp*);
-        /* ... and its post-write steps (a host wrote a file on the volume;
-         * MSC writes are refused while a logger session runs): the update
-         * file's park / check / finalize / commit. */
-        *(.text.*8opendm406vwrite4park*);
-        *(.text.*8opendm406vwrite5check*);
-        *(.text.*8opendm406vwrite8finalize*);
-        *(.text.*8opendm406vwrite6commit*);
         /* Region B audit #10 (memory plan P1, 2026-11-01): functions that
          * tools/region-profile/rprof.py classes `c-only` (reached only
          * through region C code or start-up), >= ~40 B. Their callers:
-         * the generator page (gen_values: gen_preview, gen_box_value), a
-         * host write on the volume (VDisk::write: vwrite stage /
-         * ours_live / dates_only / host_cluster), the recording start
+         * the generator page (gen_values: gen_preview, gen_box_value), the
+         * recording start
          * (App::rec_start: csvlog ascii / W::a, the catalog's list_on
          * closure), the range / limits / keypad / settings / power entry /
          * inrush pages (ok_and_limits_buttons, kp_unit_text,
@@ -474,10 +453,6 @@ SECTIONS
          * same instance would land in slow flash). */
         *(.text.*8opendm402ui11gen_preview*);
         *(.text.*8opendm402ui13gen_box_value*);
-        *(.text.*8opendm406vwrite5stage*);
-        *(.text.*8opendm406vwrite9ours_live*);
-        *(.text.*8opendm406vwrite10dates_only*);
-        *(.text.*8opendm406vwrite12host_cluster*);
         *(.text.*8opendm406csvlog5ascii*);
         *(.text.*8opendm406csvlog*1W1a);
         *(.text.*8opendm406csvlog7list_on0*);
@@ -509,6 +484,10 @@ SECTIONS
         __cold_end = .;
     } > FLASH_C
 
+    /* Feature memprobe (DBG:PEEK? etc., debug builds only) is not claimed
+     * by .cold: its ~3 KB put region C under the 4 KiB floor (2026-11-06,
+     * C 7 KB free in the default build). Its timing loop and asm are
+     * `.text.a2.*` (zero-wait region A2). */
     .text ORIGIN(FLASH_B) :
     {
         __stext = .;
