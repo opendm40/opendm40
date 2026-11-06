@@ -781,6 +781,8 @@ to a high voltage applied while the meter sat on the mV range.
   is above the range (or the function's limit). The bargraph turns red with
   an **OL** mark. In the [combined view](#combined-view)'s meter strip,
   **Overflow** is in the small text right of the reading.
+- Above **Overflow**, the range that overflowed: **>60V**, **>600MΩ**
+  (not in temperature and Hz).
 - A small value (for example the diode's Ω value) that is over its limit
   shows **0L** with a small **Overflow** before it.
 - An overflow is never stored in MIN/MAX/AVG, the chart or the history.
@@ -2411,7 +2413,7 @@ goes back to the main menu.
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | On battery: switches the meter off after this time without input. Never with USB power. |
+| **Shutdown** | 1, 5, 10, 30 min, 1 to 10 hours, Never | 30 min | On battery: switches the meter off after this time without input. Never with USB power. |
 | **Analog power** | Auto (per view), Both always | Auto (per view) | [Analog power](#analog-power). |
 | **Mode Remember** | OFF, ON | OFF | ON: after switching off and on, the multimeter and the scope continue as you left them ([What is kept](#what-is-kept-when-you-switch-off)). |
 
