@@ -521,7 +521,7 @@ const OSR_EARLY: u8 = 0x15;
 
 /// UF-21: text for the UI when the mV-first AUTO is selected for V
 /// (`Dmm::mv_auto_warn`).
-pub const MV_AUTO_WARN: &str = "AUTO starts on mV: AUTO+ is safer";
+pub const MV_AUTO_WARN: &str = crate::tr!("AUTO starts on mV: AUTO+ is safer");
 
 /// Code window of an AD1 range (FR-05 table): (window, restart threshold in
 /// codes, extra digit possible); None = no averaging (avg_n 0). Thresholds

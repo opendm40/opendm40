@@ -133,6 +133,16 @@ A2](native-boot.md#region-a2-2026-10-22)). Moving another blob to A2 is one
 name in `A2_FONTS`; the link fails if A2 overlaps the marker. No font may go
 to region C (not zero-wait): labels are drawn while the AD2 stream ISR runs.
 
+## 3a. Localized images
+
+[i18n/](../i18n/README.md), [`src/lang.rs`](../src/lang.rs): one language per
+image (features `zh`, `ru`, `it`, `fr`), resolved at build time (`tr!`); none in
+the default image.
+Chinese: 14 px 1 bpp glyphs in one set for every font of 15 px and up, each hanzi
+stored as U+0400 + its index. Russian: letters shaped like a Latin one use the
+stock glyph (and one byte of text); the others per font, sized by `fit_size` in
+[`mklang_x.py`](../tools/mklang_x.py). Italian, French: stock letter plus accent.
+
 ## 4. Options not taken
 
 | option | saves | why not |

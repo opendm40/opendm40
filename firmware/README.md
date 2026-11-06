@@ -10,6 +10,7 @@ in the [documentation index](../docs/README.md). Paths below are relative to
 ```
 ./build.sh                    # release image -> opendm40.bin + dm40_opendm40_v<version>.bin
 ./build.sh --dev              # developer image -> opendm40.bin + dm40_opendm40_v<version>-dev.bin
+tools/build-langs.sh          # -> dm40_opendm40_v<version>-{zh,ru,it,fr}.bin (i18n/README.md)
 tools/reload.sh               # build (--dev), upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
 tools/scpi-doc-check/run.sh   # SCPI parser vs docs/manual/scpi-reference.md

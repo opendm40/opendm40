@@ -210,7 +210,7 @@ pub const TAP_OFF: u8 = 2;
 /// The default tap-step mode (the owner's corner zones). Persisted XOR this
 /// value, so a record without the field restores it.
 pub const TAP_DEFAULT: u8 = TAP_CORNERS;
-pub const TAP_NAMES: [&str; 3] = ["Halves (stock)", "Corners", "Off"];
+pub const TAP_NAMES: [&str; 3] = [crate::tr!("Halves (stock)"), crate::tr!("Corners"), crate::tr!("Off")];
 
 /// Persisted tap-step code (2 bits): the mode XOR TAP_DEFAULT, so a record
 /// written before the setting existed (0) restores the default.
@@ -3039,13 +3039,13 @@ impl Arm {
 // math engine). Drawn by composition like the page; AA off.
 
 pub const MEAS_NAMES: [&str; 20] =
-    ["Freq", "+Duty", "-Duty", "+Wid", "-Wid", "+Pul", "-Pul", "X2-1", "Xf", "Cycl", "Vp-p", "Vrms", "Vmax", "Vmin", "Vtop", "Vbas", "Vamp", "Y2-1", "Vcrm", "Vavg"];
+    [crate::tr!("Freq"), "+Duty", "-Duty", "+Wid", "-Wid", "+Pul", "-Pul", "X2-1", "Xf", "Cycl", "Vp-p", "Vrms", "Vmax", "Vmin", "Vtop", "Vbas", "Vamp", "Y2-1", "Vcrm", "Vavg"];
 pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "10X", "20X", "50X", "100X", "200X", "500X", "1000X"];
 /// FFT windows (stock five, "Hanming" spelled Hamming, + flat-top; the same
 /// order as fft::WIN_NAMES).
 pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
 /// The MF popup's tabs (stock four, opendm40 Decode).
-pub const MF_TABS: [&str; 5] = ["Measure", "Display", "Trigger", "Settings", "Decode"];
+pub const MF_TABS: [&str; 5] = [crate::tr!("Measure"), crate::tr!("Display"), crate::tr!("Trigger"), crate::tr!("Settings"), crate::tr!("Decode")];
 /// Tab pitch (stock four tabs in 401 px: 101; opendm40 five: 93).
 const MF_TAB_W: i16 = 93;
 /// The MF popup's box (opendm40, owner 2026-11-06): from x 13 as stock
@@ -3318,25 +3318,25 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[v.meas[k] as usize % 20], C_YELLOW);
             }
             // Clear and Default under the grid's last two columns.
-            rbox_text(rect(MC_X + MC_P * 5, 176, MC_W, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
-            rbox_text(rect(MC_X + MC_P * 6, 176, MC_W, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, "Default", C_WHITE);
+            rbox_text(rect(MC_X + MC_P * 5, 176, MC_W, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, crate::tr!("Clear"), C_WHITE);
+            rbox_text(rect(MC_X + MC_P * 6, 176, MC_W, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, crate::tr!("Default"), C_WHITE);
         }
         1 => {
             fill_c(rect(MF_IX, 61, MF_IW, 100), pc, C_POP_BG);
-            for (r, t) in [(rect(24, 61, 189, 20), "Roll:"), (rect(24, 105, 189, 20), "Persist:"), (rect(MF_C2, 61, MF_C2_W, 20), "Brightness:"), (rect(MF_C2, 105, MF_C2_W, 20), "Grid intensity:")] {
+            for (r, t) in [(rect(24, 61, 189, 20), crate::tr!("Roll:")), (rect(24, 105, 189, 20), crate::tr!("Persist:")), (rect(MF_C2, 61, MF_C2_W, 20), crate::tr!("Brightness:")), (rect(MF_C2, 105, MF_C2_W, 20), crate::tr!("Grid intensity:"))] {
                 fill_text(r, pc, C_POP_BG, sf::SC_F16, r, t, C_FILL, 1, 0);
             }
-            option_list(rect(24, 81, 88, 24), pc, &["On", "Off"], 44, if v.roll { 0 } else { 1 });
-            option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF"], 44, v.persist as usize);
+            option_list(rect(24, 81, 88, 24), pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.roll { 0 } else { 1 });
+            option_list(rect(24, 125, 176, 24), pc, &[crate::tr!("OFF"), "MIN", "1S", "INF"], 44, v.persist as usize);
             mf_display_values(v);
             // opendm40: the computed generator trace.
             fill_c(rect(MF_IX, 161, MF_IW, 50), pc, C_POP_BG);
             fill_text(GT_LABEL, pc, C_POP_BG, sf::SC_F16, GT_LABEL, "GEN trace:", C_FILL, 1, 0);
-            option_list(GT_LIST, pc, &["On", "Off"], 44, if v.gen_trace { 0 } else { 1 });
+            option_list(GT_LIST, pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.gen_trace { 0 } else { 1 });
             // opendm40: the DMM as CH2 and its V/div.
             fill_c(rect(MF_IX, 211, MF_IW, 49), pc, C_POP_BG);
             fill_text(C2_LABEL, pc, C_POP_BG, sf::SC_F16, C2_LABEL, "CH2 (DMM):", C_FILL, 1, 0);
-            option_list(C2_LIST, pc, &["On", "Off"], 44, if v.ch2_on { 0 } else { 1 });
+            option_list(C2_LIST, pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.ch2_on { 0 } else { 1 });
             if v.ch2_on {
                 rbox_text(C2_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
                 rbox_text(C2_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
@@ -3345,17 +3345,17 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
         }
         2 => {
             fill_c(rect(MF_IX, 61, MF_IW, 55), pc, C_POP_BG);
-            fill_text(rect(24, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(24, 61, 189, 20), "Edge:", C_FILL, 1, 0);
-            fill_text(TM_LABEL, pc, C_POP_BG, sf::SC_F16, TM_LABEL, "Mode:", C_FILL, 1, 0);
-            option_list(rect(24, 81, 120, 24), pc, &["Rising", "Falling"], 60, if v.rising { 0 } else { 1 });
-            option_list(TM_LIST, pc, &["Auto", "Normal", "Single"], 60, v.mode as usize);
+            fill_text(rect(24, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(24, 61, 189, 20), crate::tr!("Edge:"), C_FILL, 1, 0);
+            fill_text(TM_LABEL, pc, C_POP_BG, sf::SC_F16, TM_LABEL, crate::tr!("Mode:"), C_FILL, 1, 0);
+            option_list(rect(24, 81, 120, 24), pc, &[crate::tr!("Rising"), crate::tr!("Falling")], 60, if v.rising { 0 } else { 1 });
+            option_list(TM_LIST, pc, &[crate::tr!("Auto"), crate::tr!("Normal"), crate::tr!("Single")], 60, v.mode as usize);
             // opendm40 (UF-13): trigger type and its parameters.
             fill_c(rect(MF_IX, 116, MF_IW, 70), pc, C_POP_BG);
-            fill_text(TT_LABEL, pc, C_POP_BG, sf::SC_F16, TT_LABEL, "Type:", C_FILL, 1, 0);
+            fill_text(TT_LABEL, pc, C_POP_BG, sf::SC_F16, TT_LABEL, crate::tr!("Type:"), C_FILL, 1, 0);
             option_list(TT_LIST, pc, &crate::trigsoft::TYPE_NAMES, 60, v.ttype.min(2) as usize);
             match v.ttype {
                 crate::trigsoft::PULSE => {
-                    fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, "Width:", C_FILL, 1, 0);
+                    fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, crate::tr!("Width:"), C_FILL, 1, 0);
                     option_list(TP_COND, pc, &crate::trigsoft::COND_NAMES, 30, v.pcond.min(2) as usize);
                     rbox_text(TP_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
                     rbox_text(TP_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
@@ -3374,7 +3374,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             }
             // opendm40: the trigger source (the generator computed, edge only).
             fill_c(rect(MF_IX, 186, MF_IW, 50), pc, C_POP_BG);
-            fill_text(TS_LABEL, pc, C_POP_BG, sf::SC_F16, TS_LABEL, "Source:", C_FILL, 1, 0);
+            fill_text(TS_LABEL, pc, C_POP_BG, sf::SC_F16, TS_LABEL, crate::tr!("Source:"), C_FILL, 1, 0);
             option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(1) as usize);
             if v.tsrc == crate::scope::TSRC_GEN {
                 fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0);
@@ -3383,7 +3383,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
         3 => {
             fill_c(rect(MF_IX, 61, MF_IW, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
-            rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
+            rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, crate::tr!("Save CSV"), C_WHITE);
         }
         // opendm40: the protocol decoder (ui_decode.rs).
         _ => dec::page(&v.dec, pc),
@@ -3588,7 +3588,7 @@ fn side_popup(title: &str, tabs: &[&str], tab: u8) {
 
 pub fn draw_ch1(tab: u8, v: &PopVals) {
     let tab = tab.min(2);
-    side_popup("CH1", &["Coupling", "Probe", "Color"], tab);
+    side_popup("CH1", &[crate::tr!("Coupling"), crate::tr!("Probe"), crate::tr!("Color")], tab);
     let pc = rect(SX + 79, 50, 120, 250);
     match tab {
         0 => option_list(rect(SX + 94, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
@@ -3608,7 +3608,7 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
 /// from the current FFT span), Other (window, unit).
 pub fn draw_math(tab: u8, v: &PopVals) {
     let tab = tab.min(3);
-    side_popup("MATH", &["Mode", "Color", "Hz/Div", "Other"], tab);
+    side_popup("MATH", &[crate::tr!("Mode"), crate::tr!("Color"), "Hz/Div", crate::tr!("Other")], tab);
     let pc = rect(SX + 79, 50, 120, 250);
     match tab {
         // Stock: FFT selected unless the mode is ABS (also while math is off).
@@ -3620,10 +3620,10 @@ pub fn draw_math(tab: u8, v: &PopVals) {
         }
         _ => {
             let r = rect(SX + 79, 50, 120, 20);
-            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Window", C_BAR, 8, 0);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, crate::tr!("Window"), C_BAR, 8, 0);
             spinner(rect(SX + 84, 70, 110, 150), pc, &WINDOWS, v.fft_win.min(5) as usize, false);
             let r = rect(SX + 79, 224, 120, 24);
-            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "FFT Unit", C_BAR, 8, 0);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, crate::tr!("FFT Unit"), C_BAR, 8, 0);
             option_list(rect(SX + 94, 250, 90, 24), pc, &["dB", "Vrms"], 44, v.fft_vrms as usize);
         }
     }
@@ -3834,7 +3834,7 @@ pub fn tb_scroll(cur: u8, acc: i32) -> (u8, i32) {
 
 /// The "Sampling" box (RUN refused during AUTO-set).
 pub fn sampling() {
-    rbox_text(rect(190, 150, 100, 20), rect(0, 0, 480, 320), 8, C_PURPLE, C_FILL, sf::SC_F16, "Sampling", C_WHITE);
+    rbox_text(rect(190, 150, 100, 20), rect(0, 0, 480, 320), 8, C_PURPLE, C_FILL, sf::SC_F16, crate::tr!("Sampling"), C_WHITE);
 }
 
 // ------------------------------------------------------------------ meter strip

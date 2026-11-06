@@ -72,6 +72,8 @@ To install opendm40 on a meter that runs the stock firmware:
    [release](https://github.com/opendm40/opendm40/releases/latest). You can
    also build it from the source
    ([firmware/README.md, Build](../../firmware/README.md#build)).
+   The files ending in `-zh`, `-ru`, `-it` and `-fr` show the screens in
+   Chinese, Russian, Italian and French.
 2. On the meter: **Settings > Other Settings > USB Connect**. Connect the
    meter to the computer with a USB cable. A USB disk appears.
 3. Copy the file onto that disk (any `dm40*.bin` name works). Keep it the

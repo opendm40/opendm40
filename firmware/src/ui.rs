@@ -1221,7 +1221,8 @@ const CAP_DIS_RECT: sf::Rect = rect(8, 36, 223, 30);
 /// there), else only the value part.
 #[inline(never)] // .cold (link-native.x): during a discharge only
 pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
-    const PRE: &str = "Discharging...";
+    // F14: English in Chinese (too small), Russian and French (glyphs not in F14).
+    const PRE: &str = if cfg!(any(feature = "zh", feature = "ru", feature = "fr")) { "Discharging..." } else { crate::tr!("Discharging...") };
     let b = CAP_DIS_RECT;
     // (The value from a word space after the prefix.)
     let w = sf::text_width(sf::F14, PRE, 1) + 10;
@@ -1444,6 +1445,7 @@ fn auto_cpl_label() {
 pub(crate) fn lim_badge(v: u8) {
     let r = rect(403, 72 + main_dy(), 31, 17);
     let (t, bg) = match v {
+        // English in every image: F14 is too small for Chinese.
         crate::meter::V_PASS => ("OK", 0x04A9),
         crate::meter::V_HI => ("HI", 0xF800),
         crate::meter::V_LO => ("LO", 0xF800),
@@ -1585,10 +1587,10 @@ fn cpl_rect(i: usize) -> sf::Rect {
 #[inline(never)] // .cold (link-native.x): the MF page, drawn on a tap
 pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bool)>) {
     let title = match b {
-        Button::Volt => "Voltage Settings",
-        Button::Amp => "Current Settings",
-        Button::Ohm => "Resistor Settings",
-        _ => "Capacitance Settings",
+        Button::Volt => crate::tr!("Voltage Settings"),
+        Button::Amp => crate::tr!("Current Settings"),
+        Button::Ohm => crate::tr!("Resistor Settings"),
+        _ => crate::tr!("Capacitance Settings"),
     };
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
@@ -1634,7 +1636,7 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         // view's "Wave" in ad2-isr builds).
         let r = FUSE_BTN;
         sf::rbox(r, 6, 0x2966, BG);
-        sf::glyphs(sf::TEXT22, r, "Fuse check", STATUS_FG, 0x2966, 8, 0);
+        sf::glyphs(sf::TEXT22, r, crate::tr!("Fuse check"), STATUS_FG, 0x2966, 8, 0);
     }
 }
 
@@ -1645,7 +1647,7 @@ pub const INRUSH_BTN: sf::Rect = rect(319, 141, 150, 36);
 
 pub fn inrush_button() {
     sf::rbox(INRUSH_BTN, 6, 0x2966, BG);
-    sf::glyphs(sf::TEXT22, INRUSH_BTN, "Inrush", STATUS_FG, 0x2966, 8, 0);
+    sf::glyphs(sf::TEXT22, INRUSH_BTN, crate::tr!("Inrush"), STATUS_FG, 0x2966, 8, 0);
 }
 
 /// The Inrush button was hit (the gaps to its neighbours split as theirs).
@@ -1673,12 +1675,12 @@ pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32])
         _ => "",
     };
     match (stage, res) {
-        (0, _) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Lead from V/ohm jack to A", "nothing else connected", Some("Cancel"), Some("Start")),
-        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Measuring ...", "expect ~48 \u{3a9}", Some("Cancel"), None),
-        (_, F::Ok(_)) => crate::dialog::fuse_check("Fuse OK", crate::dialog::FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
-        (_, F::Open) => crate::dialog::fuse_check("Fuse open", crate::dialog::FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
-        (_, F::Odd(_)) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, ohm, "One lead V/ohm to A only", Some("Again"), Some("OK")),
-        (_, F::NoReading) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, "No ohm reading", "One lead V/ohm to A only", Some("Again"), Some("OK")),
+        (0, _) => crate::dialog::fuse_check(crate::tr!("Fuse check"), crate::dialog::TITLE_BG, crate::tr!("Lead from V/ohm jack to A"), crate::tr!("nothing else connected"), Some(crate::tr!("Cancel")), Some(crate::tr!("Start"))),
+        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check(crate::tr!("Fuse check"), crate::dialog::TITLE_BG, crate::tr!("Measuring ..."), crate::tr!("expect ~48 \u{3a9}"), Some(crate::tr!("Cancel")), None),
+        (_, F::Ok(_)) => crate::dialog::fuse_check(crate::tr!("Fuse OK"), crate::dialog::FUSE_OK_BG, ohm, crate::tr!("A input path intact"), Some(crate::tr!("Again")), Some(crate::tr!("OK"))),
+        (_, F::Open) => crate::dialog::fuse_check(crate::tr!("Fuse open"), crate::dialog::FUSE_BAD_BG, crate::tr!("OL: no path from V to A"), crate::tr!("Replace: 10 A ceramic fuse"), Some(crate::tr!("Again")), Some(crate::tr!("OK"))),
+        (_, F::Odd(_)) => crate::dialog::fuse_check(crate::tr!("Check leads"), crate::dialog::FUSE_ODD_BG, ohm, crate::tr!("One lead V/ohm to A only"), Some(crate::tr!("Again")), Some(crate::tr!("OK"))),
+        (_, F::NoReading) => crate::dialog::fuse_check(crate::tr!("Check leads"), crate::dialog::FUSE_ODD_BG, crate::tr!("No ohm reading"), crate::tr!("One lead V/ohm to A only"), Some(crate::tr!("Again")), Some(crate::tr!("OK"))),
     }
 }
 
@@ -1713,7 +1715,7 @@ fn bottom_col(x: u16, y: u16) -> Option<usize> {
 /// `record_button`.
 #[inline(never)]
 fn ok_and_limits_buttons() {
-    for (c, t) in [(0, "Limits"), (3, "OK")] {
+    for (c, t) in [(0, crate::tr!("Limits")), (3, crate::tr!("OK"))] {
         let r = bottom_rect(c);
         sf::rbox(r, 6, 0x2966, BG);
         sf::glyphs(sf::TEXT22, r, t, STATUS_FG, 0x2966, 8, 0);
@@ -1742,7 +1744,7 @@ pub fn record_button(r: sf::Rect, pressed: bool) {
         0x2966
     };
     sf::rbox(r, 6, c, BG);
-    sf::glyphs(sf::TEXT22, r, "Record", STATUS_FG, c, 8, 0);
+    sf::glyphs(sf::TEXT22, r, crate::tr!("Record"), STATUS_FG, c, 8, 0);
 }
 
 /// "Wave" on the V / A range pages (the DMM wave view, app_wave.rs; builds
@@ -1756,7 +1758,7 @@ pub const FUSE_BTN: sf::Rect = rect(162, 141, 150, 36);
 
 pub fn wave_button() {
     sf::rbox(WAVE_BTN, 6, 0x2966, BG);
-    sf::glyphs(sf::TEXT22, WAVE_BTN, "Wave", STATUS_FG, 0x2966, 8, 0);
+    sf::glyphs(sf::TEXT22, WAVE_BTN, crate::tr!("Wave"), STATUS_FG, 0x2966, 8, 0);
 }
 
 /// The Wave button was hit (the gaps to its neighbours split as theirs).
@@ -1797,8 +1799,8 @@ pub fn range_press_rect(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option
 fn range_press_item(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<(sf::Rect, Option<(&'static str, bool)>)> {
     let items = range_items(b);
     let (r, name, selected) = match t {
-        RP_WAVE => (WAVE_BTN, "Wave", false),
-        RP_INRUSH => (INRUSH_BTN, "Inrush", false),
+        RP_WAVE => (WAVE_BTN, crate::tr!("Wave"), false),
+        RP_INRUSH => (INRUSH_BTN, crate::tr!("Inrush"), false),
         i if (i as usize) < items.len() => (range_rect(i as usize), items[i as usize].0, sel == Some(i as usize)),
         RP_ERR.. => match (t - RP_ERR, b) {
             (k @ 0..=1, Button::Ohm) => (rect([8, 244][k as usize], 182, 228, 38), OHM_VARS[k as usize], k == sub),
@@ -1810,10 +1812,10 @@ fn range_press_item(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<(sf
                 };
                 (cpl_rect(i as usize), CPL_NAMES[i as usize], i == sub)
             }
-            (2, _) => (bottom_rect(3), "OK", false),
-            (4, _) => (bottom_rect(0), "Limits", false),
+            (2, _) => (bottom_rect(3), crate::tr!("OK"), false),
+            (4, _) => (bottom_rect(0), crate::tr!("Limits"), false),
             (7, _) => return Some((bottom_rect(1), None)),
-            (5, Button::Amp) => (FUSE_BTN, "Fuse check", false),
+            (5, Button::Amp) => (FUSE_BTN, crate::tr!("Fuse check"), false),
             _ => return None,
         },
         _ => return None,
@@ -1949,8 +1951,8 @@ pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
             let v = crate::dmm::format(&mut t, p.beta, 0);
             join(&mut b, &["Beta  ", v, " K"])
         }
-        TK_LIMITS => "Limits",
-        _ => "OK",
+        TK_LIMITS => crate::tr!("Limits"),
+        _ => crate::tr!("OK"),
     };
     if code == TK_OFFS {
         // The value field: darker than the keys, the value in orange.
@@ -1966,8 +1968,8 @@ pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
 pub fn temp_page(p: &TempPage) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Temperature Settings", STATUS_FG, 0x2966, 8, 0);
-    sf::glyphs(sf::TEXT22, rect(8, T_ROW_Y, 118, T_ROW_H), "Offset", STATUS_FG, BG, 1, 0);
+    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), crate::tr!("Temperature Settings"), STATUS_FG, 0x2966, 8, 0);
+    sf::glyphs(sf::TEXT22, rect(8, T_ROW_Y, 118, T_ROW_H), crate::tr!("Offset"), STATUS_FG, BG, 1, 0);
     for code in T_CODES {
         temp_key(p, code, false);
     }
@@ -2426,7 +2428,9 @@ pub fn wave_chip() {
     }
     #[cfg(test)]
     crate::probe::end();
-    sf::glyphs(sf::F14, rect(r.x + 26, r.y + 1, r.w - 28, r.h), "Wave", STATUS_FG, BTN, 1, 1);
+    // English in Chinese and Russian (F14: too small for Chinese, too narrow for Russian).
+    let t = if cfg!(any(feature = "zh", feature = "ru")) { "Wave" } else { crate::tr!("Wave") };
+    sf::glyphs(sf::F14, rect(r.x + 26, r.y + 1, r.w - 28, r.h), t, STATUS_FG, BTN, 1, 1);
 }
 
 /// A tap on the Wave chip: the chart's corner x 80..159, y 226..272, larger
@@ -2687,7 +2691,7 @@ const G_DIM: Color = 0x7BEF;
 /// value (LETTERS, right-aligned to 411) and its unit (from 421) below.
 pub const GEN_BOX_Y: [i16; 4] = [40, 110, 180, 250];
 const GEN_BOX_H: i16 = 66;
-const GEN_NAMES: [&str; 4] = ["Frequency", "Vpp", "Offset", "Duty"];
+const GEN_NAMES: [&str; 4] = [crate::tr!("Frequency"), "Vpp", crate::tr!("Offset"), crate::tr!("Duty")];
 
 /// The wave drop-down box (4, 40, 239, 42) under a tap.
 pub fn gen_wave_hit(x: u16, y: u16) -> bool {
@@ -2980,14 +2984,14 @@ pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
             (r(420, 146, 56, 40), "H", b'H'), (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'),
             (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "k", b'K'), (r(228, 234, 60, 40), "7", b'7'),
             (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'), (r(420, 234, 56, 40), "M", b'M'),
-            (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), "<", b'<'), (r(417, 277, 59, 40), "OK", b'='),
+            (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), "<", b'<'), (r(417, 277, 59, 40), crate::tr!("OK"), b'='),
         ];
     const NUM: [Key; 15] = [
             (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
             (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'), (r(356, 190, 60, 40), "6", b'6'),
             (r(228, 234, 60, 40), "7", b'7'), (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'),
             (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), ".", b'.'), (r(417, 146, 59, 84), "<", b'<'),
-            (r(417, 234, 59, 83), "OK", b'='), (r(0, 0, 0, 0), "", 0), (r(0, 0, 0, 0), "", 0),
+            (r(417, 234, 59, 83), crate::tr!("OK"), b'='), (r(0, 0, 0, 0), "", 0), (r(0, 0, 0, 0), "", 0),
         ];
     // NUM with the wide '.' split into '.' and "+/-".
     const SIGNED: [Key; 15] = [
@@ -2995,7 +2999,7 @@ pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
             (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'), (r(356, 190, 60, 40), "6", b'6'),
             (r(228, 234, 60, 40), "7", b'7'), (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'),
             (r(228, 277, 60, 40), "0", b'0'), (r(292, 277, 60, 40), ".", b'.'), (r(417, 146, 59, 84), "<", b'<'),
-            (r(417, 234, 59, 83), "OK", b'='), (r(356, 277, 58, 40), "+/-", b'-'), (r(0, 0, 0, 0), "", 0),
+            (r(417, 234, 59, 83), crate::tr!("OK"), b'='), (r(356, 277, 58, 40), "+/-", b'-'), (r(0, 0, 0, 0), "", 0),
         ];
     match kind {
         KP_FREQ => &FREQ,
@@ -3083,10 +3087,10 @@ const M_ACCENT: Color = 0x04FC;
 const ICONS: sf::Font = sf::Font(0x0805_592C);
 
 pub const TILES: [(i16, i16, &str, u32); 4] = [
-    (46, 52, "Multimeter", 0x20),
-    (244, 52, "Oscilloscope", 0x21),
-    (46, 166, "Signal", 0x22),
-    (244, 166, "Settings", 0x23),
+    (46, 52, crate::tr!("Multimeter"), 0x20),
+    (244, 52, crate::tr!("Oscilloscope"), 0x21),
+    (46, 166, crate::tr!("Signal"), 0x22),
+    (244, 166, crate::tr!("Settings"), 0x23),
 ];
 
 /// Pressed menu tile / row: the stock tile style's second colour
@@ -3113,7 +3117,7 @@ pub fn menu_item(i: usize, combo: &str, pressed: bool) {
         sf::glyphs(sf::TEXT22, rect(x, y + 58, 190, 27), name, STATUS_FG, bg, 8, 0);
     } else if i == 5 {
         // Gallery row above the tiles (FR-16).
-        sf::glyphs(sf::TEXT22, rect(46, 10, 388, 34), "Gallery: screenshots and logs", STATUS_FG, bg, 8, 0);
+        sf::glyphs(sf::TEXT22, rect(46, 10, 388, 34), crate::tr!("Gallery: screenshots and logs"), STATUS_FG, bg, 8, 0);
     } else {
         let mut t = [0u8; 48];
         let pre = b"Combined view: ";
@@ -3208,22 +3212,22 @@ pub const SET_N: usize = 25;
 
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
-    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
-    "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "Help", "Jack alerts",
-    "Danger alarm", "USB disk", "Burden voltage", "Device info", "Touch test", "Accuracy", "Negative ohm",
-    "Mode Remember", "Reset settings",
+    crate::tr!("Dim screen"), crate::tr!("Shutdown"), crate::tr!("Backlight"), crate::tr!("Key/alert volume"), crate::tr!("Bluetooth"), crate::tr!("Start page"), crate::tr!("Analog power"),
+    crate::tr!("DMM rate"), crate::tr!("Smoothing"), crate::tr!("DMM row"), crate::tr!("Temp unit"), crate::tr!("Swipe"), crate::tr!("Press effect"), crate::tr!("Tap step"), crate::tr!("Help"), crate::tr!("Jack alerts"),
+    crate::tr!("Danger alarm"), crate::tr!("USB disk"), crate::tr!("Burden voltage"), crate::tr!("Device info"), crate::tr!("Touch test"), crate::tr!("Accuracy"), crate::tr!("Negative ohm"),
+    crate::tr!("Mode Remember"), crate::tr!("Reset settings"),
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
 /// "Other" as the stock's Other Settings (USB, Bluetooth, Mode Remember
 /// there) with its Device section and our help / touch test pages.
 pub const SET_TABS: [(&str, &[u8]); 6] = [
-    ("Display", &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
-    ("Alerts", &[S_VOLUME, S_ALARM, S_JACK]),
-    ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
-    ("Multimeter", &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
-    ("Scope", &[S_SWIPE, S_PRESS, S_TAP_STEP]),
-    ("Other", &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP, S_RESET]),
+    (crate::tr!("Display"), &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
+    (crate::tr!("Alerts"), &[S_VOLUME, S_ALARM, S_JACK]),
+    (crate::tr!("Power"), &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
+    (crate::tr!("Multimeter"), &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
+    (crate::tr!("Scope"), &[S_SWIPE, S_PRESS, S_TAP_STEP]),
+    (crate::tr!("Other"), &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP, S_RESET]),
 ];
 /// The section of the USB disk row (its value follows the bus), the
 /// Device / touch test / help rows (their pages return to it).
@@ -3243,10 +3247,10 @@ pub fn set_is_stepper(id: u8) -> bool {
 /// one in force differs (a host reads the WP bit when it mounts).
 pub fn usb_disk_name(ro_now: bool, ro_want: bool) -> &'static str {
     match (ro_want, ro_now == ro_want) {
-        (true, true) => "Files live",
-        (false, true) => "PC can edit",
-        (true, false) => "Files live (replug)",
-        (false, false) => "PC can edit (replug)",
+        (true, true) => crate::tr!("Files live"),
+        (false, true) => crate::tr!("PC can edit"),
+        (true, false) => crate::tr!("Files live (replug)"),
+        (false, false) => crate::tr!("PC can edit (replug)"),
     }
 }
 
@@ -3319,13 +3323,13 @@ fn page_title(title: &str) {
     // (two word spaces) to "< Back" starts that far after it instead ("Help
     // 5/7: Record + alerts" ran into it: device check 92fb8fa).
     let w = sf::text_width(sf::TEXT22, title, 0);
-    let back = BAR_X + 3 + sf::text_width(sf::TEXT22, "< Back", 0) + 28;
+    let back = BAR_X + 3 + sf::text_width(sf::TEXT22, crate::tr!("< Back"), 0) + 28;
     if (480 - w) / 2 >= back {
         sf::glyphs(sf::TEXT22, rect(0, 0, 480, PAGE_BAR_H), title, STATUS_FG, 0x2966, 8, 0);
     } else {
         sf::glyphs(sf::TEXT22, rect(back, 0, 476 - back, PAGE_BAR_H), title, STATUS_FG, 0x2966, 1, 0);
     }
-    sf::glyphs(sf::TEXT22, rect(BAR_X + 3, 0, 110, PAGE_BAR_H), "< Back", STATUS_FG, 0x2966, 1, 0);
+    sf::glyphs(sf::TEXT22, rect(BAR_X + 3, 0, 110, PAGE_BAR_H), crate::tr!("< Back"), STATUS_FG, 0x2966, 1, 0);
 }
 
 /// A tap on the title bar is "go back".
@@ -3392,7 +3396,7 @@ pub fn settings(tab: u8, vals: &[&str]) {
     let tab = (tab as usize).min(SET_TABS.len() - 1);
     let only = row_only();
     if only.is_none() {
-        page_title("Settings");
+        page_title(crate::tr!("Settings"));
         lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
     }
     for (i, (name, _)) in SET_TABS.iter().enumerate() {
@@ -3618,26 +3622,26 @@ pub fn list_hit(y: u16, n: usize) -> Option<usize> {
 /// 44 + 8 x 30 + 27 = 311): the way there for continuity, diode and
 /// frequency, which have no range page and so no Record button.
 pub const LIMIT_ROWS: [&str; 9] = [
-    "Auto Hold", "Limits", "Upper limit", "Lower limit", "Upper = reading", "Lower = reading", "Clear limits",
-    "Fail beep", "Record",
+    crate::tr!("Auto Hold"), crate::tr!("Limits"), crate::tr!("Upper limit"), crate::tr!("Lower limit"), crate::tr!("Upper = reading"), crate::tr!("Lower = reading"), crate::tr!("Clear limits"),
+    crate::tr!("Fail beep"), crate::tr!("Record"),
 ];
 
 /// Record page rows (decision 2026-10-22 #1): interval, On change
 /// threshold and duration with -/+ steppers (as Settings 1), the free-time
 /// estimate, Start / Stop.
-pub const RECORD_ROWS: [&str; 5] = ["Interval", "Change", "Duration", "Free", ""];
+pub const RECORD_ROWS: [&str; 5] = [crate::tr!("Interval"), crate::tr!("Change"), crate::tr!("Duration"), crate::tr!("Free"), ""];
 /// Rows with a stepper on the Record page.
 pub const REC_STEP_ROWS: [usize; 3] = [0, 1, 2];
 /// Value texts of csvlog::INTERVALS_S / DURATIONS_S; the last interval,
 /// "Fast", is the fast logger (fastlog.rs: raw AD1 / AD2 samples to
 /// LOGS/FASTnnn.DLG at the LOG:OSR / LOG:SRATe rate; App::rec_fast).
 /// "On change" is csvlog::ON_CHANGE.
-pub const REC_INTERVALS: [&str; 6] = ["Every reading", "1 s", "10 s", "1 min", "On change", "Fast"];
+pub const REC_INTERVALS: [&str; 6] = [crate::tr!("Every reading"), "1 s", "10 s", crate::tr!("1 min"), crate::tr!("On change"), crate::tr!("Fast")];
 /// Index of "Fast" in REC_INTERVALS.
 pub const REC_FAST: usize = 5;
 /// Texts of csvlog::CHANGES (the On change threshold, % of full scale).
 pub const REC_CHANGES: [&str; 3] = ["0.1 %", "1 %", "5 %"];
-pub const REC_DURATIONS: [&str; 5] = ["Until stopped", "10 min", "1 h", "8 h", "24 h"];
+pub const REC_DURATIONS: [&str; 5] = [crate::tr!("Until stopped"), crate::tr!("10 min"), "1 h", "8 h", "24 h"];
 /// Record page row of the Start / Stop button.
 pub const REC_START_ROW: usize = 4;
 
@@ -3647,7 +3651,7 @@ pub const REC_START_ROW: usize = 4;
 /// interval, threshold, duration texts.
 pub fn record_page(vals: [&str; 3], free: &str, recording: bool) {
     let names = RECORD_ROWS;
-    list_page("Record", &names[..4], &["", "", "", free]);
+    list_page(crate::tr!("Record"), &names[..4], &["", "", "", free]);
     for (i, v) in REC_STEP_ROWS.iter().zip(vals) {
         set_stepper(*i, v, REC_STEP_MINUS_X);
     }
@@ -3656,12 +3660,14 @@ pub fn record_page(vals: [&str; 3], free: &str, recording: bool) {
         return;
     }
     let r = set_row(REC_START_ROW);
-    let (t, bg) = if recording { ("Stop recording", 0xF800) } else { ("Start recording", M_ACCENT) };
+    let (t, bg) = if recording { (crate::tr!("Stop recording"), 0xF800) } else { (crate::tr!("Start recording"), M_ACCENT) };
     let bg = if only.is_some_and(|p| p.on) { KEY_PRESSED } else { bg };
     sf::rbox(r, 6, bg, M_BG);
     sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
 }
 
+/// The page's name for DBG:VIEW? (English in every image; on screen:
+/// `view_label`).
 pub fn view_name(v: View) -> &'static str {
     match v {
         View::Dmm => "Multimeter",
@@ -3684,6 +3690,32 @@ pub fn view_name(v: View) -> &'static str {
 
 }
 
+/// The page's name on screen (the main menu's combined-view tile, the Start
+/// page setting): `view_name` in the UI language.
+#[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
+pub fn view_label(v: View) -> &'static str {
+    match v {
+        View::Dmm => crate::tr!("Multimeter"),
+        View::Scope => crate::tr!("Oscilloscope"),
+        View::Gen => crate::tr!("Signal"),
+        View::DmmScope => "DMM + Scope",
+        View::Menu => crate::tr!("Main menu"),
+        View::Settings => crate::tr!("Settings"),
+        View::Range => crate::tr!("Range"),
+        View::Keypad => "Keypad",
+        View::Device => "Device",
+        View::Limits => crate::tr!("Hold & Limits"),
+        View::Record => crate::tr!("Record"),
+        View::Gallery => crate::tr!("Gallery"),
+        View::Help => crate::tr!("Help"),
+        View::Inrush => crate::tr!("Inrush"),
+        View::TouchTest => crate::tr!("Touch test"),
+        View::Decode => "Decode log",
+    }
+}
+#[cfg(not(any(feature = "zh", feature = "ru", feature = "it", feature = "fr")))]
+pub use self::view_name as view_label;
+
 /// On-device help (UF-29: owners have no manual; gestures, resets and limits
 /// were undiscoverable). Pages of (topic, what it does) rows in the settings
 /// list style; a tap below the title bar turns the page, the title bar or
@@ -3695,8 +3727,8 @@ pub const HELP: [(&str, &[(&str, &str)]); 2] = [
         &[
             ("Swipe left / right", "Change view"),
             ("Swipe down (DMM)", "Record on / off"),
-            ("3 fingers down", "Screenshot"),
-            ("2 fingers down", "Power off"),
+            ("3 fingers down", crate::tr!("Screenshot")),
+            ("2 fingers down", crate::tr!("Power off")),
             ("Scope: drag marker", "Move that marker"),
             ("Scope: side drag", "Trigger position"),
             ("Scope: drag up/down", "Selected item"),
@@ -3707,7 +3739,7 @@ pub const HELP: [(&str, &[(&str, &str)]); 2] = [
         &[
             ("MENU", "Menu / back"),
             ("RUN", "Hold; run / stop"),
-            ("AUTO", "Autorange"),
+            ("AUTO", crate::tr!("Autorange")),
             ("MF", "Range / menu"),
             ("Power key twice", "Touch lock"),
         ],
@@ -3746,7 +3778,7 @@ pub fn help_page(page: usize) {
     put(core::str::from_utf8(&nb[..k]).unwrap_or(""));
     put(": ");
     put(topic);
-    page_title(core::str::from_utf8(&t[..n]).unwrap_or("Help"));
+    page_title(core::str::from_utf8(&t[..n]).unwrap_or(crate::tr!("Help")));
     lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
     let next = HELP[(page + 1) % HELP.len()].0;
     let last = ("Tap: next page", next);

@@ -358,7 +358,7 @@ const PROTO_V: &[u8] = &[
     dc::P_DALI,
 ];
 const PROTO_N: &[&str] = &[
-    "Off",
+    crate::tr!("Off"),
     "UART",
     #[cfg(any(feature = "dec-dali", not(target_os = "none")))]
     "DALI",
@@ -386,12 +386,12 @@ pub const SU_TVAL: Rect = rect(MF_STEP[1].0, 197, MF_STEP[1].1, 20);
 pub const SU_TPLUS: Rect = rect(MF_STEP[2].0, 197, MF_STEP[2].1, 20);
 /// The page's labels.
 pub const SU_LABELS: [Rect; 6] = [rect(24, 61, 180, 20), rect(C2, 61, MF_C2_W, 20), rect(24, 105, 180, 20), rect(C2, 105, MF_C2_W, 20), rect(24, 149, 180, 20), rect(C2, 149, MF_C2_W, 20)];
-const SU_TEXTS: [&str; 6] = ["Protocol:", "Mode:", "Format:", "Polarity:", "Baud:", "Threshold:"];
+const SU_TEXTS: [&str; 6] = ["Protocol:", crate::tr!("Mode:"), "Format:", "Polarity:", "Baud:", crate::tr!("Threshold:")];
 /// DALI's page: no Format / Baud (UART only); the fixed bit rate in
 /// Format's place, Threshold on the third row (Auto / Manual left, its
 /// stepper right).
 pub const DL_RATE: Rect = rect(24, 125, 176, 24);
-const DL_TEXTS: [&str; 6] = ["Protocol:", "Mode:", "Bit rate:", "Polarity:", "Threshold:", ""];
+const DL_TEXTS: [&str; 6] = ["Protocol:", crate::tr!("Mode:"), "Bit rate:", "Polarity:", crate::tr!("Threshold:"), ""];
 const DL_THR: [Rect; 4] = [rect(24, 169, 120, 24), rect(MF_STEP[0].0, 169, MF_STEP[0].1, 24), rect(MF_STEP[1].0, 169, MF_STEP[1].1, 24), rect(MF_STEP[2].0, 169, MF_STEP[2].1, 24)];
 
 /// The Threshold row's rects: Auto / Manual, -, the value, +.
@@ -420,11 +420,11 @@ pub fn page(v: &SetupVals, pc: Rect) {
         });
     }
     option_list(SU_PROTO, pc, PROTO_N, PROTO_W, if dc::DALI { PROTO_V.iter().position(|&p| p == v.proto).unwrap_or(0) } else { v.proto.min(PROTO_V.len() as u8 - 1) as usize });
-    let modes: &[&str] = if LOG { &["Band", "Log"] } else { &["Band"] };
+    let modes: &[&str] = if LOG { &["Band", crate::tr!("Log")] } else { &["Band"] };
     option_list(SU_MODE, pc, modes, 60, v.mode.min(modes.len() as u8 - 1) as usize);
-    option_list(SU_POL, pc, &["Normal", "Inverted"], 88, v.inv as usize);
+    option_list(SU_POL, pc, &[crate::tr!("Normal"), "Inverted"], 88, v.inv as usize);
     let [ta, tm, tv, tp] = thr_rects(dali);
-    option_list(ta, pc, &["Auto", "Manual"], 60, v.thr.is_finite() as usize);
+    option_list(ta, pc, &[crate::tr!("Auto"), crate::tr!("Manual")], 60, v.thr.is_finite() as usize);
     let mut hb = [0u8; 16];
     let mut h = dc::W { b: &mut hb, n: 0 };
     volts_text(&mut h, if v.thr.is_finite() { v.thr } else { v.level });
@@ -437,7 +437,7 @@ pub fn page(v: &SetupVals, pc: Rect) {
         option_list(SU_FMT, pc, &dc::FMT_NAMES, 44, v.fmt as usize % 4);
         let mut b = dc::W { b: &mut bb, n: 0 };
         if v.baud == 0 {
-            b.s("Auto");
+            b.s(crate::tr!("Auto"));
         } else {
             b.u(v.baud);
         }

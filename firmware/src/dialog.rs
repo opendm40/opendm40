@@ -125,7 +125,7 @@ fn button(r: (u16, u16, u16, u16), label: &str, bg: Color) {
 
 /// Draw the power-off confirm.
 pub fn power_off() {
-    confirm("Power off?", "Cancels in 3 s");
+    confirm(crate::tr!("Power off?"), "Cancels in 3 s");
 }
 
 /// Draw the energy reset confirm (power meter: a long press on the energy
@@ -142,19 +142,19 @@ fn confirm(title: &str, body: &str) {
     centred((b.0, b.1 + 40, b.2, 60), body, FG, BODY_BG);
     lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
     frame(b, FRAME);
-    button(NO, "No", BTN);
-    button(YES, "Yes", BTN_RED);
+    button(NO, crate::tr!("No"), BTN);
+    button(YES, crate::tr!("Yes"), BTN_RED);
 }
 
 /// Draw the Reset settings confirm; hit test = `power_off_hit`.
 pub fn settings_reset() {
-    confirm("Reset settings?", "Calibration, files stay");
+    confirm(crate::tr!("Reset settings?"), crate::tr!("Calibration, files stay"));
 }
 
 /// The firmware install question (vwrite.rs: a valid update file copied
 /// onto the USB disk is staged as DM40FW.BIN); hit test = `power_off_hit`.
 pub const FW_TITLE: &str = "Firmware received";
-pub const FW_BODY: &str = "Install it now?";
+pub const FW_BODY: &str = crate::tr!("Install it now?");
 /// Auto-answer No, ms.
 pub const FW_MS: u64 = 60_000;
 /// The toast for a DM40*.BIN that is no valid update file.

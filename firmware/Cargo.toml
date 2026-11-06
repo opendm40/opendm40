@@ -24,6 +24,13 @@ default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log"]
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
+# A second UI language next to English (src/lang.rs, i18n/<lang>.tsv): Settings
+# > Display > Language. One per image, none in the default image: the text and
+# glyphs take region B.
+zh = []
+ru = []
+it = []
+fr = []
 # AD2 logger stream on ONE timer interrupt (TIMER6 = STM32 TIM7, IRQ 55) with
 # the HY3131 bus handed to the ISR exclusively while an AD2 session runs
 # (../docs/history/decisions-2026-10-22.md #3; src/hy3131.rs `stream`, src/logger.rs
@@ -132,3 +139,7 @@ usbd-storage = { version = "3.0.0", features = ["bbb", "scsi"] }
 # region B, ~0.8 KB).
 [patch.crates-io]
 usbd-storage = { path = "vendor/usbd-storage" }
+
+[lints.rust]
+# ui-render's string log (tools/ui-render/run.sh UIR_LANG).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(lang_log)'] }
