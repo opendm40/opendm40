@@ -51,6 +51,7 @@ macro_rules! tr {
     ("Color") => { "Colore" };
     ("Corners") => { "Angoli" };
     ("Coupling") => { "Accopp." };
+    ("Cur") => { "Corr" };
     ("Current Settings") => { "Impost. corrente" };
     ("Current in A jack: check leads") => { "Corrente in A: vedi puntali" };
     ("Current too high: reduce it") => { "Corrente alta: riducila" };
@@ -202,7 +203,9 @@ macro_rules! tr {
     ("Touch calibration") => { "Calibrazione tocco" };
     ("Touch test") => { "Test tocco" };
     ("Triangle") => { "Triangolo" };
+    ("Trigger source: CH1") => { "Sorgente trigger: CH1" };
     ("Try again") => { "Riprova" };
+    ("Type") => { "Tipo" };
     ("Type:") => { "Tipo:" };
     ("USB disk") => { "Disco USB" };
     ("Unstable: unplug USB?") => { "Instabile: scollegare USB?" };
@@ -211,6 +214,7 @@ macro_rules! tr {
     ("Upper = reading") => { "Sup. = lettura" };
     ("Upper limit") => { "Limite sup." };
     ("Vendor") => { "Produttore" };
+    ("Vol") => { "Tens" };
     ("Voltage Settings") => { "Impost. tensione" };
     ("Voltage on V jack, no current") => { "Tensione su V, no corrente" };
     ("Voltage on circuit - power off") => { "Togliere tensione al circuito" };
@@ -275,6 +279,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Color", "Colore"),
     ("Corners", "Angoli"),
     ("Coupling", "Accopp."),
+    ("Cur", "Corr"),
     ("Current Settings", "Impost. corrente"),
     ("Current in A jack: check leads", "Corrente in A: vedi puntali"),
     ("Current too high: reduce it", "Corrente alta: riducila"),
@@ -426,7 +431,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Touch calibration", "Calibrazione tocco"),
     ("Touch test", "Test tocco"),
     ("Triangle", "Triangolo"),
+    ("Trigger source: CH1", "Sorgente trigger: CH1"),
     ("Try again", "Riprova"),
+    ("Type", "Tipo"),
     ("Type:", "Tipo:"),
     ("USB disk", "Disco USB"),
     ("Unstable: unplug USB?", "Instabile: scollegare USB?"),
@@ -435,6 +442,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Upper = reading", "Sup. = lettura"),
     ("Upper limit", "Limite sup."),
     ("Vendor", "Produttore"),
+    ("Vol", "Tens"),
     ("Voltage Settings", "Impost. tensione"),
     ("Voltage on V jack, no current", "Tensione su V, no corrente"),
     ("Voltage on circuit - power off", "Togliere tensione al circuito"),

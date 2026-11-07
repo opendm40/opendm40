@@ -221,6 +221,7 @@ fn set_commands() {
     check(matches!(s.handle(b"TRIG:SOUR chan", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR chan");
     check(matches!(s.handle(b"TRIG:EDGE:SOUR CHANnel1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:EDGE:SOUR CHANnel1");
     check(matches!(s.handle(b"TRIG:SOUR GEN", 1), Out::Instr(Cmd::TrigSource(Some(1)))), "TRIG:SOUR GEN");
+    check(matches!(s.handle(b"TRIG:SOUR CHAN2", 1), Out::Instr(Cmd::TrigSource(Some(2)))), "TRIG:SOUR CHAN2 (the DMM channel)");
     // The GEN trace on the scope page: its V/div and on / off.
     check(matches!(s.handle(b"GEN:SCAL 0.5", 1), Out::Instr(Cmd::GenScale(Some(v))) if v == 0.5), "GEN:SCAL 0.5");
     check(matches!(s.handle(b"GENerator:SCALe 200mV", 1), Out::Instr(Cmd::GenScale(Some(v))) if (v - 0.2).abs() < 1e-6), "GENerator:SCALe 200mV");
@@ -287,7 +288,7 @@ fn set_commands() {
         ("CHAN1:DISP ON", "-113"),
         ("TRIG:SLOP UP", "-224"),
         ("TRIG:SWE NEVER", "-224"),
-        ("TRIG:SOUR CHAN2", "-224"),
+        ("TRIG:SOUR CHAN3", "-224"),
         ("TRIG:SOUR CHANNEL", "-224"),
         ("TRIG:LEV x", "-224"),
         ("TRIG:LEV", "-109"),

@@ -684,6 +684,8 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         // The DMM CH2 too: its block (on, 250mA) and a trace.
         m.ch2_txt = scope_ui::Txt::new("250mA");
         m.ch2_on = true;
+        // Its zero row 60 rows below the centre: the '2' marker by its trace.
+        m.ch2_pos = 60;
         m.gen_on = true;
         m.gen_txt = scope_ui::Txt::new("1V");
         draw(&m, scope_ui::Popup::None, &pv, true);
@@ -717,6 +719,26 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         if !(ch1 == 0 && gen > 20) {
             ck.fail("gen/badge-source", format!("trigger badge GEN colour: {ch1} px on CH1, {gen} px on GEN"));
         }
+        // CH2 at its default position (on CH1's row): the '2' marker beside
+        // CH1's 'A', not under it.
+        {
+            let mut m2 = m;
+            m2.pos = 0;
+            m2.ch2_pos = 0;
+            let mut it = [(0u8, scope_ui::Mark::NONE); scope_ui::NSTRIP];
+            let k = scope_ui::strip_items(&m2, &mut it);
+            let a = it[..k].iter().find(|i| i.0 == 0).map(|i| i.1.rect());
+            let c2 = it[..k].iter().find(|i| i.0 == scope_ui::CH2_LEVEL).map(|i| i.1.rect());
+            ck.cases += 1;
+            match (a, c2) {
+                (Some(a), Some(b)) if a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y => {}
+                _ => ck.fail(&format!("gen/{}/ch2-marker", combined as u8), format!("CH2 marker {:?} on CH1's {:?}", c2.map(|r| (r.x, r.y)), a.map(|r| (r.x, r.y)))),
+            }
+            if !combined {
+                draw(&m2, scope_ui::Popup::None, &pv, true);
+                save(out, "s08c-ch2-default-pos");
+            }
+        }
         for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
             draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
             let add = if tab == 1 {
@@ -728,6 +750,101 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(scope_ui::MF_X as i32, 20, scope_ui::MF_W as i32, if tab == 1 { 241 } else { 216 }));
             if !combined {
                 save(out, name);
+            }
+        }
+        // CH2's V / A on the Display tab: its taps, beside On / Off.
+        if !combined {
+            let uy = |i: i16| scope_ui::mf_hit(1, &pv, scope_ui::C2_UNIT.x + 22 + 44 * i, scope_ui::C2_UNIT.y + 12);
+            if !(matches!(uy(0), scope_ui::MfHit::Ch2Func(false)) && matches!(uy(1), scope_ui::MfHit::Ch2Func(true))) {
+                ck.fail("gen/ch2-func", "the Display tab's CH2 V / A is not hit".to_string());
+            }
+            if !matches!(scope_ui::mf_hit(1, &pv, scope_ui::C2_LIST.x + 22, scope_ui::C2_LIST.y + 12), scope_ui::MfHit::Ch2(true)) {
+                ck.fail("gen/ch2-func", "CH2 On lost its hit".to_string());
+            }
+            let mut pa = pv;
+            pa.ch2_func = 1;
+            draw(&m, scope_ui::Popup::Mf(1), &pa, true);
+            ck.check_add("gen/ch2-func/tab1", &[("page", Bx::new(scope_ui::MF_X as i32 + 1, 161, scope_ui::MF_W as i32 - 2, 99))], &[rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)], Bx::new(scope_ui::MF_X as i32, 20, scope_ui::MF_W as i32, 241));
+            save(out, "s08-ch2-func-a");
+        }
+        // CH1 type Cur: the Probe tab's Type list, the unit on CH1's V/div,
+        // the taps on the Type list.
+        if !combined {
+            let mut pc = pv;
+            pc.cur = true;
+            let mut mc = m;
+            mc.amps = true;
+            draw(&mc, scope_ui::Popup::Ch1(1), &pc, true);
+            ck.check_replica("gen/ch1-cur");
+            save(out, "s08-ch1-cur");
+            let sc = scope_ui::block_look(&mc, scope_ui::BLK_CH1).scale;
+            let sv = scope_ui::block_look(&m, scope_ui::BLK_CH1).scale;
+            println!("CH1 scale: Vol {:?}, Cur {:?}", sv.as_str(), sc.as_str());
+            if !(sc.as_str().ends_with('A') && sv.as_str().ends_with('V')) {
+                ck.fail("gen/ch1-cur", format!("CH1 scale unit: Vol {:?}, Cur {:?}", sv.as_str(), sc.as_str()));
+            }
+            let sx = scope_ui::PANEL_X - 200;
+            let ty = |i: i16| scope_ui::side_hit(false, 1, &pc, sx + 94 + 22 + 44 * i, 262);
+            if !(matches!(ty(0), scope_ui::SideHit::Type(0)) && matches!(ty(1), scope_ui::SideHit::Type(1))) {
+                ck.fail("gen/ch1-cur", "the CH1 Probe tab's Type list is not hit".to_string());
+            }
+            if !matches!(scope_ui::side_hit(false, 1, &pc, sx + 94, 120), scope_ui::SideHit::Probe(_)) {
+                ck.fail("gen/ch1-cur", "the Probe spinner lost its hit".to_string());
+            }
+        }
+        if !combined {
+            // CH1 hidden: no CH1 trace or 'A' marker, the CH1 block dimmed;
+            // CH2, GEN and the trigger stay. Below the top markers' row (the
+            // trigger position's T stays), left of the trigger level's T.
+            let (w, top, gh) = (host::W, m.top() as usize, h as usize);
+            let count = |c: u16| (top + 14..top + gh).flat_map(|y| (scope_ui::GX as usize..scope_ui::GR as usize - 12).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
+            let tc = m.trace_colour();
+            draw(&m, scope_ui::Popup::None, &pv, true);
+            let shown = count(tc);
+            let mut m1 = m;
+            m1.ch1_on = false;
+            draw(&m1, scope_ui::Popup::None, &pv, true);
+            ck.check_replica("gen/ch1-off");
+            save(out, "s08-ch1-off");
+            let hidden = count(tc);
+            println!("CH1 off: {hidden} px in CH1's trace colour (on: {shown})");
+            if !(shown > 300 && hidden == 0) {
+                ck.fail("gen/ch1-off", format!("CH1 off still drawn: {hidden} px of CH1's colour (on: {shown})"));
+            }
+        }
+        if !combined {
+            // Trigger on CH2 (DMM) and on GEN: the badge, the T markers and
+            // both guide lines in the source's colour.
+            let w = host::W;
+            let count = |x0: usize, x1: usize, y0: usize, y1: usize, c: u16| (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
+            let top = m.top() as usize;
+            let (rx, fy) = ((scope_ui::GR - 12) as usize, top + scope_ui::line_fy(h, 90) as usize);
+            // The trigger position's T (graph column 200) and its guide line.
+            let (tx, vx) = ((scope_ui::GX + 1 + 200 - 6) as usize, (scope_ui::GX + 200) as usize);
+            for (src, c, name) in [(scope::TSRC_CH2, scope_ui::c_ch2(), "ch2"), (scope::TSRC_GEN, scope_ui::c_gen(), "gen")] {
+                let mut mt = m;
+                mt.tsrc = src;
+                mt.trig_row = 90;
+                mt.trig_px = 200;
+                mt.sel_v = 1;
+                mt.guide = true;
+                let mut pvt = pv;
+                pvt.tsrc = src;
+                draw(&mt, scope_ui::Popup::None, &pvt, true);
+                ck.check_replica(&format!("gen/{name}-trigger"));
+                if src == scope::TSRC_CH2 {
+                    save(out, "s08-ch2-trigger");
+                }
+                let (badge, mark, line, tpos, vline) = (count(352, 414, 1, 18, c), count(rx, rx + 12, top, top + h as usize, c), count(20, 300, fy, fy + 1, c), count(tx, tx + 12, top, top + 14, c), count(vx, vx + 1, top + 14, top + h as usize, c));
+                println!("{name} trigger in its colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px, its line {vline} px");
+                if !(badge > 20 && mark > 20 && line > 40 && tpos > 20 && vline > 40) {
+                    ck.fail(&format!("gen/{name}-trigger"), format!("not in the source's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px, its line {vline} px"));
+                }
+                if src == scope::TSRC_CH2 {
+                    // The Trigger tab with Source DMM (its note: the CH2 scale).
+                    draw(&mt, scope_ui::Popup::Mf(2), &pvt, true);
+                    save(out, "s08-ch2-trigger-tab");
+                }
             }
         }
         if !combined {
