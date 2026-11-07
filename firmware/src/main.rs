@@ -286,6 +286,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             .product("DM40 multimeter (opendm40)")
             .serial_number(uid::serial())])
         .unwrap()
+        // Windows caches "no MS OS descriptors" per VID:PID:release, so the
+        // release moved with them (usbtmc.rs MS_OS_20_SET; was the default
+        // 0x0010).
+        .device_release(0x0100)
         .build();
     // build() enabled the core; now force the GD32 power/VBUS bits.
     usb::force_power_no_vbus();

@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **USBTMC without a driver on Windows:** Windows binds WinUSB to the USBTMC interface by itself (MS OS 2.0 descriptors), so pyvisa-py, libusb and WebUSB pages need no Zadig ([manual](docs/manual/README.md#windows)).
+
 - DMM: 2 px more between the big digits and the bargraph.
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
