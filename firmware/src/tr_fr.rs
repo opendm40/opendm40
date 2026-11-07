@@ -138,6 +138,7 @@ macro_rules! tr {
     ("No disk") => { "Pas de disque" };
     ("No ohm reading") => { "Pas de mesure en \u{3a9}" };
     ("No screenshots or logs") => { "Aucune capture ni log" };
+    ("Null: short the leads first") => { "Null : court-circuitez d'abord les pointes" };
     ("OFF (stock)") => { "OFF (origine)" };
     ("OL: no path from V to A") => { "OL : pas de liaison V-A" };
     ("Off (stock)") => { "Off (origine)" };
@@ -374,6 +375,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("No disk", "Pas de disque"),
     ("No ohm reading", "Pas de mesure en \u{3a9}"),
     ("No screenshots or logs", "Aucune capture ni log"),
+    ("Null: short the leads first", "Null : court-circuitez d'abord les pointes"),
     ("OFF (stock)", "OFF (origine)"),
     ("OL: no path from V to A", "OL : pas de liaison V-A"),
     ("Off (stock)", "Off (origine)"),

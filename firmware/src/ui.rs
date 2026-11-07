@@ -328,7 +328,11 @@ pub struct DmmView {
     pub pwc: pw::PwCache,
     /// The "ON" ohm variant is selected (`draw_static`'s `ohm_on`).
     ohm_on: bool,
-    /// Test current label as last drawn: ohm range | variant << 3, 0x10
+    /// The ohm null is on (Dmm::ohm_null; set by the app before
+    /// `draw_static`): "NULL" after the ohm test current.
+    pub ohm_null: bool,
+    /// Test current label as last drawn: ohm range | variant << 3 | null <<
+    /// 6, 0x10
     /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
@@ -670,6 +674,7 @@ impl DmmView {
             power: false,
             pwc: pw::PwCache::new(),
             ohm_on: false,
+            ohm_null: false,
             last_iohm: 254,
             ol_word: false,
             ol_range: 0,
@@ -1041,7 +1046,7 @@ impl DmmView {
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
             _ if band => 255,
-            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3 | (self.ohm_null as u8) << 6,
             12 if aux[0].is_none() && !self.power => 0x10,
             13 if !self.power => match r.aux2 {
                 Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
@@ -1197,7 +1202,7 @@ impl DmmView {
             cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
             self.last_iohm = ik;
         } else if ik != 255 && self.last_iohm != ik {
-            test_current_label(r.mode, r.range, self.ohm_on);
+            test_current_label(r.mode, r.range, self.ohm_on, self.ohm_null);
             self.last_iohm = ik;
         }
         // The phase is part of the key only while it alternates: no
@@ -1345,9 +1350,10 @@ pub fn cap_noise_label() {
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
 /// measured short-circuit current of range `range` in the variant `on`
 /// (none on 60 M: the box is cleared); continuity / diode, the source current (measured, continuity negative). Two significant digits, DIM F14 (small: a
-/// property of the function, not a reading).
+/// property of the function, not a reading). `null`: the ohm null is on
+/// (r0..r6): "NULL" after it, in the reading's colour.
 #[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
-fn test_current_label(mode: u8, range: i8, on: bool) {
+fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
     let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
         // No value (60 M): clear the box, a range change from 6 M left the
         // 6 M label (device check 2f56ff9).
@@ -1370,6 +1376,10 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
     t.push(crate::dmm::format(&mut b, v, if v.abs() < 1.0 { 2 } else if v.abs() < 10.0 { 1 } else { 0 }));
     t.push(u);
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
+    if null && mode == 10 && !exp {
+        let w = sf::text_width(sf::F14, t.as_str(), 1);
+        sf::label(sf::F14, rect(OHM_I_RECT.x + w + 12, OHM_I_RECT.y, OHM_I_RECT.w - w - 12, OHM_I_RECT.h), "NULL", VALUE, BG, 1, 1);
+    }
 }
 
 /// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
@@ -1741,6 +1751,28 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     }
 }
 
+/// "Null" on the Resistor Settings page (Dmm::ohm_null): the note row's
+/// right half, beside the 600 Mohm item (`range_rect(8)`, 8..236). Selected
+/// colour while on, with the value.
+pub const NULL_BTN: sf::Rect = rect(244, 141, 228, 36);
+
+/// The Null button (`NULL_BTN`) for a null of `ohm` (0 = off).
+#[inline(never)] // the range page, drawn on a tap
+pub fn ohm_null_button(ohm: f32) {
+    let mut t = crate::scope_ui::Txt::new("Null ");
+    let c = if ohm > 0.0 {
+        let mut b = [0u8; 16];
+        t.push(crate::dmm::format(&mut b, ohm, 3));
+        t.push(" \u{3a9}");
+        SEL
+    } else {
+        t.push(crate::tr!("off"));
+        0x2966
+    };
+    sf::rbox(NULL_BTN, 6, c, BG);
+    sf::glyphs(sf::TEXT22, NULL_BTN, t.as_str(), STATUS_FG, c, 8, 0);
+}
+
 /// "Inrush" on the Current Settings page (the inrush capture, app_inrush.rs;
 /// builds with the AD2 stream ISR only): the note row, right column (the
 /// AC+DC column of the stock grid), beside Fuse check.
@@ -1926,7 +1958,7 @@ fn range_press_item(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<(sf
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
 /// Limits, 7 Record, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
-/// buttons, while `ohm_vars_shown(sel)`.
+/// buttons, while `ohm_vars_shown(sel)`, Err(8) = Null (`NULL_BTN`).
 pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
@@ -1950,6 +1982,9 @@ pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result
         Some(1) => return Some(Err(7)),
         Some(3) => return Some(Err(2)),
         _ => {}
+    }
+    if (139..180).contains(&y) && x >= 241 && b == Button::Ohm {
+        return Some(Err(8));
     }
     if (139..180).contains(&y) && (160..315).contains(&x) && b == Button::Amp {
         return Some(Err(5));

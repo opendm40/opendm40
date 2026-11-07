@@ -3823,7 +3823,15 @@ fn main() {
         // selected, the DMM page with the tag on the ohm button.
         host::reset(0);
         ui::range_page(Button::Ohm, Some(7), 1, None);
+        ui::ohm_null_button(0.0);
+        ck.check_opts("range/ohm-null-off", &page_regions, false);
         save(&out, "m07-range-ohm-on");
+        // Ohm null on (Resistor Settings "Null"): the button with its value.
+        host::reset(0);
+        ui::range_page(Button::Ohm, Some(7), 0, None);
+        ui::ohm_null_button(0.123);
+        ck.check_opts("range/ohm-null-on", &page_regions, false);
+        save(&out, "m07c-range-ohm-null");
         host::reset(0);
         ui::range_page(Button::Cap, Some(7), 0, None);
         save(&out, "m07b-range-cap");
@@ -3881,6 +3889,23 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
+        // Ohm null on: "NULL" after the test current (600 ohm range, the
+        // widest current text with the "ON" variant off and on).
+        for on in [false, true] {
+            host::reset(0);
+            let (r, _) = find("ohm_k");
+            let r = Reading { range: 1, ..r };
+            let mut dv = ui::DmmView::new();
+            dv.label = None;
+            dv.ohm_null = true;
+            dv.draw_static(Button::Ohm, r.mode, false, on);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            ck.check(&format!("dmm-ohm-null/{}", on as u8), &dmm_page_regions);
+            if !on {
+                save(&out, "d06b-dmm-ohm-null");
+            }
+        }
         // ui-review #13: the stock >= 30 V red value (230 V AC).
         host::reset(0);
         let (r, _) = find("acv_230");

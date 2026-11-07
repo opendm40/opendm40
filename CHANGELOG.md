@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Multimeter:** Null on the Resistor Settings page takes the test leads' resistance off the ohm reading.
 - **Settings:** Alerts > Continuity beep: Always lets the continuity / diode beeper sound at volume 0 %.
 - **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
 - **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
