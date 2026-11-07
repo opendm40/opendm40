@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
 - **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
 - **Scope:** a second tap on the CH1 title with its popup open hides CH1.
 - **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; DMM turns CH2 on; GEN cannot be picked while the generator is off.

@@ -1566,7 +1566,10 @@ not use the trigger hardware.
 over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
 signal, alongside the scope. Its on / off and V/div (A/div) are also on the
 **DMM** block. Drag its **2** marker on the left to move the trace (long
-press: back to the centre); kept in the settings. It works in V, mV and
+press: back to the centre); kept in the settings. **V** / **A** beside **On** /
+**Off** puts the multimeter into that function (V, or AC A) in one tap; neither
+is selected in another function, and it does nothing in the Wave view or during
+a recording. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
