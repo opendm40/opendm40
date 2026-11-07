@@ -16,6 +16,8 @@ section named after the tag as the release notes; how to cut a release:
 - **Combined view:** the meter strip's reading is orange, as on the multimeter page.
 - DMM: 2 px more between the big digits and the bargraph.
 
+- Scope: the CUR tab turns the cursors off again when they were chosen in the Measure tab or kept over a restart (the tap did nothing).
+
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
 
 - Overflow names the range: **>60V**, **>600MΩ** beside the big 0L, in manual ranges and at the top of AUTO.

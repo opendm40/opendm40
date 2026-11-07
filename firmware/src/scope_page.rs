@@ -1952,7 +1952,14 @@ impl App {
         let base = match self.sp.cur_saved {
             Some(b) if state != su::CUR_OFF => b,
             _ => {
-                let b = (self.meas_sel, self.meas_n);
+                // Nothing saved while cursors show (chosen in the Measure
+                // tab, kept over a restart): the selection without them, so
+                // that "off" turns them off (it restored itself before).
+                let mut b = ([0u8; 4], 0);
+                for &id in self.meas_sel[..self.meas_n].iter().filter(|id| !cur(id)) {
+                    b.0[b.1] = id;
+                    b.1 += 1;
+                }
                 self.sp.cur_saved = Some(b);
                 b
             }
