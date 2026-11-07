@@ -541,6 +541,7 @@ disk error
 disk full
 down
 drag orange T
+edge, CH2 scale
 edge, computed
 falling
 format

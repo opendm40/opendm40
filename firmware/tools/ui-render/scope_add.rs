@@ -780,7 +780,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             scope_ui::cells(&m, &["Freq:1.00kHz", "Vp-p:3.00V", "\u{2}Freq:1.00kHz", "\u{2}Y2-1:2.01A"]);
             ck.check_replica("gen/ch2-cells");
             // The CH2 cells (the last two) in the CH2 colour, the first two not.
-            let cell_px = |x0: i16, x1: i16| (302..319usize).flat_map(|y| (x0 as usize..x1 as usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::C_CH2).count();
+            let cell_px = |x0: i16, x1: i16| (302..319usize).flat_map(|y| (x0 as usize..x1 as usize).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * host::W + x] == scope_ui::c_ch2()).count();
             let (mx, ms) = (scope_ui::MEAS_X, scope_ui::MEAS_STEP);
             let (ch1, ch2) = (cell_px(mx, mx + 2 * ms), cell_px(mx + 2 * ms, mx + 4 * ms));
             ck.cases += 1;
@@ -849,6 +849,41 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             println!("CH1 off: {hidden} px in CH1's trace colour (on: {shown})");
             if !(shown > 300 && hidden == 0) {
                 ck.fail("gen/ch1-off", format!("CH1 off still drawn: {hidden} px of CH1's colour (on: {shown})"));
+            }
+        }
+        if !combined {
+            // Trigger on CH2 (DMM) and on GEN: the badge, the T markers and
+            // both guide lines in the source's colour.
+            let w = host::W;
+            let count = |x0: usize, x1: usize, y0: usize, y1: usize, c: u16| (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
+            let top = m.top() as usize;
+            let (rx, fy) = ((scope_ui::GR - 12) as usize, top + scope_ui::line_fy(h, 90) as usize);
+            // The trigger position's T (graph column 200) and its guide line.
+            let (tx, vx) = ((scope_ui::GX + 1 + 200 - 6) as usize, (scope_ui::GX + 200) as usize);
+            for (src, c, name) in [(scope::TSRC_CH2, scope_ui::c_ch2(), "ch2"), (scope::TSRC_GEN, scope_ui::c_gen(), "gen")] {
+                let mut mt = m;
+                mt.tsrc = src;
+                mt.trig_row = 90;
+                mt.trig_px = 200;
+                mt.sel_v = 1;
+                mt.guide = true;
+                let mut pvt = pv;
+                pvt.tsrc = src;
+                draw(&mt, scope_ui::Popup::None, &pvt, true);
+                ck.check_replica(&format!("gen/{name}-trigger"));
+                if src == scope::TSRC_CH2 {
+                    save(out, "s08-ch2-trigger");
+                }
+                let (badge, mark, line, tpos, vline) = (count(352, 414, 1, 18, c), count(rx, rx + 12, top, top + h as usize, c), count(20, 300, fy, fy + 1, c), count(tx, tx + 12, top, top + 14, c), count(vx, vx + 1, top + 14, top + h as usize, c));
+                println!("{name} trigger in its colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px, its line {vline} px");
+                if !(badge > 20 && mark > 20 && line > 40 && tpos > 20 && vline > 40) {
+                    ck.fail(&format!("gen/{name}-trigger"), format!("not in the source's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px, its line {vline} px"));
+                }
+                if src == scope::TSRC_CH2 {
+                    // The Trigger tab with Source DMM (its note: the CH2 scale).
+                    draw(&mt, scope_ui::Popup::Mf(2), &pvt, true);
+                    save(out, "s08-ch2-trigger-tab");
+                }
             }
         }
         if !combined {
