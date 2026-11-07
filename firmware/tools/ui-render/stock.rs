@@ -289,7 +289,7 @@ pub fn emu_popvals(m: &Model) -> su::PopVals {
 /// Popup values of the reference scenes (tools/stock-ui Scene::default).
 pub fn popvals(m: &Model) -> su::PopVals {
     su::PopVals {
-        meas: [0, 10, 9, 11],
+        meas: [0, 10, 9, 11, 0],
         meas_n: 4,
         roll: false,
         persist: 0,

@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope: wide graph.** A swipe right on the right panel hides it; the graph and the measurement row take the whole width, with a 5th measurement (MF > Measure takes five). A swipe left from the right edge brings the panel back ([manual](docs/manual/README.md#the-scope-page)).
+
 - DMM: 2 px more between the big digits and the bargraph.
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.

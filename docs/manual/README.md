@@ -1291,7 +1291,12 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   - Tap a title: **CH1** opens the channel popup; **DMM** and **GEN** switch
     their trace on / off; **MATH** opens the math popup.
   - Hold the **DMM** title: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
-- **Measurement row** at the bottom: up to four measurements.
+  - Swipe right on the panel: it hides, and the graph and the measurement
+    row take the whole width. Swipe left from the screen's right edge: the
+    panel comes back. Not kept over a restart; the combined view keeps the
+    panel.
+- **Measurement row** at the bottom: up to four measurements, five while the
+  panel is hidden (**MF > Measure** takes five).
 
 ![All four channels on: CH1, DMM, GEN, ABS math](img/scope-channels.png)
 
