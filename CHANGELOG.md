@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** a second tap on the CH1 title with its popup open hides CH1.
 - **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; DMM turns CH2 on; GEN cannot be picked while the generator is off.
 - **Scope:** drag the DMM channel's 2 marker to move its trace.
 - **Combined view:** the meter strip's reading is orange, as on the multimeter page.
