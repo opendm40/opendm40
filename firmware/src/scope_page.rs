@@ -773,19 +773,28 @@ impl App {
         let m = self.sp_model(self.now);
         let mut b: [[u8; 24]; 4] = [[0; 24]; 4];
         let mut n = [0usize; 4];
+        let amps2 = crate::scope_ch2::store().scale().amps;
         for i in 0..self.meas_n.min(4) {
-            let id = self.meas_sel[i];
+            let sel = self.meas_sel[i];
+            let id = crate::scope_meas::item(sel);
+            let c2 = crate::scope_meas::is_ch2(sel);
+            let (res, amps) = if c2 { (&self.meas_res2, amps2) } else { (&self.meas_res, m.amps) };
             // Stock label "Vp-p:" (ours: "Vpp:").
             let mut t = [0u8; 24];
-            let f = crate::scope_meas::format_unit(&mut t, id, self.meas_res.v[id as usize], m.amps);
+            let f = crate::scope_meas::format_unit(&mut t, id, res.v[id as usize], amps);
             let (pre, rest): (&[u8], &[u8]) = match (f.strip_prefix("Vpp"), f.strip_prefix("Ipp")) {
                 (Some(r), _) => (b"Vp-p", r.as_bytes()),
                 (_, Some(r)) => (b"Ip-p", r.as_bytes()),
                 _ => (b"", f.as_bytes()),
             };
-            let k = (pre.len() + rest.len()).min(24);
-            b[i][..pre.len()].copy_from_slice(pre);
-            b[i][pre.len()..k].copy_from_slice(&rest[..k - pre.len()]);
+            // A CH2 item: the cell's colour mark first (su::meas_cell).
+            let mark: &[u8] = if c2 { &[su::CELL_CH2] } else { b"" };
+            let k = (mark.len() + pre.len() + rest.len()).min(24);
+            let mut j = 0;
+            for &c in mark.iter().chain(pre).chain(rest).take(k) {
+                b[i][j] = c;
+                j += 1;
+            }
             n[i] = k;
         }
         let txt = |i: usize| core::str::from_utf8(&b[i][..n[i]]).unwrap_or("--");
@@ -1916,8 +1925,10 @@ impl App {
     /// selection from before the first tap comes back with "off".
     fn sp_cur_cycle(&mut self) {
         const XS: [u8; 2] = [7, 8];
+        // Y: Y2-1 of CH1, and of CH2 (its V/div) while CH2 is shown.
         const YS: [u8; 1] = [17];
-        let cur = |id: &u8| XS.contains(id) || YS.contains(id);
+        const YS2: [u8; 2] = [17, 17 | crate::scope_meas::CH2];
+        let cur = |id: &u8| XS.contains(&crate::scope_meas::item(*id)) || YS.contains(&crate::scope_meas::item(*id));
         let state = self.sp_cur_state();
         let base = match self.sp.cur_saved {
             Some(b) if state != su::CUR_OFF => b,
@@ -1932,6 +1943,7 @@ impl App {
         let mut n = 0;
         let lead: &[u8] = match state {
             su::CUR_OFF => &XS,
+            su::CUR_X if self.ch2.on => &YS2,
             su::CUR_X => &YS,
             _ => &[],
         };
@@ -1958,8 +1970,9 @@ impl App {
     /// Cursor tab state from the measurement selection.
     fn sp_cur_state(&self) -> u8 {
         let sel = &self.meas_sel[..self.meas_n];
-        let x = sel.contains(&7) || sel.contains(&8);
-        let y = sel.contains(&17);
+        let has = |id: u8| sel.iter().any(|&s| crate::scope_meas::item(s) == id);
+        let x = has(7) || has(8);
+        let y = has(17);
         match (x, y) {
             (true, false) => su::CUR_X,
             (false, true) => su::CUR_Y,
@@ -2343,6 +2356,7 @@ impl App {
             gen_trace: self.scope.gen_trace,
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(),
+            meas_src2: self.meas_src2,
         }
     }
 
@@ -2628,11 +2642,18 @@ impl App {
                 return;
             }
             su::MfHit::Cell(i) => {
+                // The channel picked with the Source cell (opendm40).
+                let i = if self.meas_src2 { i | crate::scope_meas::CH2 } else { i };
                 // Refuse a duplicate or a 5th item silently (stock).
                 if self.meas_n < 4 && !self.meas_sel[..self.meas_n].contains(&i) {
                     self.meas_sel[self.meas_n] = i;
                     self.meas_n += 1;
                     self.cursors_from_selection();
+                    // A stopped scope: one more frame measures the new CH2
+                    // item (running: the next 300 ms result does).
+                    if crate::scope_meas::is_ch2(i) {
+                        self.scope.refresh();
+                    }
                 }
             }
             su::MfHit::SelCell(k) => {
@@ -2642,6 +2663,9 @@ impl App {
                     self.meas_n -= 1;
                     self.cursors_from_selection();
                 }
+            }
+            su::MfHit::MeasSrc => {
+                self.meas_src2 = !self.meas_src2;
             }
             su::MfHit::Clear => {
                 self.meas_n = 0;
