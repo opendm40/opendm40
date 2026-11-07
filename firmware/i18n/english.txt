@@ -529,6 +529,7 @@ auto
 blue
 brown
 corrected
+cyan
 dB
 dBV
 dec-log
@@ -560,6 +561,7 @@ mV
 mVA
 mW
 mWh
+magenta
 max 10 MHz
 max 50 kHz
 ms

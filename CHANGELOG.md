@@ -10,6 +10,7 @@ section named after the tag as the release notes; how to cut a release:
 - **Combined view:** the meter strip's reading is orange, as on the multimeter page.
 - **Scope:** drag the DMM channel's 2 marker to move its trace.
 - **Scope:** MF > Measure can measure the DMM channel (a CH1 / CH2 cell); CUR Y shows a second Y2-1 at the CH2 V/div.
+- **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
 - DMM: 2 px more between the big digits and the bargraph.
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
