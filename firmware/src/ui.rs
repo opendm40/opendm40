@@ -339,6 +339,9 @@ pub struct DmmView {
     /// The "Overflow" caption next to the main readout's "0L" is drawn
     /// (`ol_word`).
     ol_word: bool,
+    /// What the caption's range line shows (a hash of the text): a new
+    /// range while the reading stays 0L redraws it.
+    ol_range: u32,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
     /// history row (Settings > Display "DMM row": History) and the power meter
@@ -358,16 +361,17 @@ pub struct DmmView {
     short_drawn: u8,
 }
 
-/// Bargraph geometry in the history row's place (rows 150..172 between the
+/// Bargraph geometry in the history row's place (rows 152..174 between the
 /// F78 ink, which ends at 146, and the chart frame at 176):
-///   segments  12..410 x 150..158 (50 x 8 px pitch, bargraph.rs)
-///   labels    F14 row 161..172 under the scale: 0 / half / full scale
+///   segments  12..410 x 152..160 (50 x 8 px pitch, bargraph.rs), 5 px under
+///             the digits' ink
+///   labels    F14 row 163..174 under the scale: 0 / half / full scale
 ///             (bipolar: -FS / 0 / +FS), the full scale with its unit
-///   OL marker 418..472 x 147..160 (red "OL" on overload)
-pub const BAR_RECT: (u16, u16, u16, u16) = (12, 150, 400, 9);
-const BAR_LBL_Y: i16 = 161;
+///   OL marker 418..472 x 149..162 (red "OL" on overload)
+pub const BAR_RECT: (u16, u16, u16, u16) = (12, 152, 400, 9);
+const BAR_LBL_Y: i16 = 163;
 const BAR_LBL_H: i16 = 12;
-const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
+const BAR_OL: sf::Rect = rect(418, 149, 54, 14);
 /// The accuracy label (../docs/dmm-accuracy.md): F14 grey in the label row,
 /// right-aligned under the unit, 5 px after the full-scale label (which
 /// ends at the bar's end, 410); `pm` draws the "+-" sign before the text.
@@ -673,6 +677,7 @@ impl DmmView {
             ohm_null: false,
             last_iohm: 254,
             ol_word: false,
+            ol_range: 0,
             acc: Some(Acc { model: 2, tc: true }),
             acc_on: true,
             acc_k: None,
@@ -767,14 +772,7 @@ impl DmmView {
         if unit.is_empty() {
             return;
         }
-        let num = |b: &mut [u8; 16], v: f32| -> usize {
-            let mut t = [0u8; 16];
-            let s = crate::dmm::format(&mut t, v, 2);
-            let s = if s.as_bytes().contains(&b'.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
-            let n = s.len().min(16);
-            b[..n].copy_from_slice(&s.as_bytes()[..n]);
-            n
-        };
+        let num = scale_num;
         // The unit as the readout and the accuracy label beside it spell
         // it (F14 has the ohm glyph): "600 KΩ", not "600 kOhm".
         let mut ub = [0u8; 16];
@@ -958,13 +956,20 @@ impl DmmView {
         let ow = rect(OL_WORD.x, OL_WORD.y + md, OL_WORD.w, OL_WORD.h);
         let ok = r.main.ol;
         if !ok && self.ol_word {
-            lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
+            let top = ow.y - OL_RANGE_H;
+            lcd::fill_rect(ow.x as u16, top as u16, ow.w as u16, (ow.h + OL_RANGE_H) as u16, BG);
             self.ol_word = false;
         }
         sf::cells_diff(sf::F78, rect(x0, 68 + md, w, 80), t, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
-        if ok && (!same_layout || !self.ol_word) {
-            ol_word(ow, color);
-            self.ol_word = true;
+        if ok {
+            let mut rb = [0u8; 24];
+            let rt = if self.power { "" } else { ol_range_text(&mut rb, r) };
+            let rk = rt.bytes().fold(0x811c_9dc5u32, |a, b| (a ^ b as u32).wrapping_mul(0x0100_0193));
+            if !same_layout || !self.ol_word || rk != self.ol_range {
+                self.ol_range = rk;
+                ol_word(ow, rt, color);
+                self.ol_word = true;
+            }
         }
         if self.last_unit != r.main.unit || self.last_mode != mkey {
             self.last_unit = r.main.unit;
@@ -1253,14 +1258,48 @@ impl DmmView {
 /// The "0L" caption's box on the DMM page: the empty cells after the
 /// "0L" of the main readout (CELLS[4]: "0L" ends at x 304), bottom-aligned
 /// on the digits' baseline; left of the limit badge / unit box (x >= 403).
-const OL_WORD: sf::Rect = rect(312, VALUE_BASE as i16 - 22, 86, 22);
+pub const OL_WORD: sf::Rect = rect(310, VALUE_BASE as i16 - 22, 88, 22);
+/// The range line's height, directly above OL_WORD.
+const OL_RANGE_H: i16 = 24;
+
+/// A scale value as the bargraph's labels write it ("60", "0.6"), bytes in `b`.
+fn scale_num(b: &mut [u8; 16], v: f32) -> usize {
+    let mut t = [0u8; 16];
+    let s = crate::dmm::format(&mut t, v, 2);
+    let s = if s.as_bytes().contains(&b'.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
+    let n = s.len().min(16);
+    b[..n].copy_from_slice(&s.as_bytes()[..n]);
+    n
+}
+
+/// The range that overflowed, as the bargraph's full-scale label: ">60V",
+/// ">600MΩ". Empty where a reading has no such range (temperature, Hz).
+pub fn ol_range_text<'a>(b: &'a mut [u8; 24], r: &Reading) -> &'a str {
+    if matches!(r.mode, 14 | 15) || r.main.unit.is_empty() {
+        return "";
+    }
+    let fs = crate::bargraph::mode_full_scale(r.mode, r.range, r.main.dec, r.main.unit);
+    // The 6 / 60 mF ranges read in uF: ">60mF" fits the box, ">60000uF" not.
+    let mf = r.mode == 13 && fs >= 6000.0 && r.main.unit != "nF";
+    let mut v = [0u8; 16];
+    let k = scale_num(&mut v, if mf { fs / 1000.0 } else { fs });
+    let mut ub = [0u8; 16];
+    let us = sf::unit_text(if mf { "mF" } else { r.main.unit }, &mut ub).as_bytes();
+    let n = 1 + k + us.len().min(5);
+    b[0] = b'>';
+    b[1..1 + k].copy_from_slice(&v[..k]);
+    b[1 + k..n].copy_from_slice(&us[..n - 1 - k]);
+    core::str::from_utf8(&b[..n]).unwrap_or("")
+}
 
 /// What "0L" means, in the readout's colour and F14 (the old "Overload"
-/// caption's font): "Overflow" in every function (owner 2026-11-01). Region B (F14: blob in
-/// A2, index in B), not .cold: an OL can start while the fast logger's AD2
+/// caption's font): "Overflow" in every function (owner 2026-11-01), under
+/// the range that overflowed in TEXT22. Region B (F14: blob in A2, index in
+/// B; TEXT22 in B), not .cold: an OL can start while the fast logger's AD2
 /// stream runs (V / A functions).
 #[inline(never)] // drawn on entering OL only
-fn ol_word(r: sf::Rect, c: Color) {
+fn ol_word(r: sf::Rect, range: &str, c: Color) {
+    sf::label(sf::TEXT22, rect(r.x, r.y - OL_RANGE_H, r.w, OL_RANGE_H), range, c, BG, 1, 1);
     sf::label(sf::F14, r, "Overflow", c, BG, 2, 1);
 }
 
@@ -1304,7 +1343,8 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
 pub fn cap_noise_label() {
     let b = CAP_DIS_RECT;
     lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-    sf::label(sf::F14, b, "Unstable: unplug USB?", DIM, BG, 1, 1);
+    // F14: English in Chinese (too small).
+    sf::label(sf::F14, b, crate::tr!("Unstable: unplug USB?"), DIM, BG, 1, 1);
 }
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
@@ -3316,15 +3356,18 @@ pub const S_REMEMBER: u8 = 23;
 /// Reset settings: a confirm, then a restart with the defaults (app.rs
 /// `reset_ask`).
 pub const S_RESET: u8 = 24;
+/// The continuity / diode beeper: with the key / alert volume (the default,
+/// 0 % = silent) or Always (heard at 0 % volume too).
+pub const S_CONT: u8 = 25;
 /// Number of settings (the value array's length).
-pub const SET_N: usize = 25;
+pub const SET_N: usize = 26;
 
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
     crate::tr!("Dim screen"), crate::tr!("Shutdown"), crate::tr!("Backlight"), crate::tr!("Key/alert volume"), crate::tr!("Bluetooth"), crate::tr!("Start page"), crate::tr!("Analog power"),
     crate::tr!("DMM rate"), crate::tr!("Smoothing"), crate::tr!("DMM row"), crate::tr!("Temp unit"), crate::tr!("Swipe"), crate::tr!("Press effect"), crate::tr!("Tap step"), crate::tr!("Help"), crate::tr!("Jack alerts"),
     crate::tr!("Danger alarm"), crate::tr!("USB disk"), crate::tr!("Burden voltage"), crate::tr!("Device info"), crate::tr!("Touch test"), crate::tr!("Accuracy"), crate::tr!("Negative ohm"),
-    crate::tr!("Mode Remember"), crate::tr!("Reset settings"),
+    crate::tr!("Mode Remember"), crate::tr!("Reset settings"), crate::tr!("Continuity beep"),
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
@@ -3332,7 +3375,7 @@ pub const SET_NAMES: [&str; SET_N] = [
 /// there) with its Device section and our help / touch test pages.
 pub const SET_TABS: [(&str, &[u8]); 6] = [
     (crate::tr!("Display"), &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
-    (crate::tr!("Alerts"), &[S_VOLUME, S_ALARM, S_JACK]),
+    (crate::tr!("Alerts"), &[S_VOLUME, S_CONT, S_ALARM, S_JACK]),
     (crate::tr!("Power"), &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     (crate::tr!("Multimeter"), &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     (crate::tr!("Scope"), &[S_SWIPE, S_PRESS, S_TAP_STEP]),
@@ -3349,7 +3392,7 @@ pub fn set_opens(id: u8) -> bool {
 
 /// Rows with a -/+ stepper.
 pub fn set_is_stepper(id: u8) -> bool {
-    matches!(id, S_BACKLIGHT | S_VOLUME)
+    matches!(id, S_BACKLIGHT | S_VOLUME | S_SHUTDOWN)
 }
 
 /// The "USB disk" setting's value: the mode asked for, "(replug)" while the
@@ -3391,14 +3434,14 @@ fn row_only() -> Option<RowPress> {
 /// The box pressed item `t` of `view` covers (app_press.rs draws it pressed
 /// / released in one strip pass, nothing outside it); None: the view's
 /// items are drawn directly.
-pub fn press_rect(view: View, t: RowPress) -> Option<sf::Rect> {
+pub fn press_rect(view: View, t: RowPress, tab: u8) -> Option<sf::Rect> {
     let row = t.row as usize;
     let key = |r: sf::Rect, minus: i16, plus: i16, w: i16, m: i16| rect(if t.part < 0 { minus } else { plus }, r.y + m, w, r.h - 2 * m);
     Some(match view {
         View::Menu => menu_item_rect(row),
         View::Settings if t.row & 0x80 != 0 => st_tab(row & 0x7F),
         View::Settings if t.part == 0 => st_row(row),
-        View::Settings => key(st_row(row), ST_MINUS_X, ST_PLUS_X, ST_KEY_W, 4),
+        View::Settings => key(st_row(row), st_minus_x(settings_id(tab, row).unwrap_or(0)), ST_PLUS_X, ST_KEY_W, 4),
         View::Limits => set_row(row),
         View::Record if t.part == 0 => set_row(row),
         View::Record => key(set_row(row), REC_STEP_MINUS_X, STEP_PLUS_X, STEP_KEY_W, 3),
@@ -3474,6 +3517,11 @@ const ST_TXT_END: i16 = ST_ROW_X + ST_ROW_W - 6;
 const ST_KEY_W: i16 = 40;
 const ST_PLUS_X: i16 = ST_TXT_END - ST_KEY_W;
 const ST_MINUS_X: i16 = ST_PLUS_X - 4 - 56 - 4 - ST_KEY_W;
+/// The "-" key of a stepper row: Shutdown's value box is 90 px for "10 hours"
+/// (its short name leaves the room, "Key/alert volume" does not).
+const fn st_minus_x(id: u8) -> i16 {
+    if id == S_SHUTDOWN { ST_PLUS_X - 4 - 90 - 4 - ST_KEY_W } else { ST_MINUS_X }
+}
 /// Most rows a section can have (and most sections).
 pub const SET_ROWS_MAX: usize = 6;
 const _: () = {
@@ -3550,15 +3598,16 @@ fn st_stepper(i: usize, id: u8, val: &str, only: Option<RowPress>) {
     if only.is_some_and(|p| p.row as usize != i) {
         return;
     }
+    let minus = st_minus_x(id);
     let r = st_row(i);
     if only.is_none() {
         sf::rbox(r, 6, M_TILE, M_BG);
         let name = SET_NAMES[id as usize];
-        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, ST_MINUS_X - 4 - ST_TXT_X, r.h), name, STATUS_FG, M_TILE, 1, 0);
-        let vx = ST_MINUS_X + ST_KEY_W + 4;
+        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, minus - 4 - ST_TXT_X, r.h), name, STATUS_FG, M_TILE, 1, 0);
+        let vx = minus + ST_KEY_W + 4;
         sf::glyphs(sf::TEXT22, rect(vx, r.y, ST_PLUS_X - 4 - vx, r.h), val, M_ACCENT, M_TILE, 8, 0);
     }
-    for (d, x, t) in [(-1, ST_MINUS_X, "-"), (1, ST_PLUS_X, "+")] {
+    for (d, x, t) in [(-1, minus, "-"), (1, ST_PLUS_X, "+")] {
         let bg = match only {
             None => M_ACCENT,
             Some(p) if p.part == d => if p.on { KEY_PRESSED } else { M_ACCENT },
@@ -3603,7 +3652,7 @@ pub fn set_value_x(id: u8) -> i16 {
     if set_opens(id) {
         ST_SPLIT as i16
     } else if set_is_stepper(id) {
-        ST_MINUS_X - 6
+        st_minus_x(id) - 6
     } else {
         ST_TXT_X + sf::text_width(sf::TEXT22, SET_NAMES[id as usize], 0) + 6
     }
@@ -3614,10 +3663,10 @@ pub fn settings_id(tab: u8, row: usize) -> Option<u8> {
     SET_TABS.get(tab as usize)?.1.get(row).copied()
 }
 
-/// A tap at `x` on a stepper row: -1 (left of the value's centre: the
+/// A tap at `x` on the stepper row `id`: -1 (left of the value's centre: the
 /// "-" key) or +1.
-pub fn settings_step(x: u16) -> i8 {
-    if (x as i16) < (ST_MINUS_X + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
+pub fn settings_step(id: u8, x: u16) -> i8 {
+    if (x as i16) < (st_minus_x(id) + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
 }
 
 /// A settings-style page: title bar with "< Back", up to SET_ROWS rows of

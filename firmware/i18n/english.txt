@@ -2,6 +2,7 @@
   Bad 
   max 
  (AD2, isolated jacks)
+ (DMM calibration applied)\r\n
  (n/a here)
  (software),
  A now
@@ -37,6 +38,7 @@
  zoom
  } else if r.main.v.is_nan() { b
  } else { b
+# Noise: dmm.rs CAP_NOISE_UNIT, a unit tag compared by value (ui.rs), never drawn; its text is "Unstable: unplug USB?".
 ) && num(buf, &mut at, e.late_ms as f32, 0) && put(buf, &mut at, b
 ) } else { (crate::dmm::format(&mut t, ms as f32 / 1000.0, 2), b
 +Duty
@@ -189,9 +191,6 @@ BIG
 BMP with 
 BUSY
 Band
-Battery empty: off in 10 s
-Battery empty: off in 20 s
-Battery empty: off in 30 s
 Baud:
 Bd 
 Before: mean 
@@ -206,6 +205,7 @@ CAP
 CH1
 CH2 (DMM):
 CH2: DMM in V or A
+CH2: data logger running
 CH2: needs AC A
 CH2: no AD2 row here
 CH2: not in AC+DC/AUTO
@@ -334,7 +334,6 @@ LOW
 Leads open, nothing in A
 Leave and open the gallery again to retry
 Lost:
-Low battery! Please charge
 Lowest V/div
 MANU
 MANUAL
@@ -482,7 +481,6 @@ USB host is writing
 Undefined header
 Unit: \u{2103}
 Unit: \u{2109}
-Unstable: unplug USB?
 Unsupported
 Unsupported format
 V cal
@@ -531,10 +529,12 @@ Zero: leads open (12 s)
 Zero: signal present
 Zeroing: leads open
 ad2-isr
+amperes through the DMM A jack
 auto
 blue
 brown
 corrected
+cyan
 dB
 dBV
 dec-log
@@ -543,6 +543,7 @@ disk error
 disk full
 down
 drag orange T
+edge, CH2 scale
 edge, computed
 falling
 format
@@ -560,11 +561,13 @@ kWh
 list_page {title}: values vs rows
 logic level
 mA
+mF
 mHz
 mV
 mVA
 mW
 mWh
+magenta
 max 10 MHz
 max 50 kHz
 ms
@@ -590,11 +593,15 @@ settings: one value per setting
 shunt
 source DMM 
 t_s,raw,value_A,lost_before\r\n
+the value column is 
+the value column is amperes (CH1 type Cur; probe factor = A per input volt)\r\n
 uA
 uF
 uV
 us
 var
 view
+volts at the DMM jacks
+volts at the probe tip\r\n
 yellow
 zh

@@ -62,11 +62,10 @@ const TIM13_CCR1: u32 = 0x4000_1C34;
 /// p[11] bit 31: bits 16..29 hold the ohm null (persist_words); older records
 /// have it clear (their bits 16..31 were the removed hold-to-grab ms).
 const OHM_NULL_SET: u32 = 1 << 31;
-/// Offered stock options: dim 5/10/30 min/never, shutdown 10/30/60 min/never.
+/// Offered stock options: dim 5/10/30 min/never; the Shutdown list is in
+/// autooff.rs.
 const DIM_MS: [u64; 4] = [300_000, 600_000, 1_800_000, 0];
-const OFF_MS: [u64; 4] = [600_000, 1_800_000, 3_600_000, 0];
 const DIM_TXT: [&str; 4] = [crate::tr!("5 min"), crate::tr!("10 min"), crate::tr!("30 min"), crate::tr!("Never")];
-const OFF_TXT: [&str; 4] = [crate::tr!("10 min"), crate::tr!("30 min"), crate::tr!("1 hour"), crate::tr!("Never")];
 /// Wake gate (stock FUN_08020248, stock/re/stock-ui-notes/interaction.md D.3):
 /// after an idle dim the first touch / side key only restores the backlight,
 /// and input is ignored for this long from it. opendm40 also drops the rest of
@@ -77,7 +76,7 @@ const START: [View; 4] = [View::Dmm, View::Scope, View::Gen, View::Menu];
 /// UF-28: the idle power-off is announced OFF_WARN_MS before (then every
 /// OFF_WARN_STEP_MS): a toast and a beep at no less than ALERT_VOL %, so it
 /// is heard also with the key & alert volume at 0 %.
-const OFF_WARN_MS: u64 = 30_000;
+use crate::autooff::{OFF_MS, OFF_TXT, OFF_WARN_MS};
 const OFF_WARN_STEP_MS: u64 = 10_000;
 const ALERT_VOL: u8 = 50;
 /// A screenshot waits this long after a full repaint (`App::repaint_at`):
@@ -370,6 +369,9 @@ pub struct App {
     /// the readings are above the 10 A rating.
     alarm: crate::danger::Alarm,
     pub alarm_mode: u8,
+    /// Settings > Alerts "Continuity beep": Always (true) or with the volume
+    /// (false, the default; `ui::S_CONT`).
+    cont_always: bool,
     danger_rd: bool,
     i10_since: Option<u64>,
     /// A fuse check was running at the last tick (`fuse_tick`).
@@ -736,7 +738,7 @@ impl App {
             backlight: 55,
             beep_on: true,
             dim_idx: 0,
-            off_idx: 1,
+            off_idx: crate::autooff::OFF_DEFAULT,
             volume: 50,
             start_page: 0,
             mode_remember: false,
@@ -797,6 +799,7 @@ impl App {
             alert_buzz: false,
             alarm: crate::danger::Alarm::NEW,
             alarm_mode: crate::danger::LOUD,
+            cont_always: false,
             danger_rd: false,
             i10_since: None,
             fuse_busy: false,
@@ -1119,6 +1122,7 @@ impl App {
                 vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { crate::tr!("ON") } else { crate::tr!("OFF") };
                 vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { crate::tr!("ON") } else { crate::tr!("OFF (stock)") };
                 vals[ui::S_REMEMBER as usize] = if self.mode_remember { crate::tr!("ON") } else { crate::tr!("OFF") };
+                vals[ui::S_CONT as usize] = if self.cont_always { crate::tr!("Always") } else { crate::tr!("With volume") };
                 ui::settings(self.set_tab, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
@@ -1785,8 +1789,9 @@ impl App {
         }
         self.alert_beep(now);
         // The continuity / diode beeper (HY3131 CMP pin) has no loudness:
-        // off at volume 0 % (Dmm::poll applies a change).
-        crate::hy3131::set_beeper(self.volume > 0);
+        // its own level, or off at volume 0 % unless "Continuity beep" is
+        // Always (Dmm::poll applies a change).
+        crate::hy3131::set_beeper(self.volume > 0 || self.cont_always);
         if !can_draw {
             self.note_host_activity(now);
         }
@@ -2337,6 +2342,7 @@ impl App {
         // The MCX settings (the wave view's are not persisted).
         let sc = &self.scope.mcx_settings();
         let mut p = [0u32; crate::persist::WORDS];
+        // Bits 4..7 the Shutdown code (autooff.rs; 2 bits until 0.5.0).
         p[0] = self.dim_idx as u32
             | (self.off_idx as u32) << 4
             | (self.start_page as u32) << 8
@@ -2436,6 +2442,7 @@ impl App {
             | if self.dmm.ohm_neg { crate::meter::EXT_OHM_NEG } else { 0 }
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT
             | if self.mode_remember { crate::meter::EXT_MODE_REMEMBER } else { 0 }
+            | if self.cont_always { crate::meter::EXT_CONT_ALWAYS } else { 0 }
             | ui::trend_code(self.chart_rate) << crate::meter::EXT_TREND_SHIFT
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
@@ -2487,13 +2494,14 @@ impl App {
         self.mode_remember = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_MODE_REMEMBER != 0;
         let cont = same_session || self.mode_remember;
         self.dim_idx = (p[0] & 3) as usize;
-        self.off_idx = (p[0] >> 4 & 3) as usize;
+        self.off_idx = crate::autooff::off_code(p[0]);
         self.start_page = (p[0] >> 8 & 3) as usize;
         self.bt_on = p[0] >> 12 & 1 != 0;
         crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
-        crate::hy3131::set_beeper(self.volume > 0); // before the first DMM row
+        self.cont_always = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_CONT_ALWAYS != 0;
+        crate::hy3131::set_beeper(self.volume > 0 || self.cont_always); // before the first DMM row
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
@@ -4336,15 +4344,15 @@ impl App {
                 };
                 match id {
                     ui::S_DIM => self.dim_idx = (self.dim_idx + 1) % 4,
-                    ui::S_SHUTDOWN => self.off_idx = (self.off_idx + 1) % 4,
+                    ui::S_SHUTDOWN => self.off_idx = crate::autooff::off_step(self.off_idx, ui::settings_step(id, x)),
                     // -/+ steppers (ui-review #12): Backlight on the
                     // 10, 15 ... 95, 100 grid, volume 10 % steps, clamped.
                     ui::S_BACKLIGHT => {
-                        self.backlight = ui::backlight_step(self.backlight, ui::settings_step(x));
+                        self.backlight = ui::backlight_step(self.backlight, ui::settings_step(id, x));
                         backlight(self.backlight);
                     }
                     ui::S_VOLUME => {
-                        let d = ui::settings_step(x) as i16 * 10;
+                        let d = ui::settings_step(id, x) as i16 * 10;
                         self.volume = (self.volume as i16 + d).clamp(0, 100) as u8;
                     }
                     ui::S_BT => self.bt_on = !self.bt_on,
@@ -4389,6 +4397,7 @@ impl App {
                         };
                         self.dmm.set_alert_mask(clk, j);
                     }
+                    ui::S_CONT => self.cont_always = !self.cont_always,
                     ui::S_ALARM => {
                         // Danger alarm (doc 4.10): Loud -> Volume -> Off.
                         self.alarm_mode = (self.alarm_mode + 1) % 3;
@@ -5573,6 +5582,8 @@ impl App {
                 out.put_bytes(if sc.ac { b"AC" } else { b"DC" });
                 Some(())
             }
+            // Source DMM: the level on CH2's scale, as the badge.
+            C::TrigLevel(v) if sc.tsrc == scope::TSRC_CH2 && !self.scope.wave_on() => self.ch2_trig_level(&mut sc, v, out),
             C::TrigLevel(Some(v)) => {
                 // Volts at the probe tip, as TRIG:LEV? answers (probe
                 // applied), kept as given: the row was the one below the
@@ -5606,11 +5617,27 @@ impl App {
                 Some(())
             }
             C::TrigSource(Some(t)) => {
-                sc.tsrc = t.min(scope::TSRC_GEN);
+                // CHAN2 with CH2 off: CH2 on first (as the Trigger tab);
+                // refused there (a DMM function without CH2): an error, the
+                // source stays.
+                let t = t.min(scope::TSRC_CH2);
+                if t == scope::TSRC_CH2 && !self.ch2.on {
+                    if self.ch2_on_for_trig(clk) {
+                        sc = self.scope.s;
+                    } else {
+                        out.set_err("Settings conflict");
+                        return false;
+                    }
+                }
+                sc.tsrc = t;
                 None
             }
             C::TrigSource(None) => {
-                out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
+                out.put_bytes(match sc.tsrc {
+                    scope::TSRC_GEN => b"GEN",
+                    scope::TSRC_CH2 => b"CHAN2",
+                    _ => b"CHAN1",
+                });
                 Some(())
             }
             C::GenScale(Some(v)) => {

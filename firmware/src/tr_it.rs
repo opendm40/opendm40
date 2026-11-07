@@ -5,6 +5,15 @@
 macro_rules! tr {
     ("0 A for 60 s: check the fuse?") => { "0 A per 60 s: fusibile?" };
     ("1 hour") => { "1 ora" };
+    ("10 hours") => { "10 ore" };
+    ("2 hours") => { "2 ore" };
+    ("3 hours") => { "3 ore" };
+    ("4 hours") => { "4 ore" };
+    ("5 hours") => { "5 ore" };
+    ("6 hours") => { "6 ore" };
+    ("7 hours") => { "7 ore" };
+    ("8 hours") => { "8 ore" };
+    ("9 hours") => { "9 ore" };
     ("< Back") => { "< Indietro" };
     ("< Prev") => { "< Prec" };
     ("A input path intact") => { "Ingresso A integro" };
@@ -15,6 +24,7 @@ macro_rules! tr {
     ("Accuracy") => { "Precisione" };
     ("Again") => { "Ripeti" };
     ("Alerts") => { "Avvisi" };
+    ("Always") => { "Sempre" };
     ("Analog power") => { "Alim. analog." };
     ("Arm") => { "Arma" };
     ("Auto (per view)") => { "Auto (vista)" };
@@ -23,6 +33,9 @@ macro_rules! tr {
     ("Back") => { "Indietro" };
     ("Backlight") => { "Retroillum." };
     ("Bargraph") => { "Barra" };
+    ("Battery empty: off in 10 s") => { "Batteria: si spegne tra 10 s" };
+    ("Battery empty: off in 20 s") => { "Batteria: si spegne tra 20 s" };
+    ("Battery empty: off in 30 s") => { "Batteria: si spegne tra 30 s" };
     ("Both always") => { "Sempre entrambi" };
     ("Brightness:") => { "Luminosit\u{1}:" };
     ("Burden voltage") => { "Caduta tens." };
@@ -37,8 +50,10 @@ macro_rules! tr {
     ("Clear") => { "Cancella" };
     ("Clear limits") => { "Azzera limiti" };
     ("Color") => { "Colore" };
+    ("Continuity beep") => { "Bip continuit\u{1}" };
     ("Corners") => { "Angoli" };
     ("Coupling") => { "Accopp." };
+    ("Cur") => { "Corr" };
     ("Current Settings") => { "Impost. corrente" };
     ("Current in A jack: check leads") => { "Corrente in A: vedi puntali" };
     ("Current too high: reduce it") => { "Corrente alta: riducila" };
@@ -94,13 +109,14 @@ macro_rules! tr {
     ("Install it now?") => { "Installare ora?" };
     ("Installing firmware...") => { "Installazione..." };
     ("Interval") => { "Intervallo" };
-    ("Jack alerts") => { "Avvisi boccole" };
+    ("Jack alerts") => { "Boccole" };
     ("Key/alert volume") => { "Volume tasti" };
     ("Lead from V/ohm jack to A") => { "Puntale da V/\u{3a9} ad A" };
     ("Limits") => { "Limiti" };
     ("Loading...") => { "Caricamento..." };
     ("Log failed") => { "Errore log" };
     ("Loud") => { "Forte" };
+    ("Low battery! Please charge") => { "Batteria scarica! Ricaricare" };
     ("Lower") => { "Inf." };
     ("Lower = reading") => { "Inf. = lettura" };
     ("Lower limit") => { "Limite inf." };
@@ -190,14 +206,18 @@ macro_rules! tr {
     ("Touch calibration") => { "Calibrazione tocco" };
     ("Touch test") => { "Test tocco" };
     ("Triangle") => { "Triangolo" };
+    ("Trigger source: CH1") => { "Sorgente trigger: CH1" };
     ("Try again") => { "Riprova" };
+    ("Type") => { "Tipo" };
     ("Type:") => { "Tipo:" };
     ("USB disk") => { "Disco USB" };
+    ("Unstable: unplug USB?") => { "Instabile: scollegare USB?" };
     ("Until stopped") => { "Fino a stop" };
     ("Upper") => { "Sup." };
     ("Upper = reading") => { "Sup. = lettura" };
     ("Upper limit") => { "Limite sup." };
     ("Vendor") => { "Produttore" };
+    ("Vol") => { "Tens" };
     ("Voltage Settings") => { "Impost. tensione" };
     ("Voltage on V jack, no current") => { "Tensione su V, no corrente" };
     ("Voltage on circuit - power off") => { "Togliere tensione al circuito" };
@@ -205,6 +225,7 @@ macro_rules! tr {
     ("Width:") => { "Larghezza:" };
     ("Window") => { "Finestra" };
     ("Wiring") => { "Schema" };
+    ("With volume") => { "Con il volume" };
     ("Yes") => { "S\u{2}" };
     ("expect ~48 \u{3a9}") => { "attesi ~48 \u{3a9}" };
     ("nothing else connected") => { "nient'altro collegato" };
@@ -216,6 +237,15 @@ macro_rules! tr {
 pub const PAIRS: &[(&str, &str)] = &[
     ("0 A for 60 s: check the fuse?", "0 A per 60 s: fusibile?"),
     ("1 hour", "1 ora"),
+    ("10 hours", "10 ore"),
+    ("2 hours", "2 ore"),
+    ("3 hours", "3 ore"),
+    ("4 hours", "4 ore"),
+    ("5 hours", "5 ore"),
+    ("6 hours", "6 ore"),
+    ("7 hours", "7 ore"),
+    ("8 hours", "8 ore"),
+    ("9 hours", "9 ore"),
     ("< Back", "< Indietro"),
     ("< Prev", "< Prec"),
     ("A input path intact", "Ingresso A integro"),
@@ -226,6 +256,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Accuracy", "Precisione"),
     ("Again", "Ripeti"),
     ("Alerts", "Avvisi"),
+    ("Always", "Sempre"),
     ("Analog power", "Alim. analog."),
     ("Arm", "Arma"),
     ("Auto (per view)", "Auto (vista)"),
@@ -234,6 +265,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Back", "Indietro"),
     ("Backlight", "Retroillum."),
     ("Bargraph", "Barra"),
+    ("Battery empty: off in 10 s", "Batteria: si spegne tra 10 s"),
+    ("Battery empty: off in 20 s", "Batteria: si spegne tra 20 s"),
+    ("Battery empty: off in 30 s", "Batteria: si spegne tra 30 s"),
     ("Both always", "Sempre entrambi"),
     ("Brightness:", "Luminosit\u{1}:"),
     ("Burden voltage", "Caduta tens."),
@@ -248,8 +282,10 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Clear", "Cancella"),
     ("Clear limits", "Azzera limiti"),
     ("Color", "Colore"),
+    ("Continuity beep", "Bip continuit\u{1}"),
     ("Corners", "Angoli"),
     ("Coupling", "Accopp."),
+    ("Cur", "Corr"),
     ("Current Settings", "Impost. corrente"),
     ("Current in A jack: check leads", "Corrente in A: vedi puntali"),
     ("Current too high: reduce it", "Corrente alta: riducila"),
@@ -305,13 +341,14 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Install it now?", "Installare ora?"),
     ("Installing firmware...", "Installazione..."),
     ("Interval", "Intervallo"),
-    ("Jack alerts", "Avvisi boccole"),
+    ("Jack alerts", "Boccole"),
     ("Key/alert volume", "Volume tasti"),
     ("Lead from V/ohm jack to A", "Puntale da V/\u{3a9} ad A"),
     ("Limits", "Limiti"),
     ("Loading...", "Caricamento..."),
     ("Log failed", "Errore log"),
     ("Loud", "Forte"),
+    ("Low battery! Please charge", "Batteria scarica! Ricaricare"),
     ("Lower", "Inf."),
     ("Lower = reading", "Inf. = lettura"),
     ("Lower limit", "Limite inf."),
@@ -401,14 +438,18 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Touch calibration", "Calibrazione tocco"),
     ("Touch test", "Test tocco"),
     ("Triangle", "Triangolo"),
+    ("Trigger source: CH1", "Sorgente trigger: CH1"),
     ("Try again", "Riprova"),
+    ("Type", "Tipo"),
     ("Type:", "Tipo:"),
     ("USB disk", "Disco USB"),
+    ("Unstable: unplug USB?", "Instabile: scollegare USB?"),
     ("Until stopped", "Fino a stop"),
     ("Upper", "Sup."),
     ("Upper = reading", "Sup. = lettura"),
     ("Upper limit", "Limite sup."),
     ("Vendor", "Produttore"),
+    ("Vol", "Tens"),
     ("Voltage Settings", "Impost. tensione"),
     ("Voltage on V jack, no current", "Tensione su V, no corrente"),
     ("Voltage on circuit - power off", "Togliere tensione al circuito"),
@@ -416,6 +457,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Width:", "Larghezza:"),
     ("Window", "Finestra"),
     ("Wiring", "Schema"),
+    ("With volume", "Con il volume"),
     ("Yes", "S\u{2}"),
     ("expect ~48 \u{3a9}", "attesi ~48 \u{3a9}"),
     ("nothing else connected", "nient'altro collegato"),

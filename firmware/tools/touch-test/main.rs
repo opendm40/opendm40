@@ -56,6 +56,10 @@ mod hy3131_tables;
 mod lcd;
 #[path = "../../src/meter.rs"]
 mod meter;
+// The DMM CH2 store (scope.rs: the CH2 trigger source).
+#[allow(dead_code, static_mut_refs)]
+#[path = "../../src/scope_ch2.rs"]
+mod scope_ch2;
 #[path = "../../src/scope.rs"]
 mod scope;
 #[path = "../../src/scope_meas.rs"]
@@ -920,8 +924,11 @@ fn hit_tests(ck: &mut Ck) {
     }
     // Backlight / volume steppers (ui-review #12): the "-" key (x 322..361)
     // steps down, the "+" key (426..465) up.
-    ck.t("settings stepper: '-' key steps down", ui::settings_step(340) == -1);
-    ck.t("settings stepper: '+' key steps up", ui::settings_step(430) == 1 && ui::settings_step(465) == 1);
+    ck.t("settings stepper: '-' key steps down", ui::settings_step(ui::S_VOLUME, 340) == -1);
+    ck.t("settings stepper: '+' key steps up", ui::settings_step(ui::S_VOLUME, 430) == 1 && ui::settings_step(ui::S_VOLUME, 465) == 1);
+    // Shutdown: the value box is wider, the "-" key at x 292..331.
+    ck.t("Shutdown stepper: '-' key", ui::settings_step(ui::S_SHUTDOWN, 292) == -1 && ui::settings_step(ui::S_SHUTDOWN, 331) == -1);
+    ck.t("Shutdown stepper: '+' key", ui::settings_step(ui::S_SHUTDOWN, 430) == 1 && ui::settings_step(ui::S_SHUTDOWN, 469) == 1);
     // Backlight walks the manual's grid both ways and stays on it at the ends (#91).
     let mut up = vec![55u8];
     for _ in 0..6 { up.push(ui::backlight_step(*up.last().unwrap(), 1)); }
@@ -1132,7 +1139,7 @@ fn hit_tests(ck: &mut Ck) {
         ck.t("scope panel: the graph side (x < PANEL_X) is no panel target", ph(scope_ui::PANEL_X as u16 - 1, 60).is_none() && ph(scope_ui::PANEL_X as u16, 60).is_some());
     }
     ck.t("range page: Null on the ohm page only, the note row's right half", ui::range_hit(dmm::Button::Ohm, Some(0), 300, 160) == Some(Err(8)) && ui::range_hit(dmm::Button::Volt, Some(0), 300, 160) != Some(Err(8)));
-    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY, dec: scope_ui::dec::SetupVals::DEFAULT };
+    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, cur: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY, ch2_func: 0, dec: scope_ui::dec::SetupVals::DEFAULT };
     for tab in 0..5u8 {
         host::reset(0);
         scope_ui::draw_mf(tab, &pv);
