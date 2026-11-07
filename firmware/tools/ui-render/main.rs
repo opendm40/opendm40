@@ -4011,7 +4011,7 @@ fn main() {
     }
     ui::set_btn_mem(0);
     // Beeper indicator (continuity / diode, App::beep_ind): every style
-    // (bit 0 the SHORT / BEEP band, bit 1 the digits green) x SHORT / BEEP
+    // (bit 0 the BEEP band, bit 1 the digits green) x short / pattern
     // x bargraph / history row x limit badge, layout checked; on -> off
     // and off -> on (with new readings in between) equal a fresh page.
     // Renders: b01..b11 (the PR's comparison), b12 the bargraph-row
@@ -4097,9 +4097,9 @@ fn main() {
         page(r, *b, 0, true, meter::V_NONE);
         let br = stockfont::rect(8, 147, 464, 26);
         stockfont::rbox(br, 6, ui::SHORT_BG, ui::BG);
-        stockfont::glyphs(stockfont::TEXT22, br, "SHORT", 0xFFFF, ui::SHORT_BG, 8, 2);
+        stockfont::glyphs(stockfont::TEXT22, br, "BEEP", 0xFFFF, ui::SHORT_BG, 8, 2);
         save(&out, &format!("b{n:02}-short-cont-barrow-mockup"));
-        // Combined view: the strip's badge SHORT / BEEP and its value green
+        // Combined view: the strip's badge BEEP and its value green
         // (scope_page.rs sp_strip); off -> on -> off equals a fresh strip.
         for (i, (name, r, _)) in short_cases.iter().enumerate() {
             let k = if *name == "diode-pn" { 2u8 } else { 1 };
@@ -4107,7 +4107,7 @@ fn main() {
                 let mut d = ui::strip_data(r, 0, meter::V_NONE, false, 0, false, None);
                 ui::strip_acc(&mut d, r, Some(ui::Acc { model: 2, tc: true }));
                 if on {
-                    d.badge = if k == 1 { "SHORT" } else { "BEEP" };
+                    d.badge = "BEEP";
                     d.badge_col = ui::SHORT_BG;
                     d.short = true;
                 }
