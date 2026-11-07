@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope: digital phosphor, MF > Display > Persist DPO / HOT:** CH1 bright where the trace runs most often, dim where it goes rarely ([manual](docs/manual/README.md#display-settings)). Its memory shortens the scope record to 36 864 samples (from 44 032; 55 688 from 65 520 at 100 ms/div and slower).
+
 - DMM: 2 px more between the big digits and the bargraph.
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.

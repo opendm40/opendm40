@@ -20,7 +20,11 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log"]
+default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log", "dpo"]
+# Digital phosphor (Display > Persist DPO / HOT; src/scope_dpo.rs): 14 KB of
+# SRAM for the hit counts, paid by the scope record (scope::CAP 7 K samples
+# shorter).
+dpo = []
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []

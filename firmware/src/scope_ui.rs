@@ -1836,6 +1836,10 @@ pub struct Graph {
     pub px: u32,
     /// Trace-only flush resumes at this column (`FLUSH_BUDGET`).
     next: u16,
+    /// Digital phosphor (scope_dpo.rs): 0 off, 1 DPO (the trace colour's
+    /// brightness), 2 HOT (heat colours); CH1 is drawn from its counts.
+    pub dpo: u8,
+    d_dpo: u8,
 }
 
 /// Device: a flush that only moves traces (decoration and holes unchanged:
@@ -1891,6 +1895,8 @@ static mut GRAPH: Graph = Graph {
     d_holes: [None; NH],
     px: 0,
     next: 0,
+    dpo: 0,
+    d_dpo: 0,
 };
 
 /// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
@@ -1936,6 +1942,8 @@ pub fn init() {
     g.d_holes = [None; NH];
     g.px = 0;
     g.next = 0;
+    g.dpo = 0;
+    g.d_dpo = 0;
     init_shown();
 }
 
@@ -2157,15 +2165,28 @@ impl Graph {
     /// Bring the panel up to date with `tr` / `ps` / `ma` and the model's
     /// lines, markers and colours, repainting only the rows that changed.
     pub fn flush(&mut self, m: &Model) {
+        let dm = self.dpo;
+        if dm == 0 && crate::scope_dpo::any() {
+            crate::scope_dpo::discard();
+        }
         self.deco = Deco::of(m);
         let d = self.deco;
         let o = self.d_deco;
         // Nothing changed (most main-loop passes): no per-column work.
-        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 {
+        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 && dm == self.d_dpo && !crate::scope_dpo::any() {
             self.px = 0;
             return;
         }
-        let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh;
+        let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh || dm != self.d_dpo;
+        // The phosphor's count -> colour table and a pixel's colour from it.
+        let dcol = if dm != 0 { crate::scope_dpo::colours(d.trace, dm == 2) } else { [C_FILL; 16] };
+        let dpx = |fx: i16, fy: i16| -> Option<Color> {
+            if dm == 0 {
+                return None;
+            }
+            let k = crate::scope_dpo::get((fx - 1) as usize, crate::scope_dpo::cell_of(fy));
+            if k == 0 { None } else { Some(dcol[k as usize]) }
+        };
         let h = d.fh;
         let mut minks = [MarkInk::NONE; NGRAPH];
         for (i, mk) in d.marks.iter().enumerate() {
@@ -2217,6 +2238,9 @@ impl Graph {
             if fy >= gn.0 && fy <= gn.1 {
                 return C_GEN_TR;
             }
+            if let Some(c) = dpx(fx, fy) {
+                return c;
+            }
             if fy >= ps.0 && fy <= ps.1 {
                 return d.half;
             }
@@ -2262,9 +2286,14 @@ impl Graph {
             let fx = i as i16 + 1;
             let sx = GX + fx;
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
+            // The phosphor's changed cells (taken: a full column covers them).
+            let dsp = if dm != 0 { crate::scope_dpo::take(i) } else { None };
             if full || vl(&d, fx) != vl(&o, fx) {
                 sp.add((1, h - 2));
             } else {
+                if let Some(r) = dsp {
+                    sp.add(r);
+                }
                 for (a, b) in [(self.tr[i], self.d_tr[i]), (self.ps[i], self.d_ps[i]), (self.ma[i], self.d_ma[i]), (self.gn[i], self.d_gn[i]), (self.c2[i], self.d_c2[i])] {
                     if a != b {
                         sp.add(a);
@@ -2364,6 +2393,8 @@ impl Graph {
                         C_CH2
                     } else if fy >= gn.0 && fy <= gn.1 {
                         C_GEN_TR
+                    } else if let Some(c) = dpx(fx, fy) {
+                        c
                     } else if fy >= ps.0 && fy <= ps.1 {
                         d.half
                     } else if fy & 1 == 1 && fy <= vrow {
@@ -2430,7 +2461,7 @@ impl Graph {
                 let mut span = lcd::strip_span(sy, GX + fx, GX + e);
                 let mut out = lcd::Out::panel();
                 if let Some(sp) = span.as_deref_mut() {
-                    if !line && !vrow && (GX + e < mlo || GX + fx > mhi) {
+                    if !line && !vrow && dm == 0 && (GX + e < mlo || GX + fx > mhi) {
                         // No marker, line or vertical line in the run: the
                         // inline rule over the columns, no index checks.
                         band_run(sp, &self.tr[(fx - 1) as usize..e as usize], &self.ps[(fx - 1) as usize..e as usize], &self.ma[(fx - 1) as usize..e as usize], (&self.c2[(fx - 1) as usize..e as usize], &self.gn[(fx - 1) as usize..e as usize]), &COLC[fx as usize..=e as usize], r, rc, &d);
@@ -2454,6 +2485,8 @@ impl Graph {
                             C_CH2
                         } else if r >= gn.0 && r <= gn.1 {
                             C_GEN_TR
+                        } else if let Some(c) = dpx(x, r) {
+                            c
                         } else if r >= ps.0 && r <= ps.1 {
                             d.half
                         } else if let Some(c) = if vrow { vl(&d, x) } else { None } {
@@ -2483,6 +2516,8 @@ impl Graph {
             }
         }
         self.next = 0;
+        crate::scope_dpo::done();
+        self.d_dpo = dm;
         self.d_tr = self.tr;
         self.d_ps = self.ps;
         self.d_ma = self.ma;
@@ -3333,7 +3368,14 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 fill_text(r, pc, C_POP_BG, sf::SC_F16, r, t, C_FILL, 1, 0);
             }
             option_list(rect(24, 81, 88, 24), pc, &[crate::tr!("On"), crate::tr!("Off")], 44, if v.roll { 0 } else { 1 });
-            option_list(rect(24, 125, 176, 24), pc, &[crate::tr!("OFF"), "MIN", "1S", "INF"], 44, v.persist as usize);
+            // opendm40: DPO / HOT, the digital phosphor (scope_dpo.rs). Six
+            // 29 px items: "OFF" stays English like MIN / 1S / INF (a
+            // translation such as "ВЫКЛ" does not fit).
+            if crate::scope_dpo::ENABLED {
+                option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF", "DPO", "HOT"], 29, v.persist as usize);
+            } else {
+                option_list(rect(24, 125, 176, 24), pc, &[crate::tr!("OFF"), "MIN", "1S", "INF"], 44, v.persist as usize);
+            }
             mf_display_values(v);
             // opendm40: the computed generator trace.
             fill_c(rect(MF_IX, 161, MF_IW, 50), pc, C_POP_BG);
@@ -3511,7 +3553,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
         1 => {
             if let Some(i) = option_hit(rect(24, 81, 88, 24), 2, 44, x, y) {
                 MfHit::Roll(i == 0)
-            } else if let Some(i) = option_hit(rect(24, 125, 176, 24), 4, 44, x, y) {
+            } else if let Some(i) = if crate::scope_dpo::ENABLED { option_hit(rect(24, 125, 176, 24), 6, 29, x, y) } else { option_hit(rect(24, 125, 176, 24), 4, 44, x, y) } {
                 MfHit::Persist(i)
             } else if rect(SL_X - 10, 75, MF_IX + MF_IW - (SL_X - 10), 36).has(x, y) {
                 MfHit::Bright

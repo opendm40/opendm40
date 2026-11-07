@@ -62,6 +62,7 @@ mod decode;
 mod hwtrig;
 mod scope_meas;
 mod scope_ui;
+mod scope_dpo;
 mod scope_ch2;
 mod fft;
 mod sinc;

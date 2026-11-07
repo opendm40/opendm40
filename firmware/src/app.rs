@@ -2378,7 +2378,7 @@ impl App {
         p[6] |= (sc.hpos as u32 + 1) << 18 | (sc.vzoom.min(2) as u32) << 28;
         // Scope page: colour, brightness, tap-step mode (p[1] bits 17..29),
         // drag mode, swipes, persistence, pressed feedback, grid intensity
-        // (p[11] bits 1..6, 12..15); 0 = default everywhere.
+        // (p[11] bits 1..7, 12..15); 0 = default everywhere.
         let (mut p1, mut p11) = (p[1], p[11]);
         self.sp_persist(&mut p1, &mut p11);
         p[1] = p1;

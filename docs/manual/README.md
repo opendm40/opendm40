@@ -378,7 +378,7 @@ lightning from 100 V). opendm40 adds:
 | Cursors | Through the Measure tab | One tap on **CUR** |
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
-| Capture length | 65 520 samples | From 100 ms/div 65 520 or more, up to 262 144 (what the signal allows); 44 032 faster |
+| Capture length | 65 520 samples | From 100 ms/div 55 688 or more, up to 262 144 (what the signal allows); 36 864 faster |
 | Serial decoding | — | [UART and DALI](#protocol-decoder) under the trace |
 
 ![The touchable top bar](img/new-scope-topbar.png)
@@ -451,8 +451,9 @@ lightning from 100 V). opendm40 adds:
 #### What the stock firmware has and opendm40 does not
 
 - Chinese menus: opendm40 is English only.
-- The 65 520-sample scope capture at timebases faster than 100 ms/div
-  (opendm40: 44 032 there).
+- The 65 520-sample scope capture (opendm40: 36 864 faster than 100 ms/div,
+  from 100 ms/div 55 688 or more; the rest of the memory holds the
+  [digital phosphor](#display-settings)).
 
 ## Multimeter
 
@@ -1521,11 +1522,11 @@ trace; tap the title again while its popup is open to turn it off.
 Press **RUN** (or tap the run state) to stop. The scope takes one more
 capture (the trigger point at the trigger position, as **Single**; up to
 the screen's time + 1 s), then stops; press again to stop at once. The
-capture stays in memory (from 100 ms/div a roll capture: at least 65 520
+capture stays in memory (from 100 ms/div a roll capture: at least 55 688
 samples, up to 262 144 for a smooth signal). A triggered capture while
-running holds 44 032 samples up to 5 ms/div and 26 624 from 10 ms/div (one
+running holds 36 864 samples up to 5 ms/div and 26 624 from 10 ms/div (one
 triggered in software, with CH2 on or the generator as the source, can be
-shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
+shorter); a **Single** capture 36 864, from 100 ms/div 26 624:
 
 - change the timebase to zoom in or out of the stored capture (zoom in stops
   at **Max zoom**, 16 samples across the screen);
@@ -1540,8 +1541,14 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 ### Display settings
 
-**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
-**Brightness** and **Grid** intensity; **GEN trace** on / off.
+**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF, DPO,
+HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
+
+**Persist DPO / HOT** (digital phosphor) draws CH1 by how often the trace
+hits each spot: bright where it runs in most frames, dim where it went rarely
+(jitter, noise, a rare runt); **DPO** in CH1's colour, **HOT** blue (rare) to
+red (always). It fades over some seconds; a drag, a pinch, a settings change,
+roll and STOP show the plain trace and start over.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan under CH1, on CH1's position and its own V/div (the **GEN** block's

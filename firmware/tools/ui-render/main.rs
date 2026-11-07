@@ -76,7 +76,10 @@ mod scope_meas;
 mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
+#[path = "../../src/scope_dpo.rs"]
+mod scope_dpo;
 mod scope_add;
+mod dpo_ui;
 #[path = "../../src/decode.rs"]
 mod decode;
 mod decode_ui;
@@ -1658,6 +1661,7 @@ fn main() {
 
     // 0c. opendm40 additions on the replica page (FFT boxes / peak, ...).
     scope_add::run(&mut ck, &out);
+    dpo_ui::run(&mut ck, &out);
     // 0d. The protocol decoder view (ui_decode.rs).
     decode_ui::run(&mut ck, &out);
 

@@ -68,6 +68,8 @@ mod trigsoft;
 mod decode;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
+#[path = "../../src/scope_dpo.rs"]
+mod scope_dpo;
 #[path = "../../src/stockfont.rs"]
 mod stockfont;
 #[path = "../../src/touch.rs"]
