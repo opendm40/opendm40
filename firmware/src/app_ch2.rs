@@ -58,7 +58,7 @@ fn label(vdiv: f32, amps: bool) -> crate::scope_ui::Txt {
 
 impl App {
     /// Why CH2 cannot run on the current DMM function (None: it can).
-    fn ch2_why(&self) -> Option<&'static str> {
+    pub(super) fn ch2_why(&self) -> Option<&'static str> {
         let b = self.dmm.button();
         if !app_wave::WAVE_BUILD {
             Some("CH2: not in this build")
@@ -203,16 +203,19 @@ impl App {
         }
     }
 
-    /// MF > Display "CH2 (DMM)" On / Off.
+    /// MF > Display "CH2 (DMM)" On / Off. The Wave view has the DMM
+    /// channel on: Off leaves it (`wave_channel`).
     pub(super) fn ch2_set(&mut self, clk: &mut Clock, on: bool) {
         let now = clk.now_ms();
+        if self.scope.wave_on() {
+            if !on {
+                self.wave_channel(clk, false);
+            }
+            return;
+        }
         if on {
             if let Some(why) = self.ch2_why() {
                 self.toast(now, why, false);
-                return;
-            }
-            if self.scope.wave_on() {
-                self.toast(now, "CH2: not in the Wave view", false);
                 return;
             }
         }
@@ -282,7 +285,12 @@ impl App {
 
     /// MF > Display CH2 V/div - / +: the next `scope::wave_steps` value
     /// (screen only: the DMM range stays).
+    /// The Wave view: its V/div steps (`wave_range_step`, the range follows).
     pub(super) fn ch2_step(&mut self, up: bool, now: u64) {
+        if self.scope.wave_on() {
+            self.wave_range_step(!up, now);
+            return;
+        }
         let amps = self.scope_ch2_amps();
         let st = scope::wave_steps(amps);
         let i = scope::wave_step_of(amps, self.ch2.vdiv).unwrap_or(0);
@@ -301,12 +309,14 @@ impl App {
     }
 
     /// The CH2 V/div ("1.5V", "200mA"; the DMM block, the Display tab):
-    /// also while off, "--" before the first start, in the Wave view and
-    /// while the multimeter's V / A is not the last stream's unit (until
-    /// the stream starts on the new function; AC+DC: never).
+    /// also while off, "--" before the first start and while the
+    /// multimeter's V / A is not the last stream's unit (until the stream
+    /// starts on the new function; AC+DC: never). The Wave view: its V/div.
     pub(super) fn ch2_label(&self) -> crate::scope_ui::Txt {
         let f = self.ch2_func_idx();
-        if self.ch2.vdiv > 0.0 && !self.scope.wave_on() && (f == 2 || (f == 1) == self.scope_ch2_amps()) {
+        if self.scope.wave_on() {
+            label(self.scope.vdiv(), self.scope.wave_scale_now().amps)
+        } else if self.ch2.vdiv > 0.0 && (f == 2 || (f == 1) == self.scope_ch2_amps()) {
             label(self.ch2.vdiv, self.scope_ch2_amps())
         } else {
             crate::scope_ui::Txt::new("--")

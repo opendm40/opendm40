@@ -137,7 +137,9 @@ SECTIONS
          * n7_arg: region B again since region C audit #3 (2026-10-29, C at
          * 7.7 KB free, B at 50 KB; docs/native-boot.md). They were in B
          * from region C audit #1 (133f81e) and in C from region B audit #4
-         * (2026-10-25, B at 15 KB). */
+         * (2026-10-25, B at 15 KB). dc_enter is `.cold` again (its own
+         * attribute; once per stream start, before the ISR): B at 7.8 KB
+         * with the scope PRs of 2026-11-08 merged. */
         *(.text.*8opendm409scope_csv*);
         /* The decoder's frame log: a frame's waveform, drawn on a tap, the
          * top bar / counters, the page draw, the setup popup and the

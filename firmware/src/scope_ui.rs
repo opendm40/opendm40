@@ -402,10 +402,12 @@ pub struct Model {
     /// Source DMM: the unit of the vertical values is A (current rows).
     pub amps: bool,
     /// The V/div value (SI, `fmt_div`: "1.5V", "200uA", "2.5V" with a x5
-    /// probe) and, source DMM, the CH1 label ("AC mA"); 0 / "" = the stock
-    /// texts from `vdiv` / "CH1".
+    /// probe; in the Wave view the DMM channel's); 0 = the stock text from
+    /// `vdiv`.
     pub wvdiv: f32,
-    pub ch1_txt: &'static str,
+    /// The Wave view: the CH1 block's V/div (the MCX input's, kept while
+    /// CH1 is off there).
+    pub ch1_scale: Txt,
     /// A CSV recording runs (csvlog.rs; the Scope page and the combined
     /// view): the REC mark (`rec_mark`) in the source badge's slot, the
     /// record bar beside it. The Wave view and a recording
@@ -438,8 +440,10 @@ pub struct Model {
     /// The GEN trace shown and its V/div: the GEN block.
     pub gen_on: bool,
     pub gen_txt: Txt,
-    /// The Wave view (the DMM as the scope's source): the CH1 block shows
-    /// its function, the DMM block reads "MCX" (back to the OSC input).
+    /// The Wave view: the scope with only the DMM channel on. The record is
+    /// the DMM's (scope.rs `wave`), drawn as the DMM channel: its colour,
+    /// its '2' marker, its block on with the V/div; CH1 and GEN off. No
+    /// block, label or colour changes place (owner 2026-11-08).
     pub wave: bool,
 }
 
@@ -516,7 +520,7 @@ impl Model {
         cur_tab: 0,
         amps: false,
         wvdiv: 0.0,
-        ch1_txt: "",
+        ch1_scale: Txt::EMPTY,
         rec: false,
         rec_dim: false,
         rec_unit: "V",
@@ -535,13 +539,18 @@ impl Model {
     pub fn pal(&self) -> Color {
         PALETTE[self.colour as usize % NPAL]
     }
+    /// The colour of the record's channel: CH1's, in the Wave view the DMM
+    /// channel's (its record is the DMM's).
+    pub fn rec_pal(&self) -> Color {
+        if self.wave { c_ch2() } else { self.pal() }
+    }
     /// Trace colour: palette blended into the fill by the brightness.
     pub fn trace_colour(&self) -> Color {
-        blend565(self.pal(), C_FILL, (self.bright.min(100) as u32 * 255 / 100) as u8)
+        blend565(self.rec_pal(), C_FILL, (self.bright.min(100) as u32 * 255 / 100) as u8)
     }
     /// Persistence: the same at half alpha.
     pub fn half_colour(&self) -> Color {
-        blend565(self.pal(), C_FILL, ((self.bright.min(100) as u32 * 255 / 100) >> 1) as u8)
+        blend565(self.rec_pal(), C_FILL, ((self.bright.min(100) as u32 * 255 / 100) >> 1) as u8)
     }
     /// Math colour: the palette entry (unblended, stock), grey while math
     /// is off (the pill).
@@ -1082,21 +1091,20 @@ pub fn block_look(m: &Model, b: usize) -> Look {
     let mut v = Buf::new();
     m.vdiv_str(&mut v);
     match b {
+        // The Wave view (only the DMM channel on): CH1 off with the MCX
+        // V/div, the DMM block on with the record's V/div.
         BLK_CH1 => Look {
-            // The Wave view: the function's coupling ("AC" of "AC mA"; the
-            // scale has the unit).
-            name: Txt::new(if m.wave && !m.ch1_txt.is_empty() { m.ch1_txt.split(' ').next().unwrap_or("CH1") } else { "CH1" }),
+            name: Txt::new("CH1"),
             // The V/div badge's information (gone 2026-11-02): its
             // coupling / probe glyph when AC or the probe is not x1.
             glyph: if !m.wave && (m.ac || m.probe != 3) { m.probe_glyph() } else { 0 },
-            scale: Txt::new(v.as_str()),
+            scale: if m.wave { m.ch1_scale } else { Txt::new(v.as_str()) },
             col: m.pal(),
             ink: m.pal_ink(),
-            on: m.ch1_on,
+            on: m.ch1_on && !m.wave,
             open: m.ch1_open,
         },
-        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: c_ch2(), ink: c_ch2_ink(), on: false, open: false },
-        BLK_DMM => Look { name: Txt::new("DMM"), glyph: 0, scale: m.ch2_txt, col: c_ch2(), ink: c_ch2_ink(), on: m.ch2_on, open: false },
+        BLK_DMM => Look { name: Txt::new("DMM"), glyph: 0, scale: if m.wave { Txt::new(v.as_str()) } else { m.ch2_txt }, col: c_ch2(), ink: c_ch2_ink(), on: m.ch2_on || m.wave, open: false },
         BLK_GEN => Look { name: Txt::new("GEN"), glyph: 0, scale: m.gen_txt, col: c_gen(), ink: CH1_INK[gen_colour_idx() as usize % NPAL], on: m.gen_on, open: false },
         _ => {
             // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
@@ -1247,7 +1255,8 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
         _ => Txt::new(text),
     };
     let t = Ink::new(sf::SC_F12, r, text.as_str(), 8, 0);
-    let pal = m.pal_text();
+    // The Wave view: the DMM channel's measurements, in its colour.
+    let pal = if m.wave { c_ch2() } else { m.pal_text() };
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
         if let Some(g) = t.at(x, y) {
             return (pal, tag(2, g));
@@ -1472,7 +1481,10 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let off_row = |off: i16| if off < -140 { -1 } else if off > 140 { 281 } else { 140 + off };
     let mut n = 0;
     if m.ch1_on {
-        out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
+        // The record's position: CH1's 'A', in the Wave view the DMM
+        // channel's '2' (its record).
+        let (fam, col) = if m.wave { (FAM_2, c_ch2()) } else { (FAM_A, pal) };
+        out[n] = (0, level(off_row(m.pos), fam, m.sel_v == 0, col));
         n += 1;
     }
     out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, trig_colour(m)));

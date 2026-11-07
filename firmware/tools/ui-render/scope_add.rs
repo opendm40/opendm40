@@ -63,7 +63,8 @@ fn srate(ck: &mut Checker, out: &str) {
         m.wave = wave;
         if wave {
             m.wvdiv = 250.0;
-            m.ch1_txt = "AC V";
+            m.ch1_scale = scope_ui::Txt::new("1V");
+            m.tsrc = scope::TSRC_CH2;
             m.ac = true;
             scope_ui::set_tb_lo(scope::WAVE_TB_MIN);
         }
@@ -330,13 +331,14 @@ pub fn run(ck: &mut Checker, out: &str) {
             let (vd, amps, ch1, tv) = [(250.0f32, false, "AC V", -999.0f32), (200e-6, true, "AC uA", -1.23e-3), (0.15, false, "AC mV", 0.444), (2.5, true, "AC A", 9.99)][k % 4];
             m.wvdiv = vd;
             m.amps = amps;
-            m.ch1_txt = ch1;
+            m.ch1_scale = scope_ui::Txt::new("1V");
+            m.tsrc = scope::TSRC_CH2;
             m.ac = !amps && ch1 == "AC V";
             m.trig_v = tv;
             if amps {
-                vec!["Freq:50.0Hz", "Ip-p:999.9mA", "Cycl:20.0ms", "Irms:-12.3uA"]
+                vec!["\u{2}Freq:50.0Hz", "\u{2}Ip-p:999.9mA", "\u{2}Cycl:20.0ms", "\u{2}Irms:-12.3uA"]
             } else {
-                vec!["Freq:50.0Hz", "Vp-p:999.9mV", "Cycl:20.0ms", "Vrms:-12.3uV"]
+                vec!["\u{2}Freq:50.0Hz", "\u{2}Vp-p:999.9mV", "\u{2}Cycl:20.0ms", "\u{2}Vrms:-12.3uV"]
             }
         } else {
             base.cells.clone()
@@ -393,14 +395,16 @@ pub fn run(ck: &mut Checker, out: &str) {
                 m.tabs = 3;
                 m.wvdiv = st[j].0;
                 m.amps = amps;
-                m.ch1_txt = match (amps, full) {
+                let ch1_txt = match (amps, full) {
                     (false, f) if f < 1.0 => "AC mV",
                     (false, _) => "AC V",
                     (true, f) if f < 0.01 => "AC uA",
                     (true, f) if f < 1.0 => "AC mA",
                     _ => "AC A",
                 };
-                m.ac = m.ch1_txt == "AC V";
+                m.ac = ch1_txt == "AC V";
+                m.ch1_scale = scope_ui::Txt::new("1V");
+                m.tsrc = scope::TSRC_CH2;
                 m.trig_row = 140;
                 m.trig_v = 0.0;
                 let amp = (0.98 * full / st[j].0).min(3.92);
@@ -983,15 +987,36 @@ pub fn strip_blocks(ck: &mut Checker, out: &str) {
             }
         }
     }
-    // The Wave view: the CH1 block names the function, DMM reads MCX.
+    // The Wave view: CH1 off (the MCX V/div), the DMM block on with the
+    // record's V/div, the trace / marker / trigger in the DMM colour.
     for (txt, wv) in [("AC V", 250.0f32), ("AC mA", 0.015), ("AC uA", 150e-6), ("DC V", 1.5)] {
         let mut m = base.m;
         m.wave = true;
-        m.ch1_txt = txt;
+        m.ch1_scale = scope_ui::Txt::new("1V");
+        m.tsrc = scope::TSRC_CH2;
         m.wvdiv = wv;
         m.amps = txt.ends_with('A');
         m.ac = true;
         shot(ck, m, format!("strip/wave/{txt}"), if txt == "AC uA" { Some("s09-strip-wave") } else { None });
+        // Fixed channels (owner 2026-11-08): the same names in the same
+        // blocks as off the Wave view, CH1 off, DMM on, nothing in CH1's
+        // colour but the CH1 block; the record's marker is the DMM's.
+        let (c1, dm) = (scope_ui::block_look(&m, scope_ui::BLK_CH1), scope_ui::block_look(&m, scope_ui::BLK_DMM));
+        let mut items = [(0u8, scope_ui::Mark::NONE); scope_ui::NSTRIP];
+        let k = scope_ui::strip_items(&m, &mut items);
+        let rec = items[..k].iter().find(|i| i.0 == 0).map(|i| i.1.col);
+        ck.cases += 1;
+        let ok = c1.name.as_str() == "CH1"
+            && !c1.on
+            && c1.col == m.pal()
+            && dm.name.as_str() == "DMM"
+            && dm.on
+            && dm.col == scope_ui::c_ch2()
+            && m.rec_pal() == scope_ui::c_ch2()
+            && rec == Some(scope_ui::c_ch2());
+        if !ok {
+            ck.fail(&format!("strip/wave/{txt}"), format!("Wave view channels: CH1 {:?} on {} / DMM {:?} on {}, record marker {:?}", c1.name.as_str(), c1.on, dm.name.as_str(), dm.on, rec));
+        }
     }
     println!("strip blocks: {n} scenes");
 }
