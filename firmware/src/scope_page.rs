@@ -2357,6 +2357,7 @@ impl App {
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(),
             meas_src2: self.meas_src2,
+            ch2_func: self.ch2_func_idx(),
         }
     }
 
@@ -2726,6 +2727,7 @@ impl App {
                 self.sp_settings_changed();
                 self.redraw = true;
             }
+            su::MfHit::Ch2Func(amps) => self.ch2_func(clk, amps),
             su::MfHit::GenTrace(on) => self.gen_trace_set(on, now),
             su::MfHit::PCond(c) => {
                 st.pcond = c.min(2);

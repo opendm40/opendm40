@@ -317,6 +317,7 @@ pub fn popvals(m: &Model) -> su::PopVals {
         ch2_on: false,
         ch2_vdiv: su::Txt::EMPTY,
         meas_src2: false,
+        ch2_func: 0,
     }
 }
 

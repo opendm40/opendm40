@@ -752,6 +752,21 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                 save(out, name);
             }
         }
+        // CH2's V / A on the Display tab: its taps, beside On / Off.
+        if !combined {
+            let uy = |i: i16| scope_ui::mf_hit(1, &pv, scope_ui::C2_UNIT.x + 22 + 44 * i, scope_ui::C2_UNIT.y + 12);
+            if !(matches!(uy(0), scope_ui::MfHit::Ch2Func(false)) && matches!(uy(1), scope_ui::MfHit::Ch2Func(true))) {
+                ck.fail("gen/ch2-func", "the Display tab's CH2 V / A is not hit".to_string());
+            }
+            if !matches!(scope_ui::mf_hit(1, &pv, scope_ui::C2_LIST.x + 22, scope_ui::C2_LIST.y + 12), scope_ui::MfHit::Ch2(true)) {
+                ck.fail("gen/ch2-func", "CH2 On lost its hit".to_string());
+            }
+            let mut pa = pv;
+            pa.ch2_func = 1;
+            draw(&m, scope_ui::Popup::Mf(1), &pa, true);
+            ck.check_add("gen/ch2-func/tab1", &[("page", Bx::new(scope_ui::MF_X as i32 + 1, 161, scope_ui::MF_W as i32 - 2, 99))], &[rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)], Bx::new(scope_ui::MF_X as i32, 20, scope_ui::MF_W as i32, 241));
+            save(out, "s08-ch2-func-a");
+        }
         if !combined {
             // CH2 measurements: Source CH2 in the Measure tab, two CH2 items
             // picked, and their cells under the graph.
