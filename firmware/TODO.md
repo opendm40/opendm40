@@ -350,6 +350,9 @@ What waits for the owner; each line links to the material.
 ## Next release (after 0.4.0)
 
 - [ ] Generator: a swipe gesture turns the output off (owner 2026-11-01).
+- [ ] Scope trigger source DMM in the combined view (#275 device check, 2026-11-06): CH2 does not stream
+      there, but the source stays DMM, so Normal / Single wait forever with no hint (Auto shows frames). Show a
+      hint (badge / toast), or trigger on CH1 there while keeping DMM for the Scope page.
 
 ## AD1 offset with AD2 / AD3 on: measure, then maybe compensate (owner 2026-11-01)
 

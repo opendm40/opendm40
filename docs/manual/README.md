@@ -613,6 +613,9 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
+- **Null** (range page): takes your test leads' resistance off every reading.
+  Short the leads, wait for a steady reading, tap **Null**; tap again for off.
+  Up to 10 Ω, not on 600 MΩ, independent of REL, kept over a power-off.
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |
@@ -627,7 +630,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - The beeper sounds while the resistance is below about 67 Ω (*inferred*
   from the measuring chip's setting, the same as on the stock firmware). The
   chip switches it itself: the beep starts and stops with the contact.
-  Silent at [Key/alert volume](#alerts-tab) 0 %.
+  Silent at [Key/alert volume](#alerts-tab) 0 % unless **Continuity beep** is **Always**.
 - While it sounds (also at volume 0 %) a green **BEEP** band shows above the
   reading and the digits turn green, for at least 0.15 s.
 - For low resistances such as CPU / GPU power phases use
@@ -655,7 +658,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
-  readings only. Silent at Key/alert volume 0 %.
+  readings only. At Key/alert volume 0 % as continuity (**Continuity beep**).
 - Top right: the resistance **V / 0.765 mA**; **0L** above about 0.8 V.
 - The same green **BEEP** band while it beeps: below 22 mV and for a
   pattern, left of the resistance.
@@ -783,6 +786,8 @@ to a high voltage applied while the meter sat on the mV range.
   is above the range (or the function's limit). The bargraph turns red with
   an **OL** mark. In the [combined view](#combined-view)'s meter strip,
   **Overflow** is in the small text right of the reading.
+- Above **Overflow**, the range that overflowed: **>60V**, **>600MΩ**
+  (not in temperature and Hz).
 - A small value (for example the diode's Ω value) that is over its limit
   shows **0L** with a small **Overflow** before it.
 - An overflow is never stored in MIN/MAX/AVG, the chart or the history.
@@ -1288,8 +1293,9 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   then zoom in (magnifier +, left) and zoom out (magnifier −). A channel that
   is off is dimmed. The **CH1** title also shows the probe and coupling
   symbol when the probe is not ×1 or the coupling is AC.
-  - Tap a title: **CH1** opens the channel popup; **DMM** and **GEN** switch
-    their trace on / off; **MATH** opens the math popup.
+  - Tap a title: **CH1** opens the channel popup (tapped again with the
+    popup open, it hides CH1, as **MATH** does for math); **DMM** and **GEN**
+    switch their trace on / off; **MATH** opens the math popup.
   - Hold the **DMM** title: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Measurement row** at the bottom: up to four measurements.
 
@@ -1339,8 +1345,13 @@ in the left or right half of the graph steps), **Off**.
 - Tap the **CH1** title for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
-    readings, not the hardware.
-  - **Color** of the trace.
+    readings, not the hardware. **Type**: **Vol**, or **Cur** for a current
+    probe or shunt: CH1's values are in A, and the probe factor means A per
+    volt at the input (×10 reads a 100 mV/A clamp). Kept over a restart.
+  - **Color** of the trace (the stock nine and cyan; MATH's the same).
+- Tap the **CH1** title again with the popup open to hide CH1: no trace or
+  **A** marker, the block dimmed; the trigger, measurements and MATH keep
+  working. Tap the dimmed title to show it again. Kept over a restart.
 - Bandwidth: owners report flat to about 3 MHz.
 
 
@@ -1376,7 +1387,7 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 | **Edge** | Rising, Falling. |
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
-| **Source** | **CH1**, or **GEN**: the generator's own output. |
+| **Source** | **CH1**, **GEN**: the generator's own output, or **DMM**: the multimeter channel (CH2). |
 
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
@@ -1399,10 +1410,15 @@ from the generator's timers when its output crosses the trigger level, and
 places the trigger there. The level is in the generator's volts (0 to
 3 V; a square above 50 kHz switches between 0 and 3 V); a level outside
 the output's swing never triggers. It is an edge trigger (Rising / Falling);
-the trigger badge turns cyan. Useful when the circuit's response to the
+the trigger badge and T markers turn cyan. Useful when the circuit's response to the
 generator is on CH1 and too noisy or too small to trigger on. With the
-generator off, nothing triggers (Auto still shows frames). SCPI
-`TRIGger:SOURce GENerator`.
+generator off, **GEN** cannot be picked; turned off later, nothing triggers
+(Auto still shows frames). SCPI `TRIGger:SOURce GENerator`.
+
+**Source DMM** triggers on the multimeter channel ([CH2 (DMM)](#display-settings)),
+edge only, as exact as one CH2 sample (at most 38.4 k samples/s). The level is on
+CH2's scale and moves with its **2** marker; the badge and T markers turn magenta.
+Picking **DMM** turns CH2 on; turning CH2 off puts the trigger back on CH1. SCPI `TRIGger:SOURce CHANnel2`.
 
 ![Runt trigger: the second level, the orange T](img/scope-trig-runt.png)
 
@@ -1544,7 +1560,7 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 **Brightness** and **Grid** intensity; **GEN trace** on / off.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
-in cyan under CH1, on CH1's position and its own V/div (the **GEN** block's
+in cyan (**Color** beside it, a tap: the next one, never CH1's) under CH1, on CH1's position and its own V/div (the **GEN** block's
 magnifiers; it starts at CH1's): computed from the generator's settings and
 timers, not measured (the trace is the ideal waveform; a probe on the output
 shows the real one). It is not drawn in roll mode, zoomed out past the record, or
@@ -1554,7 +1570,12 @@ not use the trigger hardware.
 **CH2 (DMM)** draws the multimeter's input as a second channel (magenta)
 over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
 signal, alongside the scope. Its on / off and V/div (A/div) are also on the
-**DMM** block; 0 is the centre line. It works in V, mV and
+**DMM** block (**Color** beside it, a tap: the next one, never CH1's; magenta by
+default). Drag its **2** marker on the left to move the trace (long
+press: back to the centre); kept in the settings. **V** / **A** beside **On** /
+**Off** puts the multimeter into that function (V, or AC A) in one tap; neither
+is selected in another function, and it does nothing in the Wave view or during
+a recording. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
@@ -1586,7 +1607,7 @@ While it is on, the edge trigger does not use the trigger hardware.
 The CSV starts with comment lines (timebase, V/div, probe, coupling,
 sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
-the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
+the probe tip (with CH1 type **Cur**: `time_s,amperes`). A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder
@@ -1712,7 +1733,7 @@ From the left:
   limit verdict (**PASS**, **HI**, **LO**), the range (**AUTO+**,
   **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD
   every second;
-- the reading and its unit;
+- the reading and its unit, orange as on the multimeter page;
 - up to two small values: the AC and DC parts, frequency and duty cycle,
   the burden voltage (**Bd**), the 4-20 mA percentage, the cold junction,
   or the voltage and current of the power meter;
@@ -2399,7 +2420,8 @@ goes back to the main menu.
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper unless **Continuity beep** is **Always**; it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Continuity beep** | With volume, Always | With volume | The continuity / diode beeper at Key/alert volume 0 %: **With volume** is silent, **Always** sounds. |
 | **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
 | **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
 
@@ -2411,7 +2433,7 @@ goes back to the main menu.
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | On battery: switches the meter off after this time without input. Never with USB power. |
+| **Shutdown** | 1, 5, 10, 30 min, 1 to 10 hours, Never | 30 min | On battery: switches the meter off after this time without input. Never with USB power. |
 | **Analog power** | Auto (per view), Both always | Auto (per view) | [Analog power](#analog-power). |
 | **Mode Remember** | OFF, ON | OFF | ON: after switching off and on, the multimeter and the scope continue as you left them ([What is kept](#what-is-kept-when-you-switch-off)). |
 

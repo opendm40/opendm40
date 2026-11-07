@@ -644,9 +644,33 @@ sections by commit ("f80524f", "d8e249d", "519fb8a", "469f354", "6bc494a",
 
 - DAC path: DAC channel 1 (`DAC_OUT0`) on PA4, paced by TIM6 TRGO,
   DMA0 stream 5. Up to 10 MS/s. Output 0..3 V unipolar (DAC
-  reference 3.0 V, assumed in code); the stock turns the DAC output buffer
-  off for sine / triangle / ramp, so an external buffer stage follows
-  (*inferred*) ([`firmware/src/gen.rs`](../firmware/src/gen.rs), `stock/re/analysis/scope_gen_v2_6.h`).
+  reference 3.0 V, assumed in code).
+- DAC output buffer (DAC_CR BOFF1), the same split as the stock: on for
+  square, off for sine / triangle / ramp
+  ([`firmware/src/gen.rs`](../firmware/src/gen.rs),
+  `stock/re/analysis/scope_gen_v2_6.h`). GD32F427
+  datasheet ([table 4-33](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf)):
+  buffer on: 0.2 V .. VDDA−0.2 V guaranteed, load ≥ 5 kΩ and ≤ 50 pF,
+  settling 0.5..1 µs; buffer off: rail to rail, output impedance up to
+  15 kΩ. The stock's reason for the split is *unknown*. The buffer's
+  settling time is a likely reason the square leaves the DAC path above
+  50 kHz (*inferred*). An external buffer stage follows PA4 (*inferred*).
+- PA4 levels by `DIAG:DAC?` (min .. max of 512 samples, V):
+
+  | Set | Square, buffer on | Sine, buffer off |
+  |---|---|---|
+  | DC 0 V (0 Vpp, offset 0) | 0.005 .. 0.008 | 0.045 .. 0.089 |
+  | DC 0.1 V | 0.093 .. 0.098 | 0.138 .. 0.180 |
+  | DC 0.3 V | 0.293 .. 0.298 | 0.330 .. 0.365 |
+  | DC 1.5 V | 1.493 .. 1.496 | 1.477 .. 1.486 |
+  | DC 3.0 V | 2.993 .. 2.995 | 2.870 .. 2.927 |
+  | 1 kHz, 3 Vpp, offset auto | 0.004 .. 2.994 | 0.083 .. 2.927 |
+
+  With the buffer on, PA4 reaches 5 mV, below the datasheet's 0.2 V
+  guarantee, which is specified for a 5 kΩ load. With it off, PA4 is
+  about +45 mV high at 0 V and 3..4 % low at 3 V, with a 40..55 mV
+  spread at a DC level: the ADC's sampling and the next stage load the
+  15 kΩ output (*inferred*). The levels at the GEN jack are *unknown*.
 - PWM path (square above 50 kHz): TIM12_CH1 on PB14 (AF9), 200 MHz / D.
 - PB12 selects the path: 1 = PWM, 0 = DAC; the switch is the SGM3157
   (*inferred* from a chat report). No attenuator or relay after it.
