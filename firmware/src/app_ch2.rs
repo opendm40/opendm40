@@ -166,6 +166,33 @@ impl App {
         crate::logger::wave::drain_ts(&mut |ts, raw| st.push(ts, raw));
     }
 
+    /// Trigger source DMM picked with CH2 off (SCPI, the Trigger tab): CH2
+    /// on (a toast where it cannot be). True: it is on.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".cold")]
+    pub(super) fn ch2_on_for_trig(&mut self, clk: &mut Clock) -> bool {
+        self.ch2_set(clk, true);
+        self.ch2.on
+    }
+
+    /// TRIG:LEV / TRIG:LEV? with source DMM: the level on CH2's scale (the
+    /// badge's; set to a row: the level is the T marker against the CH2
+    /// trace).
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".cold")]
+    pub(super) fn ch2_trig_level(&mut self, sc: &mut scope::Settings, v: Option<f32>, out: &mut crate::scpi::Scpi) -> Option<()> {
+        match v {
+            Some(v) => {
+                sc.trig_row = self.scope.ch2_level_row(v);
+                None
+            }
+            None => {
+                out.put_f32(self.scope.ch2_level());
+                Some(())
+            }
+        }
+    }
+
     /// MF > Display "CH2 (DMM)" On / Off.
     pub(super) fn ch2_set(&mut self, clk: &mut Clock, on: bool) {
         let now = clk.now_ms();
@@ -184,8 +211,14 @@ impl App {
         if !on {
             crate::scope_ui::graph().c2 = [crate::scope_ui::EMPTY; crate::scope_ui::NCOL];
         }
-        // The comparator on / off: restart the acquisition.
-        let st = self.scope.s;
+        // The comparator on / off: restart the acquisition. CH2 off with
+        // the trigger on it: the trigger goes back to CH1 (no source on a
+        // channel that is off).
+        let mut st = self.scope.s;
+        if !on && st.tsrc == scope::TSRC_CH2 {
+            st.tsrc = scope::TSRC_CH1;
+            self.toast(now, crate::tr!("Trigger source: CH1"), false);
+        }
         self.scope_set(st, now);
         self.update_rails(clk);
     }

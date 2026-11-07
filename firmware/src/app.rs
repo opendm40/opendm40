@@ -5529,6 +5529,8 @@ impl App {
                 out.put_bytes(if sc.ac { b"AC" } else { b"DC" });
                 Some(())
             }
+            // Source DMM: the level on CH2's scale, as the badge.
+            C::TrigLevel(v) if sc.tsrc == scope::TSRC_CH2 && !self.scope.wave_on() => self.ch2_trig_level(&mut sc, v, out),
             C::TrigLevel(Some(v)) => {
                 // Volts at the probe tip, as TRIG:LEV? answers (probe
                 // applied), kept as given: the row was the one below the
@@ -5562,11 +5564,27 @@ impl App {
                 Some(())
             }
             C::TrigSource(Some(t)) => {
-                sc.tsrc = t.min(scope::TSRC_GEN);
+                // CHAN2 with CH2 off: CH2 on first (as the Trigger tab);
+                // refused there (a DMM function without CH2): an error, the
+                // source stays.
+                let t = t.min(scope::TSRC_CH2);
+                if t == scope::TSRC_CH2 && !self.ch2.on {
+                    if self.ch2_on_for_trig(clk) {
+                        sc = self.scope.s;
+                    } else {
+                        out.set_err("Settings conflict");
+                        return false;
+                    }
+                }
+                sc.tsrc = t;
                 None
             }
             C::TrigSource(None) => {
-                out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
+                out.put_bytes(match sc.tsrc {
+                    scope::TSRC_GEN => b"GEN",
+                    scope::TSRC_CH2 => b"CHAN2",
+                    _ => b"CHAN1",
+                });
                 Some(())
             }
             C::GenScale(Some(v)) => {

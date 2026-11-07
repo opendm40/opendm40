@@ -188,6 +188,7 @@ macro_rules! tr {
     ("Temperature Settings") => { "\u{497}\u{45b}\u{4cc}\u{4b7}" };
     ("Triangle") => { "\u{402}\u{4c6}\u{491}" };
     ("Trigger") => { "\u{4c8}\u{432}" };
+    ("Trigger source: CH1") => { "\u{4c8}\u{432}\u{498}: CH1" };
     ("Try again") => { "\u{4e3}\u{4cd}" };
     ("Type:") => { "\u{4b1}\u{444}:" };
     ("USB disk") => { "U\u{4a5}\u{487}\u{45d}" };
@@ -398,6 +399,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Temperature Settings", "\u{497}\u{45b}\u{4cc}\u{4b7}"),
     ("Triangle", "\u{402}\u{4c6}\u{491}"),
     ("Trigger", "\u{4c8}\u{432}"),
+    ("Trigger source: CH1", "\u{4c8}\u{432}\u{498}: CH1"),
     ("Try again", "\u{4e3}\u{4cd}"),
     ("Type:", "\u{4b1}\u{444}:"),
     ("USB disk", "U\u{4a5}\u{487}\u{45d}"),
