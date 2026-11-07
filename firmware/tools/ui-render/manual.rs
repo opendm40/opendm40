@@ -465,7 +465,8 @@ pub fn run(out: &str) -> usize {
         let mut m = scope_base().m;
         m.wave = true;
         m.wvdiv = 150.0;
-        m.ch1_txt = "AC V";
+        m.ch1_scale = scope_ui::Txt::new("1V");
+        m.tsrc = scope::TSRC_CH2;
         m.ac = true;
         m.trig_v = 10.0;
         m.trig_row = 138;
@@ -473,7 +474,8 @@ pub fn run(out: &str) -> usize {
             let mut m = m;
             m.tb = tb;
             m.tabs = scope_ui::tabs_of(scope_ui::TAP_CORNERS, tb, scope_ui::tb_top(true, false), false, None);
-            let cells = vec!["Freq:50.0Hz", "Vp-p:651V", "Cycl:20.0ms", "Vrms:230V"];
+            // The Wave view: every cell measures the DMM channel (its mark).
+            let cells = vec!["\u{2}Freq:50.0Hz", "\u{2}Vp-p:651V", "\u{2}Cycl:20.0ms", "\u{2}Vrms:230V"];
             let s2 = stock::Scene { name: "manual-wave", m, popup: scope_ui::Popup::None, trace: Some(trig_sine(&m, 325.0 / 150.0, periods)), persist: None, cols: 399, cells };
             scope_shot(&mut ck, out, name, &s2, &popvals(&m));
             save1(out, name);
@@ -484,10 +486,9 @@ pub fn run(out: &str) -> usize {
         m.amps = true;
         m.ac = false;
         m.wvdiv = 1.5;
-        m.ch1_txt = "AC A";
         m.trig_v = 0.1;
         m.trig_row = 140;
-        let cells = vec!["Freq:50.0Hz", "Ip-p:4.24A", "Cycl:20.0ms", "Irms:1.50A"];
+        let cells = vec!["\u{2}Freq:50.0Hz", "\u{2}Ip-p:4.24A", "\u{2}Cycl:20.0ms", "\u{2}Irms:1.50A"];
         let s2 = stock::Scene { name: "manual-wave", m, popup: scope_ui::Popup::None, trace: Some(trig_sine(&m, 2.121 / 1.5, 5.0)), persist: None, cols: 399, cells };
         scope_shot(&mut ck, out, "wave-amps", &s2, &popvals(&m));
         save1(out, "wave-amps");

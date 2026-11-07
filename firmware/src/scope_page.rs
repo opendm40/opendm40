@@ -556,7 +556,8 @@ impl App {
             ac: s.ac,
             trig_row: s.trig_row as i16,
             trig_v: if s.tsrc == scope::TSRC_CH2 && !wave { self.scope.ch2_level() } else { self.scope.trig_volts() },
-            trig_a: crate::scope_ch2::store().scale().amps,
+            // The Wave view: the DMM channel's record (its scale).
+            trig_a: if wave { amps } else { crate::scope_ch2::store().scale().amps },
             rising: s.rising,
             trig_px: su::col_of_eng(s.hpos) as i16,
             pos: s.pos as i16,
@@ -578,7 +579,8 @@ impl App {
             // Combined view: the strip's GEN badge shows it instead.
             gen_hz: if self.gen.s.on && self.view == View::Scope { self.gen.actual_hz() } else { 0.0 },
             ch1_open: matches!(sp.popup, su::Popup::Ch1(_)),
-            // The Wave view's CH1 is the DMM's reading: always shown.
+            // The record shown (in the Wave view the DMM channel's; the CH1
+            // block is off there, `su::block_look`).
             ch1_on: !sp.ch1_off || wave,
             math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
@@ -603,7 +605,7 @@ impl App {
             // The V/div text from the value (fmt_div) also off the Wave
             // view: `vdiv`'s label is wrong with a x2 / x5 ... probe (#133).
             wvdiv: self.scope.vdiv(),
-            ch1_txt: if wave { self.wave_func_label() } else { "" },
+            ch1_scale: if wave { self.mcx_vdiv_label() } else { su::Txt::EMPTY },
             // Both scope views (the combined view's strip badge no longer
             // shows REC: one look everywhere).
             rec: crate::csvlog::active(),
@@ -611,13 +613,24 @@ impl App {
             rec_unit: su::rec_unit(self.rec_func),
             dec: self.dec_band(),
             dec_gen: self.dec_gen_shown(),
-            tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
+            // The Wave view triggers on its record, the DMM channel's.
+            tsrc: if wave { scope::TSRC_CH2 } else { s.tsrc },
             ch2_on: self.ch2.on && !wave,
             ch2_txt: self.ch2_label(),
             ch2_pos: self.ch2.pos,
-            gen_on: self.scope.gen_trace,
+            // GEN off in the Wave view (its record has no generator phase;
+            // the setting is kept for the MCX input).
+            gen_on: self.scope.gen_trace && !wave,
             gen_txt: self.gen_label(),
         }
+    }
+
+    /// The MCX input's V/div text (the CH1 block in the Wave view).
+    fn mcx_vdiv_label(&self) -> su::Txt {
+        let s = self.scope.mcx_settings();
+        let mut b = su::Buf::new();
+        su::fmt_div(&mut b, s.vdiv1() * s.probe, if self.sp.ch1_cur { "A" } else { "V" });
+        su::Txt::new(b.as_str())
     }
 
     /// The unit of CH1's values: "A" in the Wave view's current rows and with
@@ -798,8 +811,11 @@ impl App {
         for i in 0..self.meas_n.min(4) {
             let sel = self.meas_sel[i];
             let id = crate::scope_meas::item(sel);
-            let c2 = crate::scope_meas::is_ch2(sel);
-            let (res, amps) = if c2 { (&self.meas_res2, amps2) } else { (&self.meas_res, m.amps) };
+            // The Wave view: every item measures the record, the DMM
+            // channel's, and is drawn as a DMM-channel item (the selection
+            // itself is kept).
+            let c2 = crate::scope_meas::is_ch2(sel) || m.wave;
+            let (res, amps) = if c2 && !m.wave { (&self.meas_res2, amps2) } else { (&self.meas_res, m.amps) };
             // Stock label "Vp-p:" (ours: "Vpp:").
             let mut t = [0u8; 24];
             let f = crate::scope_meas::format_unit(&mut t, id, res.v[id as usize], amps);
@@ -1588,10 +1604,14 @@ impl App {
                 }
                 Some(false)
             }
-            // The DMM block's title held: the Wave view (the DMM as the
-            // scope's source; the MCX | DMM badge before 2026-11-02).
+            // The DMM block's title held: the Wave view (the scope with only
+            // the DMM channel on); held in it: the DMM's DC / AC V signal
+            // path (`wave_coupling_note`).
             Gesture::LongPress(p) if su::panel_hit(p.x, p.y) == Some(3 * su::BLK_DMM) => {
-                if app_wave::WAVE_BUILD && self.view == View::Scope && !self.scope.wave_on() {
+                if self.scope.wave_on() {
+                    self.beep(now, 30);
+                    self.wave_coupling_note(now);
+                } else if app_wave::WAVE_BUILD && self.view == View::Scope {
                     self.beep(now, 30);
                     // (A logger session or the inrush capture: refused
                     // there; CH2's stream is taken over.)
@@ -1984,7 +2004,7 @@ impl App {
         let mut n = 0;
         let lead: &[u8] = match state {
             su::CUR_OFF => &XS,
-            su::CUR_X if self.ch2.on => &YS2,
+            su::CUR_X if self.ch2.on && !self.scope.wave_on() => &YS2,
             su::CUR_X => &YS,
             _ => &[],
         };
@@ -2254,9 +2274,12 @@ impl App {
         let zin = part == su::PART_IN;
         let wave = self.scope.wave_on();
         if part == su::PART_TITLE {
+            // Each title switches its channel on / off (CH1, MATH: with the
+            // popup); a double tap is two taps. The Wave view is the scope
+            // with only the DMM channel on: CH1 on or the DMM channel off
+            // leaves it (`wave_channel`); GEN stays off there.
             match b {
-                // The wave view: CH1 = the coupling note.
-                su::BLK_CH1 if wave => self.wave_coupling_note(now),
+                su::BLK_CH1 if wave => self.wave_channel(clk, true),
                 su::BLK_CH1 => {
                     // As the math label: CH1 off -> on with its popup.
                     let show = self.sp.ch1_off;
@@ -2273,8 +2296,8 @@ impl App {
                         su::panel_part(&m, 3 * su::BLK_CH1 + 2);
                     }
                 }
-                // The wave view: back to the OSC (MCX) input.
-                su::BLK_DMM if wave => self.wave_badge_close(clk),
+                su::BLK_DMM if wave => self.wave_channel(clk, false),
+                su::BLK_GEN if wave => self.toast(now, "GEN: not in the Wave view", false),
                 su::BLK_DMM => {
                     let on = !self.ch2.on;
                     self.ch2_set(clk, on);
@@ -2296,8 +2319,9 @@ impl App {
             return;
         }
         match b {
-            // The wave view: its V/div step list.
-            su::BLK_CH1 if wave => self.wave_range_step(zin, now),
+            // The Wave view: CH1 and GEN off (their V/div kept); the DMM
+            // block steps the record's V/div (`ch2_step`).
+            su::BLK_CH1 | su::BLK_GEN if wave => {}
             su::BLK_CH1 => {
                 // VSTEPS (#202: 2 and 5 mV/div below the 10 mV range).
                 let mut st = self.scope.s;
@@ -2431,10 +2455,10 @@ impl App {
             pwidth: s.pwidth,
             runt_v: self.scope.runt_volts(),
             dec: self.dec_setup_vals(),
-            tsrc: s.tsrc,
+            tsrc: if self.scope.wave_on() { scope::TSRC_CH2 } else { s.tsrc },
             gen_trace: self.scope.gen_trace,
             cur: self.sp.ch1_cur,
-            ch2_on: self.ch2.on,
+            ch2_on: self.ch2.on || self.scope.wave_on(),
             ch2_vdiv: self.ch2_label(),
             meas_src2: self.meas_src2,
             ch2_func: self.ch2_func_idx(),
@@ -2792,6 +2816,8 @@ impl App {
                 self.scope_set(st, now);
                 // The page height is the same, the rows below change.
             }
+            // The Wave view triggers on its record (the DMM channel's).
+            su::MfHit::TSrc(_) if self.scope.wave_on() => {}
             su::MfHit::TSrc(t) => {
                 // GEN with the generator off: the source stays, a toast
                 // says why. DMM with CH2 off: CH2 on (its own toast if it

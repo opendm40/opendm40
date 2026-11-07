@@ -1290,7 +1290,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   symbol when the probe is not ×1 or the coupling is AC.
   - Tap a title: **CH1** opens the channel popup (tapped again with the
     popup open, it hides CH1, as **MATH** does for math); **DMM** and **GEN**
-    switch their trace on / off; **MATH** opens the math popup.
+    switch their trace on / off; **MATH** opens the math popup. A double tap
+    is two taps. Blocks, colours and markers never change places.
   - Hold the **DMM** title: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Measurement row** at the bottom: up to four measurements.
 
@@ -1657,14 +1658,15 @@ To open it:
 
 - in the multimeter, function V or A (DC or AC): tap **Wave** in the trend
   chart's lower left corner, or **MF**, then **Wave**; or
-- on the scope page, hold the **DMM** block's title. In the Wave view the
-  block reads **MCX**: tap it to go back to the **OSC** input.
+- on the scope page, hold the **DMM** block's title.
+
+The Wave view is the scope with only the DMM channel on: its colour, its
+**2** marker, its V/div on the **DMM** block; **CH1** and **GEN** are off.
 
 | ![Mains on the Wave view, 10 ms/div](img/wave.png) | ![The same at 50 ms/div](img/wave-50ms.png) |
 |---|---|
 | Mains on the Wave view, 10 ms/div | The same at 50 ms/div |
 
-- The first block names the function, for example **AC V**.
 - V/div: the view opens at the multimeter range's **full-scale step**:
   ± the range fills the 8 divisions (6 V → 1.5 V/div, 60 V → 15 V/div,
   600 mV → 150 mV/div, 10 A → 2.5 A/div, 60 mA → 15 mA/div). Between these
@@ -1683,7 +1685,7 @@ To open it:
 - Timebase: 1 ms/div to 50 s/div. Sample rate: 76 800/s at 1 ms/div, down
   to 1200/s from 200 ms/div. Opens at 10 ms/div the first time, then at the
   timebase you last used in it (until you switch the meter off).
-- Coupling: AC V is AC-coupled; tap the first block's title to
+- Coupling: AC V is AC-coupled; hold the **DMM** title to
   switch between the DC V and the AC V signal path. AC mV and the current
   paths are DC-coupled. DC A uses the AC A path (DC-coupled).
 - Triggers (edge, pulse, runt), measurements (in amps on the current
@@ -1697,8 +1699,8 @@ To open it:
 |---|---|
 | 2 ms/div: one period | A 1.5 A current on the 6 A range, 1.5 A/div |
 
-To leave: tap the **MCX** block (back to the OSC input), press **MENU** or
-change the view.
+To leave: tap **CH1** (CH1 on; the DMM channel stays on as CH2) or **DMM**
+(the DMM channel off), press **MENU** or change the view.
 
 The Wave view is not available in AC+DC, AUTO coupling and the power
 meter, nor while a recording runs; the meter says why.
