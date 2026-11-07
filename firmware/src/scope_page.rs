@@ -2435,7 +2435,9 @@ impl App {
             pwidth: s.pwidth,
             runt_v: self.scope.runt_volts(),
             dec: self.dec_setup_vals(),
-            tsrc: if self.scope.wave_on() { scope::TSRC_CH2 } else { s.tsrc },
+            // The Wave view: DMM selected, without the overlay's "edge, CH2
+            // scale" note (its record triggers on every type).
+            tsrc: if self.scope.wave_on() { su::TSRC_WAVE } else { s.tsrc },
             gen_trace: self.scope.gen_trace,
             cur: self.sp.ch1_cur,
             ch2_on: self.ch2.on || self.scope.wave_on(),

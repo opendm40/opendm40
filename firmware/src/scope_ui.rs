@@ -3559,6 +3559,9 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
 }
 
 /// Display tab: the two sliders and their values (repainted while dragged).
+/// `PopVals::tsrc` in the Wave view: the list's DMM entry selected, no
+/// source note (scope::TSRC_* are 0..=2).
+pub const TSRC_WAVE: u8 = 3;
 // Trigger tab rows (opendm40, UF-13).
 pub const TM_LABEL: Rect = rect(MF_C2, 61, MF_C2_W, 20);
 pub const TM_LIST: Rect = rect(MF_C2, 81, 180, 24);

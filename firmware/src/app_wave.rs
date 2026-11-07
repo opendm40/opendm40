@@ -152,6 +152,10 @@ impl App {
         if ch1 {
             self.sp.ch1_off = false;
         }
+        // MF > Display CH2 Off: the page again without the popup.
+        if self.sp.popup != crate::scope_ui::Popup::None {
+            self.sp_popup_close();
+        }
         self.wave_badge_close(clk);
         self.sp_settings_changed();
     }
