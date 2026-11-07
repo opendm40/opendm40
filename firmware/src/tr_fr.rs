@@ -4,7 +4,16 @@
 #[macro_export]
 macro_rules! tr {
     ("0 A for 60 s: check the fuse?") => { "0 A pendant 60 s : fusible ?" };
-    ("1 hour") => { "1 heure" };
+    ("1 hour") => { "1 h" };
+    ("10 hours") => { "10 h" };
+    ("2 hours") => { "2 h" };
+    ("3 hours") => { "3 h" };
+    ("4 hours") => { "4 h" };
+    ("5 hours") => { "5 h" };
+    ("6 hours") => { "6 h" };
+    ("7 hours") => { "7 h" };
+    ("8 hours") => { "8 h" };
+    ("9 hours") => { "9 h" };
     ("< Back") => { "< Retour" };
     ("< Prev") => { "< Pr\u{1}c" };
     ("A input path intact") => { "Entr\u{1}e A : circuit intact" };
@@ -24,6 +33,9 @@ macro_rules! tr {
     ("Back") => { "Retour" };
     ("Backlight") => { "R\u{1}tro\u{1}clairage" };
     ("Bargraph") => { "Barre" };
+    ("Battery empty: off in 10 s") => { "Batterie : arr\u{2}t dans 10 s" };
+    ("Battery empty: off in 20 s") => { "Batterie : arr\u{2}t dans 20 s" };
+    ("Battery empty: off in 30 s") => { "Batterie : arr\u{2}t dans 30 s" };
     ("Both always") => { "Toujours les deux" };
     ("Brightness:") => { "Luminosit\u{1} :" };
     ("Burden voltage") => { "Chute tension" };
@@ -41,6 +53,7 @@ macro_rules! tr {
     ("Continuity beep") => { "Bip continuit\u{1}" };
     ("Corners") => { "Coins" };
     ("Coupling") => { "Couplage" };
+    ("Cur") => { "Cour" };
     ("Current Settings") => { "R\u{1}glages courant" };
     ("Current in A jack: check leads") => { "Courant en A : voir cordons" };
     ("Current too high: reduce it") => { "Courant trop \u{1}lev\u{1} : r\u{1}duire" };
@@ -105,6 +118,7 @@ macro_rules! tr {
     ("Loading...") => { "Chargement..." };
     ("Log failed") => { "Erreur log" };
     ("Loud") => { "Fort" };
+    ("Low battery! Please charge") => { "Batterie faible ! Rechargez" };
     ("Lower") => { "Bas" };
     ("Lower = reading") => { "Bas = mesure" };
     ("Lower limit") => { "Limite basse" };
@@ -196,14 +210,17 @@ macro_rules! tr {
     ("Touch calibration") => { "Calibrage tactile" };
     ("Touch test") => { "Test tactile" };
     ("Trigger") => { "D\u{1}clench." };
+    ("Trigger source: CH1") => { "Source trigger : CH1" };
     ("Try again") => { "R\u{1}essayer" };
     ("Type:") => { "Type :" };
     ("USB disk") => { "Disque USB" };
+    ("Unstable: unplug USB?") => { "Instable : d\u{1}brancher l'USB ?" };
     ("Until stopped") => { "Jusqu'\u{5} l'arr\u{2}t" };
     ("Upper") => { "Haut" };
     ("Upper = reading") => { "Haut = mesure" };
     ("Upper limit") => { "Limite haute" };
     ("Vendor") => { "Fabricant" };
+    ("Vol") => { "Tens" };
     ("Voltage Settings") => { "R\u{1}glages tension" };
     ("Voltage on V jack, no current") => { "Tension sur V, sans courant" };
     ("Voltage on circuit - power off") => { "Couper la tension du circuit" };
@@ -223,7 +240,16 @@ macro_rules! tr {
 #[cfg(lang_log)]
 pub const PAIRS: &[(&str, &str)] = &[
     ("0 A for 60 s: check the fuse?", "0 A pendant 60 s : fusible ?"),
-    ("1 hour", "1 heure"),
+    ("1 hour", "1 h"),
+    ("10 hours", "10 h"),
+    ("2 hours", "2 h"),
+    ("3 hours", "3 h"),
+    ("4 hours", "4 h"),
+    ("5 hours", "5 h"),
+    ("6 hours", "6 h"),
+    ("7 hours", "7 h"),
+    ("8 hours", "8 h"),
+    ("9 hours", "9 h"),
     ("< Back", "< Retour"),
     ("< Prev", "< Pr\u{1}c"),
     ("A input path intact", "Entr\u{1}e A : circuit intact"),
@@ -243,6 +269,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Back", "Retour"),
     ("Backlight", "R\u{1}tro\u{1}clairage"),
     ("Bargraph", "Barre"),
+    ("Battery empty: off in 10 s", "Batterie : arr\u{2}t dans 10 s"),
+    ("Battery empty: off in 20 s", "Batterie : arr\u{2}t dans 20 s"),
+    ("Battery empty: off in 30 s", "Batterie : arr\u{2}t dans 30 s"),
     ("Both always", "Toujours les deux"),
     ("Brightness:", "Luminosit\u{1} :"),
     ("Burden voltage", "Chute tension"),
@@ -260,6 +289,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Continuity beep", "Bip continuit\u{1}"),
     ("Corners", "Coins"),
     ("Coupling", "Couplage"),
+    ("Cur", "Cour"),
     ("Current Settings", "R\u{1}glages courant"),
     ("Current in A jack: check leads", "Courant en A : voir cordons"),
     ("Current too high: reduce it", "Courant trop \u{1}lev\u{1} : r\u{1}duire"),
@@ -324,6 +354,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Loading...", "Chargement..."),
     ("Log failed", "Erreur log"),
     ("Loud", "Fort"),
+    ("Low battery! Please charge", "Batterie faible ! Rechargez"),
     ("Lower", "Bas"),
     ("Lower = reading", "Bas = mesure"),
     ("Lower limit", "Limite basse"),
@@ -415,14 +446,17 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Touch calibration", "Calibrage tactile"),
     ("Touch test", "Test tactile"),
     ("Trigger", "D\u{1}clench."),
+    ("Trigger source: CH1", "Source trigger : CH1"),
     ("Try again", "R\u{1}essayer"),
     ("Type:", "Type :"),
     ("USB disk", "Disque USB"),
+    ("Unstable: unplug USB?", "Instable : d\u{1}brancher l'USB ?"),
     ("Until stopped", "Jusqu'\u{5} l'arr\u{2}t"),
     ("Upper", "Haut"),
     ("Upper = reading", "Haut = mesure"),
     ("Upper limit", "Limite haute"),
     ("Vendor", "Fabricant"),
+    ("Vol", "Tens"),
     ("Voltage Settings", "R\u{1}glages tension"),
     ("Voltage on V jack, no current", "Tension sur V, sans courant"),
     ("Voltage on circuit - power off", "Couper la tension du circuit"),

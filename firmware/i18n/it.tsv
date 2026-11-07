@@ -35,6 +35,15 @@ Negative ohm	Ohm negativi	M
 Mode Remember	Ricorda modo	M
 Never	Mai	M
 1 hour	1 ora	M
+2 hours	2 ore	M
+3 hours	3 ore	M
+4 hours	4 ore	M
+5 hours	5 ore	M
+6 hours	6 ore	M
+7 hours	7 ore	M
+8 hours	8 ore	M
+9 hours	9 ore	M
+10 hours	10 ore	M
 1 min	1 min	M
 5 min	5 min	M
 10 min	10 min	M
@@ -235,3 +244,12 @@ Some skipped	Alcuni saltati	M
 Continuity beep	Bip continuità	M
 Always	Sempre	M
 With volume	Con il volume	M
+Low battery! Please charge	Batteria scarica! Ricaricare	M
+Battery empty: off in 30 s	Batteria: si spegne tra 30 s	M
+Battery empty: off in 20 s	Batteria: si spegne tra 20 s	M
+Battery empty: off in 10 s	Batteria: si spegne tra 10 s	M
+Unstable: unplug USB?	Instabile: scollegare USB?	M
+Type	Tipo	M
+Vol	Tens	M
+Cur	Corr	M
+Trigger source: CH1	Sorgente trigger: CH1	M
