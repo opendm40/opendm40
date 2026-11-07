@@ -3321,15 +3321,18 @@ pub const S_REMEMBER: u8 = 23;
 /// Reset settings: a confirm, then a restart with the defaults (app.rs
 /// `reset_ask`).
 pub const S_RESET: u8 = 24;
+/// The continuity / diode beeper: with the key / alert volume (the default,
+/// 0 % = silent) or Always (heard at 0 % volume too).
+pub const S_CONT: u8 = 25;
 /// Number of settings (the value array's length).
-pub const SET_N: usize = 25;
+pub const SET_N: usize = 26;
 
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
     crate::tr!("Dim screen"), crate::tr!("Shutdown"), crate::tr!("Backlight"), crate::tr!("Key/alert volume"), crate::tr!("Bluetooth"), crate::tr!("Start page"), crate::tr!("Analog power"),
     crate::tr!("DMM rate"), crate::tr!("Smoothing"), crate::tr!("DMM row"), crate::tr!("Temp unit"), crate::tr!("Swipe"), crate::tr!("Press effect"), crate::tr!("Tap step"), crate::tr!("Help"), crate::tr!("Jack alerts"),
     crate::tr!("Danger alarm"), crate::tr!("USB disk"), crate::tr!("Burden voltage"), crate::tr!("Device info"), crate::tr!("Touch test"), crate::tr!("Accuracy"), crate::tr!("Negative ohm"),
-    crate::tr!("Mode Remember"), crate::tr!("Reset settings"),
+    crate::tr!("Mode Remember"), crate::tr!("Reset settings"), crate::tr!("Continuity beep"),
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
@@ -3337,7 +3340,7 @@ pub const SET_NAMES: [&str; SET_N] = [
 /// there) with its Device section and our help / touch test pages.
 pub const SET_TABS: [(&str, &[u8]); 6] = [
     (crate::tr!("Display"), &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
-    (crate::tr!("Alerts"), &[S_VOLUME, S_ALARM, S_JACK]),
+    (crate::tr!("Alerts"), &[S_VOLUME, S_CONT, S_ALARM, S_JACK]),
     (crate::tr!("Power"), &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     (crate::tr!("Multimeter"), &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     (crate::tr!("Scope"), &[S_SWIPE, S_PRESS, S_TAP_STEP]),

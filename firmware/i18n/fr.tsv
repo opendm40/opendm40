@@ -24,7 +24,7 @@ Swipe	Geste	M
 Press effect	Effet appui	M
 Tap step	Pas tactile	M
 Help	Aide	M
-Jack alerts	Alertes bornes	M
+Jack alerts	Bornes	M
 Danger alarm	Alarme danger	M
 USB disk	Disque USB	M
 Burden voltage	Chute tension	M
@@ -241,6 +241,9 @@ Deleting	Suppression	M
 Selection cleared	Sélection effacée	M
 Files changed	Fichiers modifiés	M
 Some skipped	Certains ignorés	M
+Continuity beep	Bip continuité	M
+Always	Toujours	M
+With volume	Avec volume	M
 Low battery! Please charge	Batterie faible ! Rechargez	M
 Battery empty: off in 30 s	Batterie : arrêt dans 30 s	M
 Battery empty: off in 20 s	Batterie : arrêt dans 20 s	M

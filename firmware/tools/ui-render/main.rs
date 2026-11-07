@@ -1132,7 +1132,7 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
         (ui::S_SMOOTH, crate::tr!("OFF")), (ui::S_DMM_ROW, crate::tr!("Bargraph")), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, crate::tr!("Off (stock)")),
         (ui::S_PRESS, crate::tr!("ON")), (ui::S_TAP_STEP, crate::tr!("Corners")), (ui::S_JACK, crate::tr!("ON")), (ui::S_ALARM, crate::tr!("Loud")),
         (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, crate::tr!("OFF (stock)")), (ui::S_ACC, crate::tr!("ON")), (ui::S_OHM_NEG, crate::tr!("OFF (stock)")),
-        (ui::S_REMEMBER, crate::tr!("OFF")),
+        (ui::S_REMEMBER, crate::tr!("OFF")), (ui::S_CONT, crate::tr!("With volume")),
     ] {
         v[id as usize] = t;
     }
@@ -1150,6 +1150,7 @@ fn set_vals_worst() -> Vec<&'static str> {
         (ui::S_DMM_ROW, crate::tr!("Bargraph")), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, crate::tr!("OFF (stock)")),
         (ui::S_TAP_STEP, crate::tr!("Halves (stock)")), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, crate::tr!("Volume")),
         (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, crate::tr!("OFF (stock)")),
+        (ui::S_CONT, crate::tr!("With volume")),
     ])
 }
 

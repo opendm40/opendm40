@@ -28,6 +28,7 @@ macro_rules! tr {
     ("Accuracy") => { "To\u{f}\u{3}oc\u{2}\u{b}" };
     ("Again") => { "E\u{1e}\u{451} pa\u{e}" };
     ("Alerts") => { "\u{10}pe\u{7}y\u{6}p." };
+    ("Always") => { "Bce\u{14}\u{7}a" };
     ("Analog power") => { "A\u{3}a\u{5}o\u{14}. \u{6}\u{1}\u{2}." };
     ("Arm") => { "B\u{e}\u{8}ec\u{2}\u{1}" };
     ("Auto") => { "A\u{8}\u{2}o" };
@@ -55,6 +56,7 @@ macro_rules! tr {
     ("Clear") => { "O\u{f}\u{1}c\u{2}\u{1}\u{2}\u{b}" };
     ("Clear limits") => { "C\u{3}\u{11}\u{2}\u{b} \u{6}pe\u{7}e\u{5}\u{13}" };
     ("Color") => { "\u{426}\u{8}e\u{2}" };
+    ("Continuity beep") => { "\u{18}\u{8}y\u{4} \u{6}po\u{e}\u{8}o\u{3}\u{4}\u{1}" };
     ("Corners") => { "\u{19}\u{14}\u{5}\u{13}" };
     ("Coupling") => { "C\u{8}\u{11}\u{e}\u{b}" };
     ("Cur") => { "To\u{4}" };
@@ -116,7 +118,7 @@ macro_rules! tr {
     ("Install it now?") => { "\u{19}c\u{2}a\u{3}o\u{8}\u{1}\u{2}\u{b}?" };
     ("Installing firmware...") => { "\u{19}c\u{2}a\u{3}o\u{8}\u{4}a \u{6}po\u{16}\u{1}\u{8}\u{4}\u{1}..." };
     ("Interval") => { "\u{1b}\u{3}\u{2}ep\u{8}a\u{5}" };
-    ("Jack alerts") => { "\u{10}pe\u{7}y\u{6}p. \u{14}\u{3}\u{451}\u{e}\u{7}" };
+    ("Jack alerts") => { "Ko\u{3}\u{2}po\u{5}\u{b} \u{14}\u{3}\u{451}\u{e}\u{7}" };
     ("Key/alert volume") => { "\u{1a}po\u{c}\u{4}oc\u{2}\u{b}" };
     ("Lead from V/ohm jack to A") => { "\u{429}y\u{6} \u{1}\u{e} \u{14}\u{3}e\u{e}\u{7}a V/\u{3a9} \u{8} A" };
     ("Limits") => { "\u{41b}\u{1}\u{c}\u{1}\u{2}\u{13}" };
@@ -245,6 +247,7 @@ macro_rules! tr {
     ("Width:") => { "\u{428}\u{1}p\u{1}\u{3}a:" };
     ("Window") => { "O\u{4}\u{3}o" };
     ("Wiring") => { "Cxe\u{c}a" };
+    ("With volume") => { "\u{10}o \u{14}po\u{c}\u{4}oc\u{2}\u{1}" };
     ("Yes") => { "\u{1d}a" };
     ("Zero") => { "Ho\u{5}\u{b}" };
     ("expect ~48 \u{3a9}") => { "o\u{17}\u{1}\u{7}ae\u{2}c\u{11} ~48 \u{3a9}" };
@@ -280,6 +283,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Accuracy", "To\u{f}\u{3}oc\u{2}\u{b}"),
     ("Again", "E\u{1e}\u{451} pa\u{e}"),
     ("Alerts", "\u{10}pe\u{7}y\u{6}p."),
+    ("Always", "Bce\u{14}\u{7}a"),
     ("Analog power", "A\u{3}a\u{5}o\u{14}. \u{6}\u{1}\u{2}."),
     ("Arm", "B\u{e}\u{8}ec\u{2}\u{1}"),
     ("Auto", "A\u{8}\u{2}o"),
@@ -307,6 +311,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Clear", "O\u{f}\u{1}c\u{2}\u{1}\u{2}\u{b}"),
     ("Clear limits", "C\u{3}\u{11}\u{2}\u{b} \u{6}pe\u{7}e\u{5}\u{13}"),
     ("Color", "\u{426}\u{8}e\u{2}"),
+    ("Continuity beep", "\u{18}\u{8}y\u{4} \u{6}po\u{e}\u{8}o\u{3}\u{4}\u{1}"),
     ("Corners", "\u{19}\u{14}\u{5}\u{13}"),
     ("Coupling", "C\u{8}\u{11}\u{e}\u{b}"),
     ("Cur", "To\u{4}"),
@@ -368,7 +373,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Install it now?", "\u{19}c\u{2}a\u{3}o\u{8}\u{1}\u{2}\u{b}?"),
     ("Installing firmware...", "\u{19}c\u{2}a\u{3}o\u{8}\u{4}a \u{6}po\u{16}\u{1}\u{8}\u{4}\u{1}..."),
     ("Interval", "\u{1b}\u{3}\u{2}ep\u{8}a\u{5}"),
-    ("Jack alerts", "\u{10}pe\u{7}y\u{6}p. \u{14}\u{3}\u{451}\u{e}\u{7}"),
+    ("Jack alerts", "Ko\u{3}\u{2}po\u{5}\u{b} \u{14}\u{3}\u{451}\u{e}\u{7}"),
     ("Key/alert volume", "\u{1a}po\u{c}\u{4}oc\u{2}\u{b}"),
     ("Lead from V/ohm jack to A", "\u{429}y\u{6} \u{1}\u{e} \u{14}\u{3}e\u{e}\u{7}a V/\u{3a9} \u{8} A"),
     ("Limits", "\u{41b}\u{1}\u{c}\u{1}\u{2}\u{13}"),
@@ -497,6 +502,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Width:", "\u{428}\u{1}p\u{1}\u{3}a:"),
     ("Window", "O\u{4}\u{3}o"),
     ("Wiring", "Cxe\u{c}a"),
+    ("With volume", "\u{10}o \u{14}po\u{c}\u{4}oc\u{2}\u{1}"),
     ("Yes", "\u{1d}a"),
     ("Zero", "Ho\u{5}\u{b}"),
     ("expect ~48 \u{3a9}", "o\u{17}\u{1}\u{7}ae\u{2}c\u{11} ~48 \u{3a9}"),
