@@ -304,6 +304,9 @@ SECTIONS
         *(.text.*8opendm402ui2pw10press_item*);
         *(.text.*8opendm402ui9temp_rect*);
         *(.text.*8opendm403lcd10strips_box*);
+        /* The scope popups in strips (App::sp_popup_draw: per popup draw,
+         * not while the AD2 stream runs). */
+        *(.text.*8opendm403app10scope_page12popup_strips*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:TOUCH?, DBG:DIAG?, MMEM:DEL (and the
          * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?).

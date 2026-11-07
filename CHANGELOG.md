@@ -30,6 +30,8 @@ section named after the tag as the release notes; how to cut a release:
 
 - **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
 - **Scope:** the MF menu runs over the right panel, the same 13 px from both screen edges, with wider columns; the panel is drawn again when it closes.
+- **Scope:** the MF menu spans the screen to the right edge, over the right panel, with wider columns; the panel is drawn again when it closes.
+- **Scope:** the MF, CH1 and Math menus no longer tear or show half-drawn while they open, switch tabs or change a setting: each is drawn once, top to bottom.
 ### New
 
 - **Chinese README and user manual** (machine translation, not yet reviewed

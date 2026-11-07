@@ -341,6 +341,9 @@ pub(super) struct Sp {
     /// was drawn grey, bit 1: the math label, bit 7: pending).
     pub uncover: u8,
     pressed_cell: Option<u8>,
+    /// Popup draws so far (wrapping): a tap that drew it already needs no
+    /// second draw for its released cell.
+    popup_draws: u8,
     slider: Option<u8>,
     sampling: bool,
     /// Pinch bubble shown / to be (re)drawn.
@@ -422,6 +425,7 @@ impl Sp {
             popup: su::Popup::None,
             uncover: 0,
             pressed_cell: None,
+            popup_draws: 0,
             slider: None,
             sampling: false,
             bubble: false,
@@ -2431,10 +2435,15 @@ impl App {
     }
 
     pub(super) fn sp_popup_draw(&mut self) {
-        // The box's fills wait for its widgets (lcd.rs "deferred fills").
-        crate::lcd::defer_start();
+        self.sp.popup_draws = self.sp.popup_draws.wrapping_add(1);
         let v = self.sp_popvals();
-        su::draw_popup(self.sp.popup, &v);
+        // Not while the AD2 stream runs (the Wave view): popup_strips and
+        // strips_box are region C.
+        if crate::hy3131::streaming() || !popup_strips(self.sp.popup, &v) {
+            // The box's fills wait for its widgets (lcd.rs "deferred fills").
+            crate::lcd::defer_start();
+            su::draw_popup(self.sp.popup, &v);
+        }
     }
 
     /// Open (or switch) the popup; the CH1 / math label turns grey.
@@ -2560,6 +2569,7 @@ impl App {
                 self.beep(now, 30);
                 let (x, y) = (p.x as i16, p.y as i16);
                 let had_press = self.sp.pressed_cell.take().is_some();
+                let draws = self.sp.popup_draws;
                 match self.sp.popup {
                     // A toast from the tap (CH2 refused, "Generator is
                     // off", ...) waits for the popup's repaint (`toast_hold`).
@@ -2598,7 +2608,7 @@ impl App {
 
                     su::Popup::None => {}
                 }
-                if had_press && self.sp.popup != su::Popup::None && !self.redraw {
+                if had_press && self.sp.popup_draws == draws && self.sp.popup != su::Popup::None && !self.redraw {
                     self.sp_popup_draw();
                 }
             }
@@ -3292,3 +3302,33 @@ const _: () = assert!(scope::CAP <= crate::scope_csv::REC_MAX, "scope CSV sized 
 
 /// The pinch value bubble: centred in the graph.
 const BUBBLE: Rect = rect(153, 140, 120, 40);
+
+/// The popup `p` composed in RAM strips over its box (lcd::strips_box):
+/// every pixel sent once, in its final colour, top to bottom. Drawn
+/// directly, its frame fill and its ~30 widget windows (the deferred
+/// fills landing cell by cell under them) reached the panel in widget
+/// order over 35 .. 137 ms, 2 .. 8 panel refreshes of 16.3 ms (device,
+/// DBG:PROF?, DBG:SCANLINE?): the box showed torn and half drawn. The
+/// composing takes as long in strips; what changes is that the panel
+/// only ever shows the old picture above or below the new one. No
+/// scan-line wait (scanline.rs): the scan runs along x (DIR 1, inferred)
+/// and the box spans 466 of the 480 columns, so there is no window
+/// between two passes. False (the caller draws
+/// directly): no box (the timebase list), inside a page strip pass
+/// (App::repaint_strips draws the popup into its own strips) or a disk job
+/// holds the strip buffer. Region C (link-native.x): never while the AD2
+/// stream runs (the caller checks).
+#[inline(never)]
+fn popup_strips(p: su::Popup, v: &su::PopVals) -> bool {
+    let Some(r) = su::popup_box(p) else {
+        return false;
+    };
+    if crate::lcd::in_strip() {
+        return false;
+    }
+    let Some(buf) = crate::diskbuf::strip_take() else {
+        return false;
+    };
+    crate::lcd::strips_box(buf, r.x as u16, r.y as u16, (r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16, &mut || su::draw_popup(p, v));
+    crate::diskbuf::strip_give()
+}
