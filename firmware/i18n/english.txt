@@ -289,6 +289,7 @@ Frames
 Frames:
 GEN
 GEN trace:
+GEN: not in the Wave view
 Gain vs DC V / AC V, 8 s
 Gestures
 Good fit: Save applies it
