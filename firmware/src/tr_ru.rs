@@ -57,6 +57,7 @@ macro_rules! tr {
     ("Color") => { "\u{426}\u{8}e\u{2}" };
     ("Corners") => { "\u{19}\u{14}\u{5}\u{13}" };
     ("Coupling") => { "C\u{8}\u{11}\u{e}\u{b}" };
+    ("Cur") => { "To\u{4}" };
     ("Current Settings") => { "Hac\u{2}po\u{15}\u{4}a I" };
     ("Current in A jack: check leads") => { "To\u{4} \u{8} A: \u{6}po\u{8}ep\u{b}\u{2}e \u{1e}y\u{6}\u{13}" };
     ("Current too high: reduce it") => { "To\u{4} \u{8}e\u{5}\u{1}\u{4}: y\u{c}e\u{3}\u{b}\u{16}\u{1}\u{2}e" };
@@ -226,6 +227,7 @@ macro_rules! tr {
     ("Trigger") => { "Tp\u{1}\u{14}\u{14}ep" };
     ("Trigger source: CH1") => { "\u{1b}c\u{2}o\u{f}\u{3}\u{1}\u{4} \u{2}p\u{1}\u{14}\u{14}epa: CH1" };
     ("Try again") => { "\u{10}o\u{8}\u{2}op\u{1}\u{2}e" };
+    ("Type") => { "T\u{1}\u{6}" };
     ("Type:") => { "T\u{1}\u{6}:" };
     ("USB disk") => { "USB-\u{7}\u{1}c\u{4}" };
     ("Unstable: unplug USB?") => { "Hec\u{2}a\u{12}\u{1}\u{5}\u{b}\u{3}o: o\u{2}\u{4}\u{5}\u{1f}\u{f}\u{1}\u{2}e USB?" };
@@ -234,6 +236,7 @@ macro_rules! tr {
     ("Upper = reading") => { "Bepx = \u{6}o\u{4}a\u{e}." };
     ("Upper limit") => { "Bepx\u{3}\u{1}\u{15} \u{6}pe\u{7}e\u{5}" };
     ("Vendor") => { "\u{10}po\u{1}\u{e}\u{8}o\u{7}\u{1}\u{2}e\u{5}\u{b}" };
+    ("Vol") => { "Ha\u{6}p" };
     ("Voltage Settings") => { "Hac\u{2}po\u{15}\u{4}a U" };
     ("Voltage on V jack, no current") => { "Ha\u{6}p\u{11}\u{17}e\u{3}\u{1}e \u{3}a V, \u{2}o\u{4}a \u{3}e\u{2}" };
     ("Voltage on circuit - power off") => { "C\u{3}\u{1}\u{c}\u{1}\u{2}e \u{3}a\u{6}p\u{11}\u{17}e\u{3}\u{1}e c \u{1c}e\u{6}\u{1}" };
@@ -306,6 +309,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Color", "\u{426}\u{8}e\u{2}"),
     ("Corners", "\u{19}\u{14}\u{5}\u{13}"),
     ("Coupling", "C\u{8}\u{11}\u{e}\u{b}"),
+    ("Cur", "To\u{4}"),
     ("Current Settings", "Hac\u{2}po\u{15}\u{4}a I"),
     ("Current in A jack: check leads", "To\u{4} \u{8} A: \u{6}po\u{8}ep\u{b}\u{2}e \u{1e}y\u{6}\u{13}"),
     ("Current too high: reduce it", "To\u{4} \u{8}e\u{5}\u{1}\u{4}: y\u{c}e\u{3}\u{b}\u{16}\u{1}\u{2}e"),
@@ -475,6 +479,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Trigger", "Tp\u{1}\u{14}\u{14}ep"),
     ("Trigger source: CH1", "\u{1b}c\u{2}o\u{f}\u{3}\u{1}\u{4} \u{2}p\u{1}\u{14}\u{14}epa: CH1"),
     ("Try again", "\u{10}o\u{8}\u{2}op\u{1}\u{2}e"),
+    ("Type", "T\u{1}\u{6}"),
     ("Type:", "T\u{1}\u{6}:"),
     ("USB disk", "USB-\u{7}\u{1}c\u{4}"),
     ("Unstable: unplug USB?", "Hec\u{2}a\u{12}\u{1}\u{5}\u{b}\u{3}o: o\u{2}\u{4}\u{5}\u{1f}\u{f}\u{1}\u{2}e USB?"),
@@ -483,6 +488,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Upper = reading", "Bepx = \u{6}o\u{4}a\u{e}."),
     ("Upper limit", "Bepx\u{3}\u{1}\u{15} \u{6}pe\u{7}e\u{5}"),
     ("Vendor", "\u{10}po\u{1}\u{e}\u{8}o\u{7}\u{1}\u{2}e\u{5}\u{b}"),
+    ("Vol", "Ha\u{6}p"),
     ("Voltage Settings", "Hac\u{2}po\u{15}\u{4}a U"),
     ("Voltage on V jack, no current", "Ha\u{6}p\u{11}\u{17}e\u{3}\u{1}e \u{3}a V, \u{2}o\u{4}a \u{3}e\u{2}"),
     ("Voltage on circuit - power off", "C\u{3}\u{1}\u{c}\u{1}\u{2}e \u{3}a\u{6}p\u{11}\u{17}e\u{3}\u{1}e c \u{1c}e\u{6}\u{1}"),
