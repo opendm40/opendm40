@@ -360,6 +360,9 @@ pub struct Model {
     pub gen_hz: f32,
     /// CH1 / math label grey (their popup is open).
     pub ch1_open: bool,
+    /// CH1 shown (its trace, persistence and level marker; off: the CH1
+    /// block dimmed, the trigger on CH1 still works).
+    pub ch1_on: bool,
     pub math_open: bool,
     /// Right-panel button 1..7 drawn pressed (0 none; our feedback option).
     pub pressed: u8,
@@ -494,6 +497,7 @@ impl Model {
         record: (0.0, 1.0),
         gen_hz: 0.0,
         ch1_open: false,
+        ch1_on: true,
         math_open: false,
         pressed: 0,
         combined: false,
@@ -1074,7 +1078,7 @@ pub fn block_look(m: &Model, b: usize) -> Look {
             scale: Txt::new(v.as_str()),
             col: m.pal(),
             ink: m.pal_ink(),
-            on: true,
+            on: m.ch1_on,
             open: m.ch1_open,
         },
         BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: c_ch2(), ink: c_ch2_ink(), on: false, open: false },
@@ -1461,8 +1465,10 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     // CH1 / math range is +-140 rows around the centre (the 280-row model).
     let off_row = |off: i16| if off < -140 { -1 } else if off > 140 { 281 } else { 140 + off };
     let mut n = 0;
-    out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
-    n += 1;
+    if m.ch1_on {
+        out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
+        n += 1;
+    }
     out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
     n += 1;
     if m.math_on {
@@ -1887,7 +1893,7 @@ impl Deco {
                 _ => {}
             }
             match m.sel_v {
-                0 => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
+                0 if m.ch1_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
                 1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: ctr }),
                 2 if m.math_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.math_off as i32), solid: true, col: d.math }),
                 5 => {
@@ -2260,6 +2266,11 @@ impl Graph {
     /// Bring the panel up to date with `tr` / `ps` / `ma` and the model's
     /// lines, markers and colours, repainting only the rows that changed.
     pub fn flush(&mut self, m: &Model) {
+        if !m.ch1_on {
+            // CH1 off: no trace, no persistence (the record is still taken).
+            self.tr = [EMPTY; NCOL];
+            self.ps = [EMPTY; NCOL];
+        }
         self.deco = Deco::of(m);
         let d = self.deco;
         let o = self.d_deco;

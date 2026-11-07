@@ -309,6 +309,9 @@ pub(super) struct Sp {
     /// CH1 type Cur (CH1 popup > Probe > Type): CH1's values, V/div, trigger
     /// level and measurements in amperes.
     pub ch1_cur: bool,
+    /// CH1 hidden: a second tap on the CH1 block with
+    /// its popup open, as stock math (`su::Model::ch1_on`).
+    pub ch1_off: bool,
     pub sel_v: u8,
     pub sel_h: u8,
     /// Group of the last selection (false = level / V, true = time / H).
@@ -398,6 +401,7 @@ impl Sp {
     pub const fn new() -> Sp {
         Sp {
             ch1_cur: false,
+            ch1_off: false,
             sel_v: 0,
             sel_h: 0,
             last_h: false,
@@ -569,6 +573,8 @@ impl App {
             // Combined view: the strip's GEN badge shows it instead.
             gen_hz: if self.gen.s.on && self.view == View::Scope { self.gen.actual_hz() } else { 0.0 },
             ch1_open: matches!(sp.popup, su::Popup::Ch1(_)),
+            // The Wave view's CH1 is the DMM's reading: always shown.
+            ch1_on: !sp.ch1_off || wave,
             math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
             combined: self.view == View::DmmScope,
@@ -2211,7 +2217,22 @@ impl App {
             match b {
                 // The wave view: CH1 = the coupling note.
                 su::BLK_CH1 if wave => self.wave_coupling_note(now),
-                su::BLK_CH1 => self.sp_popup_open(su::Popup::Ch1(0)),
+                su::BLK_CH1 => {
+                    // As the math label: CH1 off -> on with its popup.
+                    let show = self.sp.ch1_off;
+                    if show {
+                        self.sp_ch1_show(true);
+                    }
+                    self.sp_popup_open(su::Popup::Ch1(0));
+                    if show && !self.redraw {
+                        // The magnifiers out of their dimmed look at once
+                        // (the title: sp_popup_open; the trace once the
+                        // popup closes).
+                        let m = self.sp_model(self.now);
+                        su::panel_part(&m, 3 * su::BLK_CH1 + 1);
+                        su::panel_part(&m, 3 * su::BLK_CH1 + 2);
+                    }
+                }
                 // The wave view: back to the OSC (MCX) input.
                 su::BLK_DMM if wave => self.wave_badge_close(clk),
                 su::BLK_DMM => {
@@ -2258,6 +2279,13 @@ impl App {
                 self.sp_settings_changed();
             }
         }
+    }
+
+    /// CH1 shown / hidden: the graph again from the record.
+    fn sp_ch1_show(&mut self, on: bool) {
+        self.sp.ch1_off = !on;
+        self.scope_invalidate();
+        self.sp_settings_changed();
     }
 
     /// The GEN trace on / off (the GEN block's title, MF > Display, SCPI
@@ -2510,6 +2538,12 @@ impl App {
                         self.toast_hold = true;
                         self.sp_mf_tap(clk, t, su::mf_hit(t, &v, x, y), now);
                         self.sp_toast_release(now);
+                    }
+                    su::Popup::Ch1(_) if su::panel_hit(p.x, p.y) == Some(3 * su::BLK_CH1) && !self.scope.wave_on() => {
+                        // As the math label: the CH1 label with its popup
+                        // open = CH1 hidden.
+                        self.sp_ch1_show(false);
+                        self.sp_popup_close();
                     }
                     su::Popup::Ch1(t) => {
                         self.toast_hold = true;
@@ -3094,6 +3128,8 @@ impl App {
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
             // Bit 14: CH1 type Cur.
             | (self.sp.ch1_cur as u32) << 14
+            // Bit 13: CH1 hidden.
+            | (self.sp.ch1_off as u32) << 13
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
         // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
@@ -3134,6 +3170,7 @@ impl App {
         su::set_ch2_colour(((p[5] >> 16 & 0xF) as u8).min(su::NPAL as u8));
         su::set_gen_colour(((p[5] >> 20 & 0xF) as u8 ^ su::GEN_COLOUR_DEFAULT).min(su::NPAL as u8 - 1));
         self.sp.ch1_cur = p[3] >> 14 & 1 != 0;
+        self.sp.ch1_off = p[3] >> 13 & 1 != 0;
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };

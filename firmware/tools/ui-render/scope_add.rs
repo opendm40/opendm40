@@ -832,6 +832,26 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             }
         }
         if !combined {
+            // CH1 hidden: no CH1 trace or 'A' marker, the CH1 block dimmed;
+            // CH2, GEN and the trigger stay. Below the top markers' row (the
+            // trigger position's T stays), left of the trigger level's T.
+            let (w, top, gh) = (host::W, m.top() as usize, h as usize);
+            let count = |c: u16| (top + 14..top + gh).flat_map(|y| (scope_ui::GX as usize..scope_ui::GR as usize - 12).map(move |x| (x, y))).filter(|&(x, y)| emu().fb[y * w + x] == c).count();
+            let tc = m.trace_colour();
+            draw(&m, scope_ui::Popup::None, &pv, true);
+            let shown = count(tc);
+            let mut m1 = m;
+            m1.ch1_on = false;
+            draw(&m1, scope_ui::Popup::None, &pv, true);
+            ck.check_replica("gen/ch1-off");
+            save(out, "s08-ch1-off");
+            let hidden = count(tc);
+            println!("CH1 off: {hidden} px in CH1's trace colour (on: {shown})");
+            if !(shown > 300 && hidden == 0) {
+                ck.fail("gen/ch1-off", format!("CH1 off still drawn: {hidden} px of CH1's colour (on: {shown})"));
+            }
+        }
+        if !combined {
             // The MF popup covers the panel (owner 2026-11-06): its box
             // shows nothing of the panel under it (a pressed part, the
             // CH1 title grey: the same box pixels).
