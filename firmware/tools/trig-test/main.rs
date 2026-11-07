@@ -177,6 +177,7 @@ fn main() {
     t("comparator record: rec samples, edge at pre_for, window inside", bad_layout == 0);
     // A record shorter than the screen + slack falls back to post_for.
     t("comparator record: post_for floor", hwtrig::post_rec(1000, 500, 500, win) == hwtrig::post_for(500, win));
+    freq_counter();
     let (n, bad) = unsafe { (N, BAD) };
     println!("cases {n}, failures {bad}");
     std::process::exit(if bad == 0 { 0 } else { 1 });
@@ -209,4 +210,57 @@ fn packed() {
         pack10::set(p, i, v);
     }
     t("pack10: set keeps the neighbours", pack10::get(p, 4) == d[4] && pack10::get(p, 5) == 1023 && pack10::get(p, 6) == 0 && pack10::get(p, 7) == 512 && pack10::get(p, 8) == d[8] && pack10::get(p, 3999) == 1 && pack10::get(p, 3998) == d[3998]);
+}
+
+/// src/hwtrig.rs: the TIM4 post count (`tim4_div`) and the reciprocal
+/// frequency counter (`FreqCounter`) on synthetic edge streams.
+fn freq_counter() {
+    use hwtrig::{tim4_div, FreqCounter, TIM_CLK};
+    // Sample period in core ticks -> TIM4 tick (period / m) and post x m.
+    t("tim4_div: 50 MS/s, 1 tick per sample", tim4_div(4, 26000) == Some((4, 26000)));
+    t("tim4_div: 6250 S/s fits the PSC", tim4_div(32000, 26000) == Some((32000, 26000)));
+    t("tim4_div: 2500 S/s halves the tick", tim4_div(80000, 26000) == Some((40000, 52000)));
+    t("tim4_div: 1250 S/s with a long post part does not fit", tim4_div(160000, 26000).is_none());
+    t("tim4_div: post over 16 bits does not fit", tim4_div(4, 70000).is_none());
+    // Every rate of the scope's HW table down to 25 kS/s (non-roll rates
+    // with the comparator) fits a whole ring's post part.
+    for p in [4u32, 8, 16, 20, 32, 40, 80, 160, 200, 320, 400, 800, 1600, 2000, 3200, 4000, 8000] {
+        t("tim4_div: the scope's fast rates fit", tim4_div(p, 43000).is_some_and(|(d, n)| d * (n / 43000) == p && n % 43000 == 0));
+    }
+    // Edges at f Hz from TIM2 time t0, polled every 10 ms.
+    let run = |f: f64, t0: u32, secs: f64| -> (FreqCounter, u64) {
+        let mut c = FreqCounter::new();
+        let per = TIM_CLK as f64 / f;
+        let mut ms = 0u64;
+        while (ms as f64) < secs * 1000.0 {
+            let now_ticks = ms as f64 * TIM_CLK as f64 / 1000.0;
+            let k = (now_ticks / per).floor();
+            let t_edge = t0.wrapping_add((k * per) as u64 as u32);
+            let now = t0.wrapping_add(now_ticks as u64 as u32);
+            c.update(k as u32, t_edge, now, ms);
+            ms += 10;
+        }
+        (c, ms)
+    };
+    let close = |v: Option<f32>, f: f64, ppm: f64| v.is_some_and(|v| (v as f64 / f - 1.0).abs() <= ppm * 1e-6);
+    let (c, ms) = run(1000.0, 0, 1.0);
+    t("freq: 1 kHz", close(c.hz(ms), 1000.0, 1.0));
+    let (c, ms) = run(123456.7, 0, 1.0);
+    t("freq: 123.4567 kHz", close(c.hz(ms), 123456.7, 1.0));
+    let (c, ms) = run(37.5, u32::MAX - 30_000_000, 1.5);
+    t("freq: 37.5 Hz across the TIM2 wrap", close(c.hz(ms), 37.5, 1.0));
+    let (c, ms) = run(0.5, 0, 5.0);
+    t("freq: 0.5 Hz (one edge per 2 s)", close(c.hz(ms), 0.5, 1.0));
+    t("freq: 0.5 Hz kept for three periods", close(c.hz(ms + 5000), 0.5, 1.0) && c.hz(ms + 7000).is_none());
+    let (c, ms) = run(1000.0, 0, 1.0);
+    t("freq: a result goes stale after 1.5 s without edges", c.hz(ms + 1200).is_some() && c.hz(ms + 1600).is_none());
+    let (mut c, ms) = run(1000.0, 0, 1.0);
+    c.restart();
+    t("freq: restart forgets the result", c.hz(ms).is_none());
+    // No edges at all: never a result.
+    let mut c = FreqCounter::new();
+    for ms in 0..300u64 {
+        c.update(7, 1234, (ms * 2_000_000) as u32, ms * 10);
+    }
+    t("freq: no edges, no result", c.hz(3000).is_none());
 }

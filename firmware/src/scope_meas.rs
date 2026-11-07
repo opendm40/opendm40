@@ -1,5 +1,7 @@
 //! Scope measurements (scope_gen_ui_v2_6.h section 4): computed on the
-//! samples of the visible window, refreshed at most every 300 ms.
+//! samples of the visible window, refreshed at most every 300 ms; Freq and
+//! Cycl from the comparator frequency counter (hwtrig.rs) when it has a
+//! result.
 //! Stock item IDs: 0 Freq 1 +Duty 2 -Duty 3 +Wid 4 -Wid 5 +Pul 6 -Pul
 //! 9 Cycl 10 Vpp 11 Vrms 12 Vmax 13 Vmin 14 Vtop 15 Vbas 16 Vamp 18 Vcrm 19 Vavg
 //! (7/8/17 are the cursor readouts). Invalid values: NaN.
@@ -65,7 +67,15 @@ pub fn compute<S: Src + ?Sized>(d: &S, fs: f32, sc: &Scope) -> Results {
     // calibrated map per sample (that made a 50k-sample frame take ~100 ms).
     let v_0 = sc.volts(0.0);
     let v_k = sc.volts(1.0) - v_0;
-    compute_codes(d, fs, v_0, v_k)
+    let mut r = compute_codes(d, fs, v_0, v_k);
+    // Freq / Cycl from the comparator counter (hwtrig::FreqCounter) while
+    // it has a result: crystal accuracy on any timebase, also with less
+    // than two periods on screen. Else the edges of the window.
+    if let Some(f) = sc.hw_freq() {
+        r.v[0] = f;
+        r.v[9] = 1.0 / f;
+    }
+    r
 }
 
 /// Sum of (v_0 + v_k c)^2 over `n` samples with code sum `s1` and code

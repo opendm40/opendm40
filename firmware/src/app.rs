@@ -5759,6 +5759,17 @@ impl App {
                         out.put_f32(if st.hits > 0 { st.delta_sum as f32 / st.hits as f32 } else { 0.0 });
                         Some(())
                     }
+                    5 => {
+                        // Hz (NaN: none), TIM5 edges, TIM2 now, TIM2 CCR1.
+                        let f = self.scope.hw_freq();
+                        let r = self.scope.hw.freq_regs();
+                        out.put_f32(f.unwrap_or(f32::NAN));
+                        for v in r {
+                            out.put_bytes(b",");
+                            crate::put_u32(out, v);
+                        }
+                        Some(())
+                    }
                     _ => {
                         hw.reset_stats();
                         None
