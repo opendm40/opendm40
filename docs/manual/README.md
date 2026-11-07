@@ -1301,7 +1301,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 |---|---|
 | **RUN** | Run / stop. Also: tap the run state in the top bar. |
 | **AUTO** | [Auto-set](#auto-set). |
-| **MF** | The scope menu, Measure tab. |
+| **MF** | The scope menu, on the tab open last time (at first: Measure). |
 | **MENU** | Main menu. Also closes a popup. |
 
 ### Timebase
@@ -1453,7 +1453,7 @@ menu.
 
 ### Measurements
 
-Press **MF**: the **Measure** tab lists 20 measurements. Tap up to four;
+**MF > Measure** lists 20 measurements. Tap up to four;
 tap a selected one to remove it. **Clear** removes all, **Default**
 restores Freq, Vp-p, Cycl, Vrms.
 

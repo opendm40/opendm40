@@ -328,6 +328,9 @@ pub(super) struct Sp {
     /// Measure cell under the finger, a slider being dragged (0 brightness,
     /// 1 grid), the "Sampling" box shown.
     pub popup: su::Popup,
+    /// The MF tab shown last: the MF key opens it again (persisted,
+    /// sp_persist_ext).
+    mf_tab: u8,
     /// A closed popup to repaint over (`sp_uncover`; bit 0: the CH1 label
     /// was drawn grey, bit 1: the math label, bit 7: pending).
     pub uncover: u8,
@@ -409,6 +412,7 @@ impl Sp {
             autoset: None,
             frozen: false,
             popup: su::Popup::None,
+            mf_tab: 0,
             uncover: 0,
             pressed_cell: None,
             slider: None,
@@ -2272,7 +2276,7 @@ impl App {
                 self.scope_set(s, now);
             }
             2 => self.autoset_start(now),
-            _ => self.sp_popup_open(su::Popup::Mf(0)),
+            _ => self.sp_popup_open(su::Popup::Mf(self.sp.mf_tab)),
         }
     }
 
@@ -2334,6 +2338,9 @@ impl App {
     fn sp_popup_open(&mut self, p: su::Popup) {
         self.sp_end_hold(self.now);
         self.sp.popup = p;
+        if let su::Popup::Mf(t) = p {
+            self.sp.mf_tab = t;
+        }
         self.sp.list = None;
         self.sp.tb_drawn = (255, false);
         self.sp.rec_drawn = None;
@@ -2588,6 +2595,7 @@ impl App {
                 if t != tab {
                     let old = su::popup_box(self.sp.popup);
                     self.sp.popup = su::Popup::Mf(t);
+                    self.sp.mf_tab = t;
                     let new = su::popup_box(self.sp.popup);
                     if let (View::Scope, Some(o), Some(n)) = (self.view, old, new) {
                         // The new box, then the graph rows the old one
@@ -3000,7 +3008,8 @@ impl App {
         // The MCX settings (the wave view's trigger is not persisted).
         let s = &self.scope.mcx_settings();
         let dr = scope::Settings::DEFAULT.runt_row;
-        // Bits 4 / 5: the trigger source GEN, the GEN trace shown.
+        // Bits 4 / 5: the trigger source GEN, the GEN trace shown; bits
+        // 13..15: the last MF tab (0 = Measure).
         p[3] = (s.ttype as u32 & 3)
             | (s.pcond as u32 & 3) << 2
             | (s.tsrc as u32 & 1) << 4
@@ -3008,6 +3017,7 @@ impl App {
             | (self.ch2.on as u32) << 6
             // Bits 8..12: the GEN V/div index + 1 (0: not set yet).
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
+            | (self.sp.mf_tab as u32 & 7) << 13
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
     }
@@ -3037,6 +3047,7 @@ impl App {
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
+        self.sp.mf_tab = ((p[3] >> 13 & 7) as u8).min(4);
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };
