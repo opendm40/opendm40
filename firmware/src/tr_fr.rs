@@ -207,6 +207,7 @@ macro_rules! tr {
     ("Touch calibration") => { "Calibrage tactile" };
     ("Touch test") => { "Test tactile" };
     ("Trigger") => { "D\u{1}clench." };
+    ("Trigger source: CH1") => { "Source trigger : CH1" };
     ("Try again") => { "R\u{1}essayer" };
     ("Type:") => { "Type :" };
     ("USB disk") => { "Disque USB" };
@@ -437,6 +438,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Touch calibration", "Calibrage tactile"),
     ("Touch test", "Test tactile"),
     ("Trigger", "D\u{1}clench."),
+    ("Trigger source: CH1", "Source trigger : CH1"),
     ("Try again", "R\u{1}essayer"),
     ("Type:", "Type :"),
     ("USB disk", "Disque USB"),
