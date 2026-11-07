@@ -306,6 +306,9 @@ fn hz_opts(nyq: f32) -> [f32; 4] {
 
 /// Scope page state.
 pub(super) struct Sp {
+    /// CH1 type Cur (CH1 popup > Probe > Type): CH1's values, V/div, trigger
+    /// level and measurements in amperes.
+    pub ch1_cur: bool,
     pub sel_v: u8,
     pub sel_h: u8,
     /// Group of the last selection (false = level / V, true = time / H).
@@ -394,6 +397,7 @@ impl Sp {
 
     pub const fn new() -> Sp {
         Sp {
+            ch1_cur: false,
             sel_v: 0,
             sel_h: 0,
             last_h: false,
@@ -535,7 +539,7 @@ impl App {
         if wave && s.tb <= scope::WAVE_TB_MIN {
             tabs &= !(su::TAB_SHOW_R | su::TAB_PRESS_R); // no faster wave timebase
         }
-        let amps = wave && self.scope.wave_scale_now().amps;
+        let amps = if wave { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur };
         Model {
             status,
             tb: s.tb as u8,
@@ -605,6 +609,12 @@ impl App {
         }
     }
 
+    /// The unit of CH1's values: "A" in the Wave view's current rows and with
+    /// CH1 type Cur, else "V".
+    fn ch1_unit(&self) -> &'static str {
+        if if self.scope.wave_on() { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur } { "A" } else { "V" }
+    }
+
     /// Math pill second line: FFT dB/div, else the math V/div.
     fn math_scale(&self) -> su::Txt {
         let m = &self.sp.math;
@@ -612,7 +622,7 @@ impl App {
             su::Txt::new(su::FFT_DB[m.db.min(12) as usize])
         } else {
             let mut t = su::Txt::new(su::VDIV_LABELS[m.vdiv.min(21) as usize]);
-            t.push("V");
+            t.push(self.ch1_unit());
             t
         }
     }
@@ -983,7 +993,7 @@ impl App {
         let mut t = [0u8; 16];
         h.s(crate::cold_str!("# Alientek ")).s(crate::ident::model_name()).s(crate::cold_str!(", opendm40 ")).s(crate::ident::VERSION).s(crate::cold_str!(", scope record (no real-time clock)\r\n"));
         let wave = self.scope.wave_on();
-        let amps = wave && self.scope.wave_scale_now().amps;
+        let amps = if wave { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur };
         let unit = if amps { "A" } else { "V" };
         let mut v = su::Buf::new();
         // From the value: the label table index (vdiv_idx) is wrong with
@@ -1012,15 +1022,17 @@ impl App {
             scope::TrigMode::Single => crate::cold_str!("Single"),
         });
         h.s(if trig { crate::cold_str!(", triggered\r\n") } else { crate::cold_str!(", untriggered\r\n") });
-        h.s(if wave {
-            if amps {
-                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n")
-            } else {
-                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n")
-            }
+        // The shared start once (each long text is a copy in region C).
+        h.s(crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); "));
+        if wave {
+            h.s(crate::cold_str!("the value column is ")).s(if amps { crate::cold_str!("amperes through the DMM A jack") } else { crate::cold_str!("volts at the DMM jacks") });
+            h.s(crate::cold_str!(" (DMM calibration applied)\r\n"));
+        } else if amps {
+            // CH1 type Cur: the probe factor reads amperes per input volt.
+            h.s(crate::cold_str!("the value column is amperes (CH1 type Cur; probe factor = A per input volt)\r\n"));
         } else {
-            crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n")
-        });
+            h.s(crate::cold_str!("volts at the probe tip\r\n"));
+        }
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
             self.toast(now, crate::tr!("CSV save failed"), false);
@@ -1040,8 +1052,7 @@ impl App {
             }
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
-                let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
-                su::fmt_v(&mut b, runt_v, unit);
+                su::fmt_v(&mut b, runt_v, self.ch1_unit());
                 h.s(crate::cold_str!("Runt, 2nd level ")).s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             _ => {
@@ -1295,7 +1306,7 @@ impl App {
                 su::fmt_hz(&mut pk, pf);
                 pk.push(" ");
                 if m.vrms {
-                    su::fmt_v(&mut pk, crate::fft::db_to_v(pd), "V");
+                    su::fmt_v(&mut pk, crate::fft::db_to_v(pd), self.ch1_unit());
                 } else {
                     let mut t = [0u8; 16];
                     pk.push(crate::dmm::format(&mut t, pd, if pd.abs() < 99.95 { 1 } else { 0 })).push("dBV");
@@ -2169,10 +2180,10 @@ impl App {
         if p.axis == Axis::H {
             b.push(su::TB_LABELS[p.i.min(29)]).push("/div");
         } else if self.scope.wave_on() {
-            su::fmt_div(&mut b, self.wave_step_vdiv(p.i), if self.scope.wave_scale_now().amps { "A" } else { "V" });
+            su::fmt_div(&mut b, self.wave_step_vdiv(p.i), self.ch1_unit());
             b.push("/div");
         } else {
-            su::fmt_div(&mut b, scope::VSTEPS[p.i.min(scope::VIDX_MAX)] * self.scope.s.probe, "V");
+            su::fmt_div(&mut b, scope::VSTEPS[p.i.min(scope::VIDX_MAX)] * self.scope.s.probe, self.ch1_unit());
             b.push("/div");
             if p.i < 2 {
                 b.push(" zoom"); // digital: range 0's codes stretched
@@ -2290,7 +2301,7 @@ impl App {
     /// The GEN block's scale ("1V", "500mV").
     fn gen_label(&self) -> su::Txt {
         let mut b = su::Buf::new();
-        su::vdiv_text(&mut b, self.gen_vdiv_idx());
+        su::vdiv_text(&mut b, self.gen_vdiv_idx(), "V");
         su::Txt::new(b.as_str())
     }
 
@@ -2354,6 +2365,7 @@ impl App {
             dec: self.dec_setup_vals(),
             tsrc: s.tsrc,
             gen_trace: self.scope.gen_trace,
+            cur: self.sp.ch1_cur,
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(),
             meas_src2: self.meas_src2,
@@ -2785,6 +2797,15 @@ impl App {
                 st.probe = scope::PROBES[(i as usize).min(12)];
                 self.scope_set(st, now);
             }
+            su::SideHit::Type(i) => {
+                if (i == 1) != self.sp.ch1_cur {
+                    self.sp.ch1_cur = i == 1;
+                    // The new unit on the V/div, the level badge, the
+                    // measurements and the frame's cursor readouts.
+                    self.scope.refresh();
+                    self.sp_settings_changed();
+                }
+            }
             su::SideHit::Colour(i) => self.sp.colour = i.min(su::NPAL as u8 - 1),
             su::SideHit::MathMode(md) => {
                 if md != self.sp.math.mode {
@@ -3071,6 +3092,8 @@ impl App {
             | (self.ch2.on as u32) << 6
             // Bits 8..12: the GEN V/div index + 1 (0: not set yet).
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
+            // Bit 14: CH1 type Cur.
+            | (self.sp.ch1_cur as u32) << 14
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
         // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
@@ -3110,6 +3133,7 @@ impl App {
         self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
         su::set_ch2_colour(((p[5] >> 16 & 0xF) as u8).min(su::NPAL as u8));
         su::set_gen_colour(((p[5] >> 20 & 0xF) as u8 ^ su::GEN_COLOUR_DEFAULT).min(su::NPAL as u8 - 1));
+        self.sp.ch1_cur = p[3] >> 14 & 1 != 0;
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };

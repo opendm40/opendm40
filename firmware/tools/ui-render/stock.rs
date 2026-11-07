@@ -314,6 +314,7 @@ pub fn popvals(m: &Model) -> su::PopVals {
         dec: su::dec::SetupVals::DEFAULT,
         tsrc: 0,
         gen_trace: false,
+        cur: false,
         ch2_on: false,
         ch2_vdiv: su::Txt::EMPTY,
         meas_src2: false,

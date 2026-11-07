@@ -576,10 +576,11 @@ impl Model {
         if self.wvdiv > 0.0 {
             fmt_div(out, self.wvdiv, self.unit());
         } else {
-            vdiv_text(out, self.vdiv);
+            vdiv_text(out, self.vdiv, self.unit());
         }
     }
-    /// Unit of the vertical values ("V", source DMM current rows "A").
+    /// Unit of the vertical values ("V"; "A": the DMM current rows, CH1
+    /// type Cur).
     pub fn unit(&self) -> &'static str {
         if self.amps { "A" } else { "V" }
     }
@@ -690,9 +691,9 @@ pub fn fmt_div(out: &mut Buf, v: f32, unit: &str) {
     out.push(crate::dmm::format(&mut t, v, frac as u8)).push(P[i]).push(unit);
 }
 
-/// "1V", "200mV": the V/div label and unit.
-pub fn vdiv_text(out: &mut Buf, vdiv: u8) {
-    out.push(VDIV_LABELS[vdiv.min(21) as usize]).push("V");
+/// "1V", "200mV": the V/div label and `unit` ("V" / "A").
+pub fn vdiv_text(out: &mut Buf, vdiv: u8, unit: &str) {
+    out.push(VDIV_LABELS[vdiv.min(21) as usize]).push(unit);
 }
 
 // ------------------------------------------------------------------ widgets
@@ -3218,6 +3219,8 @@ pub struct PopVals {
     /// docs/scope-gen-channel.md).
     pub tsrc: u8,
     pub gen_trace: bool,
+    /// CH1 type Cur (CH1 popup, Probe tab): the values in amperes.
+    pub cur: bool,
     /// The DMM CH2 shown and its label ("CH2 1.5V"; empty before its
     /// first start).
     pub ch2_on: bool,
@@ -3497,7 +3500,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 crate::trigsoft::RUNT => {
                     fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, "2nd level:", C_FILL, 1, 0);
                     let mut b = Buf::new();
-                    fmt_v(&mut b, v.runt_v, "V");
+                    fmt_v(&mut b, v.runt_v, if v.cur { "A" } else { "V" });
                     fill_text(TP_COND, pc, C_POP_BG, sf::SC_F16, TP_COND, b.as_str(), C_ORANGE, 1, 0);
                     fill_text(TR_HINT, pc, C_POP_BG, sf::SC_F16, TR_HINT, "drag orange T", C_FILL, 1, 0);
                 }
@@ -3753,10 +3756,12 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
         1 => {
             let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
-            // Stock also shows "Type Vol / Cur" here; it changes nothing
-            // (opendm40 reads the Wave view's current from the DMM), so it
-            // is left out.
             spinner(rect(SX + 84, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
+            // Stock's "Type Vol / Cur": Cur shows CH1's
+            // values in amperes (the probe scale: A per volt at the input).
+            let r = rect(SX + 79, 224, 120, 24);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, crate::tr!("Type"), C_BAR, 8, 0);
+            option_list(rect(SX + 94, 250, 90, 24), pc, &[crate::tr!("Vol"), crate::tr!("Cur")], 44, v.cur as usize);
         }
         _ => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
     }
@@ -3794,6 +3799,8 @@ pub enum SideHit {
     /// CH1: coupling 0 DC 1 AC.
     Coupling(u8),
     Probe(u8),
+    /// CH1: type 0 Vol 1 Cur.
+    Type(u8),
     Colour(u8),
     /// Math popup: mode 5 FFT / 6 ABS, colour, Hz/div choice, window, unit
     /// (1 = Vrms).
@@ -3832,7 +3839,10 @@ pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
     }
     match tab {
         0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
-        1 => spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
+        1 => match spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y) {
+            Some(i) => SideHit::Probe(i),
+            None => option_hit(rect(SX + 94, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Type),
+        },
         _ => spinner_hit(rect(SX + 84, 70, 110, 150), NPAL, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
     }
 }
