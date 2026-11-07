@@ -684,6 +684,8 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         // The DMM CH2 too: its block (on, 250mA) and a trace.
         m.ch2_txt = scope_ui::Txt::new("250mA");
         m.ch2_on = true;
+        // Its zero row 60 rows below the centre: the '2' marker by its trace.
+        m.ch2_pos = 60;
         m.gen_on = true;
         m.gen_txt = scope_ui::Txt::new("1V");
         draw(&m, scope_ui::Popup::None, &pv, true);
@@ -716,6 +718,26 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         ck.cases += 1;
         if !(ch1 == 0 && gen > 20) {
             ck.fail("gen/badge-source", format!("trigger badge GEN colour: {ch1} px on CH1, {gen} px on GEN"));
+        }
+        // CH2 at its default position (on CH1's row): the '2' marker beside
+        // CH1's 'A', not under it.
+        {
+            let mut m2 = m;
+            m2.pos = 0;
+            m2.ch2_pos = 0;
+            let mut it = [(0u8, scope_ui::Mark::NONE); scope_ui::NSTRIP];
+            let k = scope_ui::strip_items(&m2, &mut it);
+            let a = it[..k].iter().find(|i| i.0 == 0).map(|i| i.1.rect());
+            let c2 = it[..k].iter().find(|i| i.0 == scope_ui::CH2_LEVEL).map(|i| i.1.rect());
+            ck.cases += 1;
+            match (a, c2) {
+                (Some(a), Some(b)) if a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y => {}
+                _ => ck.fail(&format!("gen/{}/ch2-marker", combined as u8), format!("CH2 marker {:?} on CH1's {:?}", c2.map(|r| (r.x, r.y)), a.map(|r| (r.x, r.y)))),
+            }
+            if !combined {
+                draw(&m2, scope_ui::Popup::None, &pv, true);
+                save(out, "s08c-ch2-default-pos");
+            }
         }
         for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
             draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
