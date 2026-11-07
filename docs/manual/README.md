@@ -1473,7 +1473,7 @@ restores Freq, Vp-p, Cycl, Vrms.
 
 | Item | What it is |
 |---|---|
-| **Freq** | Frequency. |
+| **Freq** | Frequency. Counted in hardware where the signal crosses the trigger level, on any timebase; else from the screen. |
 | **+Duty**, **-Duty** | Positive and negative duty cycle. |
 | **+Wid**, **-Wid** | High and low time of a cycle. |
 | **+Pul**, **-Pul** | Number of high and low pulses on screen. |
