@@ -485,6 +485,11 @@ SECTIONS
          * cold_str! (strings) and cold_set! (a constant's bytes copied at
          * run time, e.g. a job record's reset value). */
         *(.rodata.cold .rodata.cold.*);
+        /* `#[link_section = ".cold"]` functions (dmm.rs, app_ch2.rs,
+         * ad2exp.rs dc_enter): before __cold_end, so that the region C
+         * budget and its asserts count them (as orphans they were placed
+         * after __image_end). */
+        *(.cold .cold.*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
