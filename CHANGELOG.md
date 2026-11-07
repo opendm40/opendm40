@@ -28,7 +28,7 @@ section named after the tag as the release notes; how to cut a release:
 - Settings > Other > Reset settings: back to the defaults after a confirm; calibration, files and Bluetooth pairing stay.
 
 - **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
-- **Scope:** the MF menu spans the screen to the right edge, over the right panel, with wider columns; the panel is drawn again when it closes.
+- **Scope:** the MF menu runs over the right panel, the same 13 px from both screen edges, with wider columns; the panel is drawn again when it closes.
 ### New
 
 - **Chinese README and user manual** (machine translation, not yet reviewed
