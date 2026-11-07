@@ -284,6 +284,9 @@ pub struct Model {
     pub gen_hz: f32,
     /// CH1 / math label grey (their popup is open).
     pub ch1_open: bool,
+    /// CH1 shown (its trace, persistence and level marker; off: the CH1
+    /// block dimmed, the trigger on CH1 still works).
+    pub ch1_on: bool,
     pub math_open: bool,
     /// Right-panel button 1..7 drawn pressed (0 none; our feedback option).
     pub pressed: u8,
@@ -344,14 +347,18 @@ pub struct Model {
     pub dec: u8,
     pub dec_gen: u16,
     /// Trigger source (scope::TSRC_*): the trigger badge in the GEN
-    /// colour for the generator.
+    /// colour for the generator, CH2's for the DMM.
     pub tsrc: u8,
+    /// Source DMM on an A row: the trigger badge's level in A.
+    pub trig_a: bool,
     /// The DMM CH2's label in the graph ("CH2 1.5V", magenta); empty =
     /// none (`CH2_LABEL`, a graph hole).
     /// The DMM CH2 trace shown, and its V/div ("1.5V", "--" before its
     /// first start): the DMM block.
     pub ch2_on: bool,
     pub ch2_txt: Txt,
+    /// The CH2 trace's zero row - 140 (its '2' level marker, `CH2_LEVEL`).
+    pub ch2_pos: i16,
     /// The GEN trace shown and its V/div: the GEN block.
     pub gen_on: bool,
     pub gen_txt: Txt,
@@ -416,6 +423,7 @@ impl Model {
         record: (0.0, 1.0),
         gen_hz: 0.0,
         ch1_open: false,
+        ch1_on: true,
         math_open: false,
         pressed: 0,
         combined: false,
@@ -439,8 +447,10 @@ impl Model {
         dec: 0,
         dec_gen: 0,
         tsrc: 0,
+        trig_a: false,
         ch2_on: false,
         ch2_txt: Txt::EMPTY,
+        ch2_pos: 0,
         gen_on: false,
         gen_txt: Txt::EMPTY,
         wave: false,
@@ -497,10 +507,11 @@ impl Model {
         if self.wvdiv > 0.0 {
             fmt_div(out, self.wvdiv, self.unit());
         } else {
-            vdiv_text(out, self.vdiv);
+            vdiv_text(out, self.vdiv, self.unit());
         }
     }
-    /// Unit of the vertical values ("V", source DMM current rows "A").
+    /// Unit of the vertical values ("V"; "A": the DMM current rows, CH1
+    /// type Cur).
     pub fn unit(&self) -> &'static str {
         if self.amps { "A" } else { "V" }
     }
@@ -611,9 +622,9 @@ pub fn fmt_div(out: &mut Buf, v: f32, unit: &str) {
     out.push(crate::dmm::format(&mut t, v, frac as u8)).push(P[i]).push(unit);
 }
 
-/// "1V", "200mV": the V/div label and unit.
-pub fn vdiv_text(out: &mut Buf, vdiv: u8) {
-    out.push(VDIV_LABELS[vdiv.min(21) as usize]).push("V");
+/// "1V", "200mV": the V/div label and `unit` ("V" / "A").
+pub fn vdiv_text(out: &mut Buf, vdiv: u8, unit: &str) {
+    out.push(VDIV_LABELS[vdiv.min(21) as usize]).push(unit);
 }
 
 // ------------------------------------------------------------------ widgets
@@ -891,17 +902,28 @@ pub fn fmt_srate(out: &mut Buf, fs: u32) {
 /// 2.5 trigger badge: edge glyph and level.
 pub fn trig_badge(m: &Model) {
     let mut b = Buf::new();
-    fmt_v(&mut b, m.trig_v, m.unit());
+    // Source DMM: the level on CH2's scale, in its unit.
+    let unit = if m.tsrc == crate::scope::TSRC_CH2 && m.trig_a { "A" } else { m.unit() };
+    fmt_v(&mut b, m.trig_v, unit);
     // The wave view's "-1.23mA" is wider than the stock box: a decimal
     // fewer ("-1.2mA").
     if sf::text_width(sf::SC_F12, b.as_str(), 0) > 49 {
         b = Buf::new();
-        fmt_v_cut(&mut b, m.trig_v, m.unit(), 1);
+        fmt_v_cut(&mut b, m.trig_v, unit, 1);
     }
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
     let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
-    let c = if m.tsrc == crate::scope::TSRC_GEN { C_GEN_TR } else { m.pal_text() };
+    let c = trig_colour(m);
     badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, c), (&t, c)]);
+}
+
+/// The trigger source's colour: the badge, the T marker and its level line.
+fn trig_colour(m: &Model) -> Color {
+    match m.tsrc {
+        crate::scope::TSRC_GEN => C_GEN_TR,
+        crate::scope::TSRC_CH2 => C_CH2,
+        _ => m.pal_text(),
+    }
 }
 
 /// The battery's shift to the right (px) while both the Bluetooth rune and
@@ -994,7 +1016,7 @@ pub fn block_look(m: &Model, b: usize) -> Look {
             scale: Txt::new(v.as_str()),
             col: m.pal(),
             ink: m.pal_ink(),
-            on: true,
+            on: m.ch1_on,
             open: m.ch1_open,
         },
         BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: C_CH2, ink: C_WHITE, on: false, open: false },
@@ -1312,8 +1334,11 @@ impl MarkInk {
 }
 
 /// Level-item slots (CH1, trigger level, math offset, runt level, Y
-/// cursors).
-pub const NSTRIP: usize = 6;
+/// cursors, CH2).
+pub const NSTRIP: usize = 7;
+/// Level-item id of the CH2 (DMM) zero row: a '2' marker in the CH2
+/// colour while CH2 is shown, dragged up / down as CH1's.
+pub const CH2_LEVEL: u8 = 6;
 /// Level-item id of the trigger level.
 const TRIG_LEVEL: u8 = 1;
 /// x of the trigger-level marker: inside the graph at its right edge (x
@@ -1370,9 +1395,11 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     // CH1 / math range is +-140 rows around the centre (the 280-row model).
     let off_row = |off: i16| if off < -140 { -1 } else if off > 140 { 281 } else { 140 + off };
     let mut n = 0;
-    out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
-    n += 1;
-    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
+    if m.ch1_on {
+        out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
+        n += 1;
+    }
+    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, trig_colour(m)));
     n += 1;
     if m.math_on {
         out[n] = (2, level(off_row(m.math_off), FAM_M, m.sel_v == 2, m.math_pal()));
@@ -1380,6 +1407,18 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     }
     if let Some(r) = m.runt_row {
         out[n] = (5, level(if r > 280 { 281 } else { r }, FAM_T, m.sel_v == 5, C_ORANGE));
+        n += 1;
+    }
+    if m.ch2_on {
+        // On CH1's marker (both at the centre by default): beside it, so
+        // both show and both can be grabbed.
+        let mut mk = level(off_row(m.ch2_pos), FAM_2, m.sel_v == CH2_LEVEL, C_CH2);
+        if let Some(&(_, a)) = out[..n].iter().find(|i| i.0 == 0) {
+            if (mk.y - a.y).abs() < 12 {
+                mk.x = a.x + 13;
+            }
+        }
+        out[n] = (CH2_LEVEL, mk);
         n += 1;
     }
     if let Some(yc) = m.ycur {
@@ -1474,7 +1513,10 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
 fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
     *out = [Mark::NONE; NGRAPH];
-    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
+    // The trigger position's T in the trigger source's colour (CH1: the
+    // trace palette, as stock; CH2 / GEN: theirs), like the level marker.
+    let tc = if m.tsrc == crate::scope::TSRC_CH1 { m.pal() } else { trig_colour(m) };
+    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, tc);
     if let Some(xc) = m.xcur {
         out[1] = top_mark(top, xc[0], FAM_1, m.sel_h == 2, C_WHITE);
         out[2] = top_mark(top, xc[1], FAM_2, m.sel_h == 3, C_WHITE);
@@ -1774,18 +1816,21 @@ impl Deco {
         };
         graph_marks(m, &mut d.marks);
         let ctr = d.trace;
+        // The trigger's guide lines (position and level): the trigger
+        // source's colour (CH1: the trace colour).
+        let tcol = if m.tsrc == crate::scope::TSRC_CH1 { ctr } else { trig_colour(m) };
         // 4.4: guide lines of the selected items, then the cursor lines.
         if m.guide {
             match m.sel_h {
-                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
+                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: tcol }),
                 // FFT centre (stock: a line at x 0 that is never positioned;
                 // opendm40: the centre column the 'M' marker stands on).
                 1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: GCX, col: d.math }),
                 _ => {}
             }
             match m.sel_v {
-                0 => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
-                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: ctr }),
+                0 if m.ch1_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
+                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: tcol }),
                 2 if m.math_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.math_off as i32), solid: true, col: d.math }),
                 5 => {
                     if let Some(r) = m.runt_row {
@@ -2157,6 +2202,11 @@ impl Graph {
     /// Bring the panel up to date with `tr` / `ps` / `ma` and the model's
     /// lines, markers and colours, repainting only the rows that changed.
     pub fn flush(&mut self, m: &Model) {
+        if !m.ch1_on {
+            // CH1 off: no trace, no persistence (the record is still taken).
+            self.tr = [EMPTY; NCOL];
+            self.ps = [EMPTY; NCOL];
+        }
         self.deco = Deco::of(m);
         let d = self.deco;
         let o = self.d_deco;
@@ -2679,8 +2729,8 @@ pub fn update(m: &Model) {
     // The trigger badge after the graph: a level drag step repaints both
     // (the badge ~3.3 ms on the device model, emu --mips 110), the marker
     // under the finger first.
-    // (The source too: its colour.)
-    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps || ol.tsrc != m.tsrc) {
+    // (The source too: its colour and unit.)
+    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps || ol.tsrc != m.tsrc || ol.trig_a != m.trig_a) {
         trig_badge(m);
     }
     // A repainted graph (a popup closed: `uncover`) leaves its holes as
@@ -3114,6 +3164,8 @@ pub struct PopVals {
     /// docs/scope-gen-channel.md).
     pub tsrc: u8,
     pub gen_trace: bool,
+    /// CH1 type Cur (CH1 popup, Probe tab): the values in amperes.
+    pub cur: bool,
     /// The DMM CH2 shown and its label ("CH2 1.5V"; empty before its
     /// first start).
     pub ch2_on: bool,
@@ -3376,7 +3428,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 crate::trigsoft::RUNT => {
                     fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, "2nd level:", C_FILL, 1, 0);
                     let mut b = Buf::new();
-                    fmt_v(&mut b, v.runt_v, "V");
+                    fmt_v(&mut b, v.runt_v, if v.cur { "A" } else { "V" });
                     fill_text(TP_COND, pc, C_POP_BG, sf::SC_F16, TP_COND, b.as_str(), C_ORANGE, 1, 0);
                     fill_text(TR_HINT, pc, C_POP_BG, sf::SC_F16, TR_HINT, "drag orange T", C_FILL, 1, 0);
                 }
@@ -3385,9 +3437,11 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             // opendm40: the trigger source (the generator computed, edge only).
             fill_c(rect(MF_IX, 186, MF_IW, 50), pc, C_POP_BG);
             fill_text(TS_LABEL, pc, C_POP_BG, sf::SC_F16, TS_LABEL, crate::tr!("Source:"), C_FILL, 1, 0);
-            option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(1) as usize);
-            if v.tsrc == crate::scope::TSRC_GEN {
-                fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0);
+            option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(2) as usize);
+            match v.tsrc {
+                crate::scope::TSRC_GEN => fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0),
+                crate::scope::TSRC_CH2 => fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, CH2 scale", C_FILL, 1, 0),
+                _ => {}
             }
         }
         3 => {
@@ -3414,7 +3468,7 @@ pub const TP_PLUS: Rect = rect(MF_STEP[2].0, 164, MF_STEP[2].1, 18);
 pub const TR_HINT: Rect = rect(MF_C2, 164, MF_C2_W, 18);
 // Trigger source row, Display tab GEN trace row (opendm40).
 pub const TS_LABEL: Rect = rect(24, 188, 180, 20);
-pub const TS_LIST: Rect = rect(24, 208, 120, 24);
+pub const TS_LIST: Rect = rect(24, 208, 180, 24);
 pub const TS_NOTE: Rect = rect(MF_C2, 208, MF_C2_W, 24);
 pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
@@ -3547,7 +3601,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Mode(i)
             } else if let Some(i) = option_hit(TT_LIST, 3, 60, x, y) {
                 MfHit::TType(i)
-            } else if let Some(i) = option_hit(TS_LIST, 2, 60, x, y) {
+            } else if let Some(i) = option_hit(TS_LIST, 3, 60, x, y) {
                 MfHit::TSrc(i)
             } else if v.ttype == crate::trigsoft::PULSE {
                 if let Some(i) = option_hit(TP_COND, 3, 30, x, y) {
@@ -3612,10 +3666,12 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
         1 => {
             let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
-            // Stock also shows "Type Vol / Cur" here; it changes nothing
-            // (opendm40 reads the Wave view's current from the DMM), so it
-            // is left out.
             spinner(rect(SX + 84, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
+            // Stock's "Type Vol / Cur": Cur shows CH1's
+            // values in amperes (the probe scale: A per volt at the input).
+            let r = rect(SX + 79, 224, 120, 24);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, crate::tr!("Type"), C_BAR, 8, 0);
+            option_list(rect(SX + 94, 250, 90, 24), pc, &[crate::tr!("Vol"), crate::tr!("Cur")], 44, v.cur as usize);
         }
         _ => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
     }
@@ -3653,6 +3709,8 @@ pub enum SideHit {
     /// CH1: coupling 0 DC 1 AC.
     Coupling(u8),
     Probe(u8),
+    /// CH1: type 0 Vol 1 Cur.
+    Type(u8),
     Colour(u8),
     /// Math popup: mode 5 FFT / 6 ABS, colour, Hz/div choice, window, unit
     /// (1 = Vrms).
@@ -3691,7 +3749,10 @@ pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
     }
     match tab {
         0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
-        1 => spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
+        1 => match spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y) {
+            Some(i) => SideHit::Probe(i),
+            None => option_hit(rect(SX + 94, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Type),
+        },
         _ => spinner_hit(rect(SX + 84, 70, 110, 150), 9, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
     }
 }
@@ -4070,7 +4131,8 @@ pub fn meter_strip(d: &StripData) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
     if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey && ol.short == d.short) {
-        let c = if d.dim { C_DIS } else if d.short { crate::ui::SHORT_FG } else { C_YELLOW };
+        // The DMM page's value colour (orange), not the stock strip's yellow.
+        let c = if d.dim { C_DIS } else if d.short { crate::ui::SHORT_FG } else { crate::ui::VALUE };
         st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), c, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
@@ -4084,7 +4146,7 @@ pub fn meter_strip(d: &StripData) {
         if o.is_some() {
             lcd::fill_rect(ST_UNIT_X as u16, ST_UNIT_Y as u16, (ST_SUB_END + 1 - ST_UNIT_X) as u16, (ST_GEN_T.y + ST_GEN_T.h - ST_UNIT_Y) as u16, C_FILL);
         }
-        st_text(ur, uf, d.unit.as_str(), C_YELLOW, ua, 1);
+        st_text(ur, uf, d.unit.as_str(), crate::ui::VALUE, ua, 1);
     }
     if changed(ol.gen == d.gen) || moved {
         st_badge(ST_GEN, if gen_on { "GEN" } else { "" }, C_GEN);

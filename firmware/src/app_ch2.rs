@@ -31,6 +31,9 @@ pub struct Ch2 {
     /// The next `ch2_lost` starts the stream again at once (a function
     /// change from the Display tab's V / A), not after 2 s.
     pub quick: bool,
+    /// Vertical position: the zero row - 140 (rows of the 280-row model,
+    /// as CH1's `Settings::pos`; the '2' marker, scope_ui::CH2_LEVEL).
+    pub pos: i16,
 }
 
 /// CH2's highest stream rate (S/s): the 38 400 rung at 2 ms/div and
@@ -43,7 +46,7 @@ pub struct Ch2 {
 pub const CH2_MAX_FS: u32 = 38_400;
 
 impl Ch2 {
-    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, quick: false };
+    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, quick: false, pos: 0 };
 }
 
 /// The CH2 V/div label ("1.5V", "200mA").
@@ -173,6 +176,33 @@ impl App {
         crate::logger::wave::drain_ts(&mut |ts, raw| st.push(ts, raw));
     }
 
+    /// Trigger source DMM picked with CH2 off (SCPI, the Trigger tab): CH2
+    /// on (a toast where it cannot be). True: it is on.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".cold")]
+    pub(super) fn ch2_on_for_trig(&mut self, clk: &mut Clock) -> bool {
+        self.ch2_set(clk, true);
+        self.ch2.on
+    }
+
+    /// TRIG:LEV / TRIG:LEV? with source DMM: the level on CH2's scale (the
+    /// badge's; set to a row: the level is the T marker against the CH2
+    /// trace).
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".cold")]
+    pub(super) fn ch2_trig_level(&mut self, sc: &mut scope::Settings, v: Option<f32>, out: &mut crate::scpi::Scpi) -> Option<()> {
+        match v {
+            Some(v) => {
+                sc.trig_row = self.scope.ch2_level_row(v);
+                None
+            }
+            None => {
+                out.put_f32(self.scope.ch2_level());
+                Some(())
+            }
+        }
+    }
+
     /// MF > Display "CH2 (DMM)" On / Off.
     pub(super) fn ch2_set(&mut self, clk: &mut Clock, on: bool) {
         let now = clk.now_ms();
@@ -191,8 +221,14 @@ impl App {
         if !on {
             crate::scope_ui::graph().c2 = [crate::scope_ui::EMPTY; crate::scope_ui::NCOL];
         }
-        // The comparator on / off: restart the acquisition.
-        let st = self.scope.s;
+        // The comparator on / off: restart the acquisition. CH2 off with
+        // the trigger on it: the trigger goes back to CH1 (no source on a
+        // channel that is off).
+        let mut st = self.scope.s;
+        if !on && st.tsrc == scope::TSRC_CH2 {
+            st.tsrc = scope::TSRC_CH1;
+            self.toast(now, crate::tr!("Trigger source: CH1"), false);
+        }
         self.scope_set(st, now);
         self.update_rails(clk);
     }
@@ -289,7 +325,8 @@ impl App {
         }
         let st = scope_ch2::store();
         let k = 141.0 / (4.0 * self.ch2.vdiv);
-        let row = |v: f32| (140.0 - v * k).clamp(-30000.0, 30000.0) as i16;
+        let z = 140.0 + self.ch2.pos as f32;
+        let row = |v: f32| (z - v * k).clamp(-30000.0, 30000.0) as i16;
         // Columns left to right (rising times): one anchor search per frame
         // and f32 maths per column (`Store::span_run`).
         let mut run = st.run();
