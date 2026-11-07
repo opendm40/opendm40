@@ -153,6 +153,8 @@ struct Cache {
     /// (docs/scope-gen-channel.md).
     gseg: [(i16, i16); scope::COLS],
     c2seg: [(i16, i16); scope::COLS],
+    /// `Ch2::pos` the c2seg rows were made at (a drag previews the move).
+    c2pos: i16,
     valid: bool,
     pos: i32,
     hpos: i32,
@@ -172,6 +174,7 @@ static mut CACHE: Cache = Cache {
     seg: [su::EMPTY; scope::COLS],
     gseg: [su::EMPTY; scope::COLS],
     c2seg: [su::EMPTY; scope::COLS],
+    c2pos: 0,
     valid: false,
     pos: 0,
     hpos: 200,
@@ -303,6 +306,12 @@ fn hz_opts(nyq: f32) -> [f32; 4] {
 
 /// Scope page state.
 pub(super) struct Sp {
+    /// CH1 type Cur (CH1 popup > Probe > Type): CH1's values, V/div, trigger
+    /// level and measurements in amperes.
+    pub ch1_cur: bool,
+    /// CH1 hidden: a second tap on the CH1 block with
+    /// its popup open, as stock math (`su::Model::ch1_on`).
+    pub ch1_off: bool,
     pub sel_v: u8,
     pub sel_h: u8,
     /// Group of the last selection (false = level / V, true = time / H).
@@ -391,6 +400,8 @@ impl Sp {
 
     pub const fn new() -> Sp {
         Sp {
+            ch1_cur: false,
+            ch1_off: false,
             sel_v: 0,
             sel_h: 0,
             last_h: false,
@@ -532,7 +543,7 @@ impl App {
         if wave && s.tb <= scope::WAVE_TB_MIN {
             tabs &= !(su::TAB_SHOW_R | su::TAB_PRESS_R); // no faster wave timebase
         }
-        let amps = wave && self.scope.wave_scale_now().amps;
+        let amps = if wave { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur };
         Model {
             status,
             tb: s.tb as u8,
@@ -540,7 +551,8 @@ impl App {
             probe: probe_idx(s.probe) as u8,
             ac: s.ac,
             trig_row: s.trig_row as i16,
-            trig_v: self.scope.trig_volts(),
+            trig_v: if s.tsrc == scope::TSRC_CH2 && !wave { self.scope.ch2_level() } else { self.scope.trig_volts() },
+            trig_a: crate::scope_ch2::store().scale().amps,
             rising: s.rising,
             trig_px: su::col_of_eng(s.hpos) as i16,
             pos: s.pos as i16,
@@ -562,6 +574,8 @@ impl App {
             // Combined view: the strip's GEN badge shows it instead.
             gen_hz: if self.gen.s.on && self.view == View::Scope { self.gen.actual_hz() } else { 0.0 },
             ch1_open: matches!(sp.popup, su::Popup::Ch1(_)),
+            // The Wave view's CH1 is the DMM's reading: always shown.
+            ch1_on: !sp.ch1_off || wave,
             math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
             combined: self.view == View::DmmScope,
@@ -596,9 +610,16 @@ impl App {
             tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
             ch2_on: self.ch2.on && !wave,
             ch2_txt: self.ch2_label(),
+            ch2_pos: self.ch2.pos,
             gen_on: self.scope.gen_trace,
             gen_txt: self.gen_label(),
         }
+    }
+
+    /// The unit of CH1's values: "A" in the Wave view's current rows and with
+    /// CH1 type Cur, else "V".
+    fn ch1_unit(&self) -> &'static str {
+        if if self.scope.wave_on() { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur } { "A" } else { "V" }
     }
 
     /// Math pill second line: FFT dB/div, else the math V/div.
@@ -608,7 +629,7 @@ impl App {
             su::Txt::new(su::FFT_DB[m.db.min(12) as usize])
         } else {
             let mut t = su::Txt::new(su::VDIV_LABELS[m.vdiv.min(21) as usize]);
-            t.push("V");
+            t.push(self.ch1_unit());
             t
         }
     }
@@ -874,6 +895,7 @@ impl App {
         c.tb = s.tb;
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
+        c.c2pos = self.ch2.pos;
         // The protocol decoder's band (app_decode.rs).
         self.dec_frame(f);
         self.sp_math_frame(f);
@@ -903,7 +925,7 @@ impl App {
             // Owner 2026-11-01: both vanished while a stopped record was
             // panned.
             g.gn[j] = fy(preview_rows(c, &c.gseg, j as i32, d_pos, hpos, gky, kx, zr));
-            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, 0, hpos, 1.0, kx, 0.0));
+            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, (self.ch2.pos - c.c2pos) as i32, hpos, 1.0, kx, 0.0));
             let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
             let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
             g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
@@ -969,7 +991,7 @@ impl App {
         let mut t = [0u8; 16];
         h.s(crate::cold_str!("# Alientek ")).s(crate::ident::model_name()).s(crate::cold_str!(", opendm40 ")).s(crate::ident::VERSION).s(crate::cold_str!(", scope record (no real-time clock)\r\n"));
         let wave = self.scope.wave_on();
-        let amps = wave && self.scope.wave_scale_now().amps;
+        let amps = if wave { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur };
         let unit = if amps { "A" } else { "V" };
         let mut v = su::Buf::new();
         // From the value: the label table index (vdiv_idx) is wrong with
@@ -998,15 +1020,17 @@ impl App {
             scope::TrigMode::Single => crate::cold_str!("Single"),
         });
         h.s(if trig { crate::cold_str!(", triggered\r\n") } else { crate::cold_str!(", untriggered\r\n") });
-        h.s(if wave {
-            if amps {
-                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n")
-            } else {
-                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n")
-            }
+        // The shared start once (each long text is a copy in region C).
+        h.s(crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); "));
+        if wave {
+            h.s(crate::cold_str!("the value column is ")).s(if amps { crate::cold_str!("amperes through the DMM A jack") } else { crate::cold_str!("volts at the DMM jacks") });
+            h.s(crate::cold_str!(" (DMM calibration applied)\r\n"));
+        } else if amps {
+            // CH1 type Cur: the probe factor reads amperes per input volt.
+            h.s(crate::cold_str!("the value column is amperes (CH1 type Cur; probe factor = A per input volt)\r\n"));
         } else {
-            crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n")
-        });
+            h.s(crate::cold_str!("volts at the probe tip\r\n"));
+        }
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
             self.toast(now, crate::tr!("CSV save failed"), false);
@@ -1026,8 +1050,7 @@ impl App {
             }
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
-                let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
-                su::fmt_v(&mut b, runt_v, unit);
+                su::fmt_v(&mut b, runt_v, self.ch1_unit());
                 h.s(crate::cold_str!("Runt, 2nd level ")).s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             _ => {
@@ -1281,7 +1304,7 @@ impl App {
                 su::fmt_hz(&mut pk, pf);
                 pk.push(" ");
                 if m.vrms {
-                    su::fmt_v(&mut pk, crate::fft::db_to_v(pd), "V");
+                    su::fmt_v(&mut pk, crate::fft::db_to_v(pd), self.ch1_unit());
                 } else {
                     let mut t = [0u8; 16];
                     pk.push(crate::dmm::format(&mut t, pd, if pd.abs() < 99.95 { 1 } else { 0 })).push("dBV");
@@ -1689,9 +1712,12 @@ impl App {
         let mut st = self.scope.s;
         match id {
             0 => {
-                // CH1 position; the trigger row moves with it (same voltage).
+                // CH1 position; the trigger row moves with it (same voltage;
+                // not with source DMM, whose level is on CH2's scale).
                 let p = (st.pos + rows).clamp(-392, 392);
-                st.trig_row += p - st.pos;
+                if st.tsrc != scope::TSRC_CH2 {
+                    st.trig_row += p - st.pos;
+                }
                 st.runt_row += p - st.pos;
                 st.pos = p;
                 self.sp_code(3);
@@ -1721,6 +1747,23 @@ impl App {
                 self.cur.y[i] = (self.cur.y[i] + rows).clamp(1, 279);
                 self.cursor_values();
                 self.sp_code(5 + 10 * i as u8);
+                return;
+            }
+            su::CH2_LEVEL if self.ch2.on => {
+                // The DMM CH2 trace's position (screen only, as its V/div);
+                // source DMM: the trigger row moves with it (same level).
+                let p = (self.ch2.pos as i32 + rows).clamp(-392, 392);
+                let d = p - self.ch2.pos as i32;
+                self.ch2.pos = p as i16;
+                self.scope.ch2_pos = self.ch2.pos;
+                self.sp_code(16);
+                self.sp_settings_changed();
+                if st.tsrc == scope::TSRC_CH2 && d != 0 {
+                    st.trig_row = (st.trig_row + d).clamp(-10, 290);
+                    self.sp_preview(st);
+                } else {
+                    self.sp_render();
+                }
                 return;
             }
             _ => return,
@@ -1811,7 +1854,7 @@ impl App {
                 self.gest_log.copy_within(1.., 0);
                 GEST_N - 1
             };
-            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15) as u8;
+            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15 | 16) as u8;
             self.gest_log[i] = (t.code, v, t.travel.clamp(-999, 999) as i16, now.saturating_sub(t.t0).min(9999) as u16);
         }
         if self.sp.frozen {
@@ -1990,6 +2033,32 @@ impl App {
                     st.runt_row -= st.pos;
                     st.pos = 0;
                 }
+                su::CH2_LEVEL if self.ch2.on => {
+                    // CH2 back on the centre line (source DMM: the level too).
+                    if self.scope.s.tsrc == scope::TSRC_CH2 {
+                        let mut s2 = self.scope.s;
+                        s2.trig_row = (s2.trig_row - self.ch2.pos as i32).clamp(-10, 290);
+                        self.scope_set(s2, now);
+                    }
+                    self.ch2.pos = 0;
+                    self.scope.ch2_pos = 0;
+                    self.sp_render();
+                    self.sp_settings_changed();
+                    self.beep(now, 60);
+                    self.sp.touch = None;
+                    self.sp.guide_until = now + GUIDE_MS;
+                    return;
+                }
+                1 if self.scope.s.tsrc == scope::TSRC_CH2 && self.ch2.on => {
+                    // Source DMM: the middle of the CH2 trace (its rows on
+                    // screen, at the present position), not of CH1's.
+                    let c = cache();
+                    let (lo, hi) = c.c2seg.iter().fold((i32::MAX, i32::MIN), |(lo, hi), &(a, b)| if (a, b) == su::EMPTY { (lo, hi) } else { (lo.min(a as i32), hi.max(b as i32)) });
+                    if lo > hi {
+                        return;
+                    }
+                    st.trig_row = ((lo + hi) / 2 + (self.ch2.pos - c.c2pos) as i32).clamp(-10, 290);
+                }
                 1 => {
                     let (hi, lo) = (self.meas_res.v[12], self.meas_res.v[13]);
                     if !(hi.is_finite() && lo.is_finite()) {
@@ -2133,10 +2202,10 @@ impl App {
         if p.axis == Axis::H {
             b.push(su::TB_LABELS[p.i.min(29)]).push("/div");
         } else if self.scope.wave_on() {
-            su::fmt_div(&mut b, self.wave_step_vdiv(p.i), if self.scope.wave_scale_now().amps { "A" } else { "V" });
+            su::fmt_div(&mut b, self.wave_step_vdiv(p.i), self.ch1_unit());
             b.push("/div");
         } else {
-            su::fmt_div(&mut b, scope::VSTEPS[p.i.min(scope::VIDX_MAX)] * self.scope.s.probe, "V");
+            su::fmt_div(&mut b, scope::VSTEPS[p.i.min(scope::VIDX_MAX)] * self.scope.s.probe, self.ch1_unit());
             b.push("/div");
             if p.i < 2 {
                 b.push(" zoom"); // digital: range 0's codes stretched
@@ -2164,7 +2233,22 @@ impl App {
             match b {
                 // The wave view: CH1 = the coupling note.
                 su::BLK_CH1 if wave => self.wave_coupling_note(now),
-                su::BLK_CH1 => self.sp_popup_open(su::Popup::Ch1(0)),
+                su::BLK_CH1 => {
+                    // As the math label: CH1 off -> on with its popup.
+                    let show = self.sp.ch1_off;
+                    if show {
+                        self.sp_ch1_show(true);
+                    }
+                    self.sp_popup_open(su::Popup::Ch1(0));
+                    if show && !self.redraw {
+                        // The magnifiers out of their dimmed look at once
+                        // (the title: sp_popup_open; the trace once the
+                        // popup closes).
+                        let m = self.sp_model(self.now);
+                        su::panel_part(&m, 3 * su::BLK_CH1 + 1);
+                        su::panel_part(&m, 3 * su::BLK_CH1 + 2);
+                    }
+                }
                 // The wave view: back to the OSC (MCX) input.
                 su::BLK_DMM if wave => self.wave_badge_close(clk),
                 su::BLK_DMM => {
@@ -2213,6 +2297,13 @@ impl App {
         }
     }
 
+    /// CH1 shown / hidden: the graph again from the record.
+    fn sp_ch1_show(&mut self, on: bool) {
+        self.sp.ch1_off = !on;
+        self.scope_invalidate();
+        self.sp_settings_changed();
+    }
+
     /// The GEN trace on / off (the GEN block's title, MF > Display, SCPI
     /// GEN:DISP): first on, its V/div starts at CH1's.
     pub(super) fn gen_trace_set(&mut self, on: bool, now: u64) {
@@ -2254,7 +2345,7 @@ impl App {
     /// The GEN block's scale ("1V", "500mV").
     fn gen_label(&self) -> su::Txt {
         let mut b = su::Buf::new();
-        su::vdiv_text(&mut b, self.gen_vdiv_idx());
+        su::vdiv_text(&mut b, self.gen_vdiv_idx(), "V");
         su::Txt::new(b.as_str())
     }
 
@@ -2318,8 +2409,10 @@ impl App {
             dec: self.dec_setup_vals(),
             tsrc: s.tsrc,
             gen_trace: self.scope.gen_trace,
+            cur: self.sp.ch1_cur,
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(),
+            ch2_func: self.ch2_func_idx(),
         }
     }
 
@@ -2460,6 +2553,12 @@ impl App {
                         self.toast_hold = true;
                         self.sp_mf_tap(clk, t, su::mf_hit(t, &v, x, y), now);
                         self.sp_toast_release(now);
+                    }
+                    su::Popup::Ch1(_) if su::panel_hit(p.x, p.y) == Some(3 * su::BLK_CH1) && !self.scope.wave_on() => {
+                        // As the math label: the CH1 label with its popup
+                        // open = CH1 hidden.
+                        self.sp_ch1_show(false);
+                        self.sp_popup_close();
                     }
                     su::Popup::Ch1(t) => {
                         self.toast_hold = true;
@@ -2653,10 +2752,18 @@ impl App {
                 // The page height is the same, the rows below change.
             }
             su::MfHit::TSrc(t) => {
-                st.tsrc = t.min(1);
-                self.scope_set(st, now);
-                if st.tsrc == scope::TSRC_GEN && !self.gen.s.on {
+                // GEN with the generator off: the source stays, a toast
+                // says why. DMM with CH2 off: CH2 on (its own toast if it
+                // cannot be).
+                let t = t.min(scope::TSRC_CH2);
+                if t == scope::TSRC_CH2 && !self.ch2.on && self.ch2_on_for_trig(clk) {
+                    st = self.scope.s;
+                }
+                if t == scope::TSRC_GEN && !self.gen.s.on {
                     self.toast(now, crate::tr!("Generator is off"), false);
+                } else if t != scope::TSRC_CH2 || self.ch2.on {
+                    st.tsrc = t;
+                    self.scope_set(st, now);
                 }
             }
             su::MfHit::Ch2(on) => {
@@ -2665,6 +2772,21 @@ impl App {
             su::MfHit::Ch2Step(up) => {
                 self.ch2_step(up, now);
             }
+            su::MfHit::GenColour => {
+                // The next GEN colour (not CH1's): the whole page again (as
+                // CH2's).
+                su::set_gen_colour(su::next_gen_colour(self.sp.colour));
+                self.sp_settings_changed();
+                self.redraw = true;
+            }
+            su::MfHit::Ch2Colour => {
+                // The next CH2 colour (not CH1's): the whole page again (trace, marker,
+                // DMM block, CH2 cells; the popup over it).
+                su::set_ch2_colour(su::next_ch2_colour(self.sp.colour));
+                self.sp_settings_changed();
+                self.redraw = true;
+            }
+            su::MfHit::Ch2Func(amps) => self.ch2_func(clk, amps),
             su::MfHit::GenTrace(on) => self.gen_trace_set(on, now),
             su::MfHit::PCond(c) => {
                 st.pcond = c.min(2);
@@ -2722,14 +2844,23 @@ impl App {
                 st.probe = scope::PROBES[(i as usize).min(12)];
                 self.scope_set(st, now);
             }
-            su::SideHit::Colour(i) => self.sp.colour = i.min(8),
+            su::SideHit::Type(i) => {
+                if (i == 1) != self.sp.ch1_cur {
+                    self.sp.ch1_cur = i == 1;
+                    // The new unit on the V/div, the level badge, the
+                    // measurements and the frame's cursor readouts.
+                    self.scope.refresh();
+                    self.sp_settings_changed();
+                }
+            }
+            su::SideHit::Colour(i) => self.sp.colour = i.min(su::NPAL as u8 - 1),
             su::SideHit::MathMode(md) => {
                 if md != self.sp.math.mode {
                     self.sp.math.mode = md;
                     self.sp_math_changed(true);
                 }
             }
-            su::SideHit::MathColour(i) => self.sp.math.colour = i.min(8),
+            su::SideHit::MathColour(i) => self.sp.math.colour = i.min(su::NPAL as u8 - 1),
             su::SideHit::HzDiv(i) => {
                 self.sp.math.hz = i.min(3);
                 self.sp_math();
@@ -3006,10 +3137,23 @@ impl App {
             | (s.tsrc as u32 & 1) << 4
             | (self.scope.gen_trace as u32) << 5
             | (self.ch2.on as u32) << 6
+            // Bit 7: source DMM (CH2; bit 4 then 0).
+            | ((s.tsrc == scope::TSRC_CH2) as u32) << 7
             // Bits 8..12: the GEN V/div index + 1 (0: not set yet).
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
+            // Bit 14: CH1 type Cur.
+            | (self.sp.ch1_cur as u32) << 14
+            // Bit 13: CH1 hidden.
+            | (self.sp.ch1_off as u32) << 13
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
+        // [5] bits 16..19: the CH2 colour (scope_ui::CH2_COLOUR, 0 = magenta).
+        p[5] |= (su::ch2_colour_idx() as u32 & 0xF) << 16;
+        // [5] bits 20..23: the GEN colour (PALETTE index XOR its default
+        // cyan, so 0 = cyan in older records).
+        p[5] |= ((su::gen_colour_idx() ^ su::GEN_COLOUR_DEFAULT) as u32 & 0xF) << 20;
+        // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
+        p[5] |= self.ch2.pos as u16 as u32;
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3019,7 +3163,7 @@ impl App {
         self.sp.math = Math {
             on: w & 1 != 0,
             mode: if w >> 1 & 1 != 0 { 6 } else { 5 },
-            colour: ((w >> 2 & 0xF) as u8 ^ d.colour).min(8),
+            colour: ((w >> 2 & 0xF) as u8 ^ d.colour).min(su::NPAL as u8 - 1),
             db: ((w >> 6 & 0xF) as u8 ^ d.db).min(12),
             vdiv: ((w >> 10 & 0x1F) as u8 ^ d.vdiv).min(21),
             vrms: w >> 15 & 1 != 0,
@@ -3033,10 +3177,16 @@ impl App {
         let dd = scope::Settings::DEFAULT;
         st.ttype = (p[3] & 3).min(2) as u8;
         st.pcond = (p[3] >> 2 & 3).min(2) as u8;
-        st.tsrc = (p[3] >> 4 & 1) as u8;
+        st.tsrc = if p[3] >> 7 & 1 != 0 { scope::TSRC_CH2 } else { (p[3] >> 4 & 1) as u8 };
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
+        su::set_ch2_colour(((p[5] >> 16 & 0xF) as u8).min(su::NPAL as u8));
+        su::set_gen_colour(((p[5] >> 20 & 0xF) as u8 ^ su::GEN_COLOUR_DEFAULT).min(su::NPAL as u8 - 1));
+        self.sp.ch1_cur = p[3] >> 14 & 1 != 0;
+        self.sp.ch1_off = p[3] >> 13 & 1 != 0;
+        self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
+        self.scope.ch2_pos = self.ch2.pos;
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };
@@ -3045,7 +3195,7 @@ impl App {
 
     pub(super) fn sp_restore(&mut self, p1: u32, p11: u32) {
         let s = &mut self.sp;
-        s.colour = ((p1 >> 17 & 0xF) ^ 2).min(8) as u8;
+        s.colour = ((p1 >> 17 & 0xF) ^ 2).min(su::NPAL as u32 - 1) as u8;
         s.bright = 100 - (p1 >> 21 & 0x7F).min(100) as u8;
         s.swipes = p11 >> 3 & 1 != 0;
         s.persist = (p11 >> 4 & 3) as u8;
