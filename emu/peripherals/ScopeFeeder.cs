@@ -225,8 +225,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 compT = horizon;
                 return;
             }
-            var k0 = (long)Math.Floor(compT * hz);
-            var k1 = (long)Math.Floor(horizon * hz);
+            // One period of slack on both sides: the time tests below decide
+            // (floor(horizon * hz) can round below an edge t <= horizon, the
+            // edge then fell between two ticks: 37.5 Hz lost 2 % of them).
+            var k0 = (long)Math.Floor(compT * hz) - 1;
+            var k1 = (long)Math.Floor(horizon * hz) + 1;
             var emitted = 0;
             for(var k = k0; k <= k1 && emitted < 20000; k++)
             {

@@ -75,7 +75,9 @@ class T:
 
     def freq(self):
         f = self.q('DBG:HWTRIG:FREQ?').split(',')
-        return float(f[0])
+        v = float(f[0])
+        # SCPI NaN is 9.91E37.
+        return math.nan if v > 9e37 else v
 
     def meas(self):
         return float(self.q('SCOP:MEAS:FREQ?'))
