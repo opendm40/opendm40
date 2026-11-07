@@ -8,6 +8,10 @@ section named after the tag as the release notes; how to cut a release:
 ## Unreleased
 
 - **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
+- **Scope:** a second tap on the CH1 title with its popup open hides CH1.
+- **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; DMM turns CH2 on; GEN cannot be picked while the generator is off.
+- **Scope:** drag the DMM channel's 2 marker to move its trace.
+- **Combined view:** the meter strip's reading is orange, as on the multimeter page.
 - DMM: 2 px more between the big digits and the bargraph.
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
