@@ -278,6 +278,10 @@ fn fft() -> &'static mut crate::fft::Fft {
     unsafe { &mut *core::ptr::addr_of_mut!(FFT) }
 }
 
+pub(super) fn fft_busy() -> bool {
+    fft().busy()
+}
+
 /// The FFT work buffer (diskbuf.rs `fft_work`: the disk buffer arena;
 /// `fresh` = a new job's load). None while a disk job holds it, or a disk
 /// user wrote it since the load: the job in flight, if any, is dropped (the
@@ -2330,12 +2334,20 @@ impl App {
     pub(super) fn sp_popup_draw(&mut self) {
         self.sp.popup_draws = self.sp.popup_draws.wrapping_add(1);
         let v = self.sp_popvals();
-        // Not while the AD2 stream runs (the Wave view): popup_strips and
-        // strips_box are region C.
-        if crate::hy3131::streaming() || !popup_strips(self.sp.popup, &v) {
-            // The box's fills wait for its widgets (lcd.rs "deferred fills").
-            crate::lcd::defer_start();
-            su::draw_popup(self.sp.popup, &v);
+        let p = self.sp.popup;
+        // In strips over its box, behind the scan when that fits
+        // (lcd::tear_free; scanline.rs: the MF box does not, ~35..137 ms).
+        // Directly, the box's fills waiting for its widgets (lcd.rs
+        // "deferred fills"), without a box (the timebase list), inside a
+        // page strip pass or while the AD2 stream runs (the Wave view).
+        match su::popup_box(p) {
+            Some(r) if !crate::lcd::in_strip() && !crate::hy3131::streaming() => {
+                crate::lcd::tear_free(r.x, r.y, r.w, r.h, &mut || su::draw_popup(p, &v));
+            }
+            _ => {
+                crate::lcd::defer_start();
+                su::draw_popup(p, &v);
+            }
         }
     }
 
@@ -3128,33 +3140,3 @@ const _: () = assert!(scope::CAP <= crate::scope_csv::REC_MAX, "scope CSV sized 
 
 /// The pinch value bubble: centred in the graph.
 const BUBBLE: Rect = rect(153, 140, 120, 40);
-
-/// The popup `p` composed in RAM strips over its box (lcd::strips_box):
-/// every pixel sent once, in its final colour, top to bottom. Drawn
-/// directly, its frame fill and its ~30 widget windows (the deferred
-/// fills landing cell by cell under them) reached the panel in widget
-/// order over 35 .. 137 ms, 2 .. 8 panel refreshes of 16.3 ms (device,
-/// DBG:PROF?, DBG:SCANLINE?): the box showed torn and half drawn. The
-/// composing takes as long in strips; what changes is that the panel
-/// only ever shows the old picture above or below the new one. No
-/// scan-line wait (scanline.rs): the scan runs along x (DIR 1, inferred)
-/// and the box spans 466 of the 480 columns, so there is no window
-/// between two passes. False (the caller draws
-/// directly): no box (the timebase list), inside a page strip pass
-/// (App::repaint_strips draws the popup into its own strips) or a disk job
-/// holds the strip buffer. Region C (link-native.x): never while the AD2
-/// stream runs (the caller checks).
-#[inline(never)]
-fn popup_strips(p: su::Popup, v: &su::PopVals) -> bool {
-    let Some(r) = su::popup_box(p) else {
-        return false;
-    };
-    if crate::lcd::in_strip() {
-        return false;
-    }
-    let Some(buf) = crate::diskbuf::strip_take() else {
-        return false;
-    };
-    crate::lcd::strips_box(buf, r.x as u16, r.y as u16, (r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16, &mut || su::draw_popup(p, v));
-    crate::diskbuf::strip_give()
-}

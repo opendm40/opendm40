@@ -574,6 +574,12 @@ fn buzzer_tone(tone: u8, vol: u8) {
     }
 }
 
+/// A scope FFT job is in flight (lcd::tear_free leaves the strip buffer
+/// to it: taking it would drop the job).
+pub(crate) fn fft_busy() -> bool {
+    scope_page::fft_busy()
+}
+
 /// Finish the on-device disk writers before the power goes (power-off, the
 /// reset path in main.rs): the CSV recording is stopped and committed, a
 /// screenshot finished (or stopped between two slices). Never cut their FAT

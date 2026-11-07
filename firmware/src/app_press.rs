@@ -208,21 +208,9 @@ impl App {
     }
 }
 
-/// A tap-feedback box `r` drawn by `draw` (which must cover it): composed
-/// in RAM strips and sent once each pixel (lcd::strips_box), started when
-/// the panel's refresh scan has just left the box (scanline.rs); directly
-/// while a disk job holds the strip buffer.
-#[inline(never)]
+/// A tap-feedback box `r` drawn by `draw` (which must cover it), without
+/// tearing (lcd::tear_free).
+#[inline(always)]
 pub(super) fn draw_box(r: crate::stockfont::Rect, draw: &mut dyn FnMut()) {
-    if let Some(buf) = crate::diskbuf::strip_take() {
-        let (x0, y0, x1, y1) = (r.x as u16, r.y as u16, (r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16);
-        let t0 = crate::scanline::wait(x0, y0, x1, y1);
-        crate::lcd::strips_box(buf, x0, y0, x1, y1, draw);
-        crate::scanline::done(t0, r.w as u32 * r.h as u32);
-        if crate::diskbuf::strip_give() {
-            return;
-        }
-        // A disk user took the buffer meanwhile: draw it again.
-    }
-    draw();
+    crate::lcd::tear_free(r.x, r.y, r.w, r.h, draw);
 }

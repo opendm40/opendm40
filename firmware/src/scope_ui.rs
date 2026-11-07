@@ -18,7 +18,22 @@
 #![allow(dead_code)]
 
 use crate::lcd::{self, Color};
-use crate::stockfont::{self as sf, in_rbox, on_ring, paint, rect, Font, Ink, Rect};
+use crate::stockfont::{self as sf, in_rbox, on_ring, rect, Font, Ink, Rect};
+
+/// `sf::paint` without tearing: every scope widget is one composite
+/// window, redrawn through lcd::tear_free (directly in a page strip pass
+/// and inside a popup's).
+#[inline(always)]
+fn paint(r: Rect, layers: &[(u8, Color)], mut f: impl FnMut(i16, i16) -> (Color, u16)) {
+    paint_tf(r, layers, &mut f)
+}
+
+#[inline(never)]
+fn paint_tf(r: Rect, layers: &[(u8, Color)], f: &mut dyn FnMut(i16, i16) -> (Color, u16)) {
+    let (x0, y0) = (r.x.max(0), r.y.max(0));
+    let (x1, y1) = ((r.x + r.w).min(lcd::W as i16), (r.y + r.h).min(lcd::H as i16));
+    lcd::tear_free(x0, y0, x1 - x0, y1 - y0, &mut || sf::paint_dyn(r, layers, f));
+}
 
 /// The protocol decoder's bus band and its setup popup (app_decode.rs).
 #[path = "ui_decode.rs"]

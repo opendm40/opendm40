@@ -22,7 +22,8 @@ section named after the tag as the release notes; how to cut a release:
 
 - **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
 - **Scope:** the MF menu spans the screen to the right edge, over the right panel, with wider columns; the panel is drawn again when it closes.
-- **Scope:** the MF, CH1 and Math menus no longer tear or show half-drawn while they open, switch tabs or change a setting: each is drawn once, top to bottom.
+- **Scope:** the MF, CH1 and Math menus no longer show half-drawn while they open, switch tabs or change a setting: each is drawn once, top to bottom.
+- **Less tearing:** badges, labels, status-bar fields, toasts, the BEEP band and the scope's buttons and cells are redrawn in one piece, timed to the display's refresh.
 ### New
 
 - **Chinese README and user manual** (machine translation, not yet reviewed

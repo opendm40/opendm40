@@ -163,7 +163,7 @@ SECTIONS
          * polls them under the region C hooks). Region B, ~2 KB. */
         *(.text.*8opendm404boot*);
         *(.text.*8opendm403app9app_press*);
-        /* The press feedback's scan-line sync and DBG:SCANLINE? (src/scanline.rs). */
+        /* The scan-line sync of lcd::tear_free and DBG:SCANLINE? (src/scanline.rs). */
         *(.text.*8opendm408scanline*);
         /* Inrush current: open / arm / close / results / save glue and the
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
@@ -288,6 +288,8 @@ SECTIONS
         *(.text.*8opendm403app*3App14temp_info_text*);
         *(.text.*8opendm403app*3App14temp_info_tick*);
         *(.text.*8opendm402ui8temp_key*);
+        /* Its info line's tear-free box (ui::temp_info and its closure). */
+        *(.text.*8opendm402ui9temp_info*);
         *(.text.*8opendm402ui10gen_values*);
         *(.text.*8opendm402ui10gen_static*);
         *(.text.*8opendm402ui14auto_cpl_label*);
@@ -298,15 +300,14 @@ SECTIONS
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);
         *(.text.*8opendm402ui2pw14settings_press*);
-        /* Their boxes for the press feedback, and the strip-box pass
-         * (app_press.rs draw_box: per press). */
+        /* Their boxes for the press feedback. */
         *(.text.*8opendm402ui16range_press_item*);
         *(.text.*8opendm402ui2pw10press_item*);
         *(.text.*8opendm402ui9temp_rect*);
+        /* lcd::tear_free's body (scanline.rs above: per box redraw, never
+         * while the AD2 stream runs; lcd::tear_free, the guard, is B). */
         *(.text.*8opendm403lcd10strips_box*);
-        /* The scope popups in strips (App::sp_popup_draw: per popup draw,
-         * not while the AD2 stream runs). */
-        *(.text.*8opendm403app10scope_page12popup_strips*);
+        *(.text.*8opendm403lcd13draw_deferred*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:TOUCH?, DBG:DIAG?, MMEM:DEL (and the
          * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?).

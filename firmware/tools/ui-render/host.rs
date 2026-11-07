@@ -32,6 +32,9 @@ pub struct Emu {
     /// RAMWR commands (= windows opened), for the DMM redraw budget.
     pub bus: u64,
     pub wins: u64,
+    /// An open lcd::tear_free box (x0, y0, x1, y1), its pixels written,
+    /// and the writes outside it.
+    tf: Option<((usize, usize, usize, usize), Vec<bool>, u64)>,
 }
 
 pub static mut EMU: Option<Emu> = None;
@@ -54,6 +57,7 @@ pub fn emu() -> &'static mut Emu {
                 writes: 0,
                 bus: 0,
                 wins: 0,
+                tf: None,
             });
         }
         EMU.as_mut().unwrap()
@@ -184,6 +188,23 @@ pub fn set(id: u32, bg: u16, g: u8) {
     emu().call = if id == 0 { None } else { Some((id, bg, g)) };
 }
 
+/// lcd::tear_free's box opens (`on`) / closes: at the close, a message
+/// when the drawing missed pixels of the box or wrote outside it.
+pub fn tear_free(on: bool, r: (i16, i16, i16, i16)) -> Option<String> {
+    let e = emu();
+    let (x, y, w, h) = (r.0 as usize, r.1 as usize, r.2 as usize, r.3 as usize);
+    if on {
+        e.tf = Some(((x, y, x + w - 1, y + h - 1), vec![false; w * h], 0));
+        return None;
+    }
+    let (_, seen, out) = e.tf.take()?;
+    let miss = seen.iter().filter(|s| !**s).count();
+    if miss == 0 && out == 0 {
+        return None;
+    }
+    Some(format!("tear_free box x {}..{} y {}..{}: {miss} px not drawn, {out} px drawn outside", x, x + w - 1, y, y + h - 1))
+}
+
 fn lcd_w16(addr: u32, v: u16) {
     let e = emu();
     if addr == 0x6001_FFFE || addr == 0x6002_0000 {
@@ -205,6 +226,13 @@ fn lcd_w16(addr: u32, v: u16) {
     if e.writing {
         e.writes += 1;
         let (x, y) = e.cur;
+        if let Some(((x0, y0, x1, y1), seen, out)) = e.tf.as_mut() {
+            if (*x0..=*x1).contains(&x) && (*y0..=*y1).contains(&y) {
+                seen[(y - *y0) * (*x1 - *x0 + 1) + x - *x0] = true;
+            } else {
+                *out += 1;
+            }
+        }
         if x < W && y < H {
             e.fb[y * W + x] = v;
             e.owner[y * W + x] = match e.call {
