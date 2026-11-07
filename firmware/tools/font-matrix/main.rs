@@ -15,6 +15,8 @@ mod stockfont;
 pub mod probe {
     /// ui-render's clip rule (stockfont probe_fit): not checked here.
     pub fn fit(_r: (i32, i32, i32, i32), _ink: (i32, i32, i32, i32), _text: &str) {}
+    /// ui-render's tear-free box rule (lcd::tear_free): not checked here.
+    pub fn tear_free(_on: bool, _r: (i16, i16, i16, i16)) {}
     pub fn open(kind: u8, bg: u16) -> u32 { crate::host::open(kind, bg) }
     pub fn set(id: u32, bg: u16, g: u8) { crate::host::set(id, bg, g) }
     pub const TEXT: u8 = 0;

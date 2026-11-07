@@ -126,6 +126,40 @@ INDIRECT = [
 ]
 
 
+# lcd::tear_free hands its `draw` closure (a `&mut dyn FnMut()`) down to
+# scanline::tear_free / chase and lcd::strips_box, which call it. Modelled
+# per caller: a function F that calls lcd::tear_free gets a node "F [tear_free]"
+# with the frames of that chain, calling F's own closures and those of the
+# functions of F's module (or impl) that have no symbol of their own
+# (inlined away; called from F's depth, not their real caller's: tear_free
+# closures are leaf drawing). Those closures are not paint_dyn's.
+TF_CHAIN = ['opendm40::lcd::tear_free', 'opendm40::scanline::tear_free', 'opendm40::scanline::chase', 'opendm40::lcd::strips_box']
+
+
+def tear_free_model(funcs):
+    callers = [n for n, f in funcs.items() if 'opendm40::lcd::tear_free' in f['calls']]
+    chain = sum(funcs[c]['frame'] for c in TF_CHAIN if c in funcs)
+    closures = {}
+    for n in funcs:
+        m = re.match(r'^(.*)::\{closure#\d+\}$', n)
+        if m and '::<' not in m.group(1):
+            closures.setdefault(m.group(1), []).append(n)
+    tf = set()
+    for c in callers:
+        mod = c.rsplit('::', 1)[0]
+        own = list(closures.get(c, []))
+        for p, cl in closures.items():
+            if p not in funcs and p.rsplit('::', 1)[0] == mod:
+                own += cl
+        if not own:
+            continue
+        node = c + ' [tear_free]'
+        funcs[node] = {'frame': chain, 'calls': set(own), 'ind': True, 'dyn': False}
+        funcs[c]['calls'].add(node)
+        tf.update(own)
+    return tf
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('elf')
@@ -136,8 +170,9 @@ def main():
     dis = subprocess.run([tool('llvm-objdump'), '-d', '--no-show-raw-insn', '-C', a.elf],
                          capture_output=True, text=True, check=True).stdout.split('\n')
     funcs = parse(dis)
+    tf = tear_free_model(funcs)
     for cpat, tpat in INDIRECT:
-        targets = [n for n in funcs if re.search(tpat, n)]
+        targets = [n for n in funcs if re.search(tpat, n) and n not in tf]
         for n in funcs:
             if re.search(cpat, n):
                 funcs[n]['calls'].update(t for t in targets if t != n)

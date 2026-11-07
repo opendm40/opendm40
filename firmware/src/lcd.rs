@@ -676,6 +676,64 @@ pub fn strips_box(buf: &mut [Color], x0: u16, y0: u16, x1: u16, y1: u16, draw: &
     }
 }
 
+// ------------------------------------------------------------ tear-free boxes
+//
+// `tear_free` redraws one box so that the panel never shows it half old,
+// half new: composed in RAM strips (each pixel sent once, `strips_box`)
+// and written between two passes of the panel's refresh scan
+// (scanline.rs). Every small, often or multi-pass redrawn box goes
+// through it (a badge, a label with its background, a stepper value, a
+// popup). `draw` must paint every pixel of the box, nothing outside it,
+// and may run more than once (once per strip): pure drawing, no state
+// changes. ui-render checks the first two on every call (host
+// `tear_free`).
+
+/// A `tear_free` is in progress (a nested one draws directly).
+static mut TF: bool = false;
+
+/// Redraw the box x, y, w, h with `draw` without tearing. Directly (no
+/// sync, no compose) inside a page strip pass or a deferred-fill batch,
+/// inside another `tear_free` and while the AD2 stream runs (the sync is
+/// region C, link-native.x).
+#[cfg(target_os = "none")]
+#[inline(never)]
+pub fn tear_free(x: i16, y: i16, w: i16, h: i16, draw: &mut dyn FnMut()) {
+    if w <= 0 || h <= 0 || x < 0 || y < 0 || strip_on() || defer_on() || unsafe { TF } || crate::hy3131::streaming() {
+        draw();
+        return;
+    }
+    unsafe { TF = true };
+    crate::scanline::tear_free(x as u16, y as u16, (x + w - 1) as u16, (y + h - 1) as u16, draw);
+    unsafe { TF = false };
+}
+
+/// Host: `draw` directly; ui-render checks that it writes every pixel of
+/// the box and none outside (probe::tear_free).
+#[cfg(not(target_os = "none"))]
+pub fn tear_free(x: i16, y: i16, w: i16, h: i16, draw: &mut dyn FnMut()) {
+    let check = !(w <= 0 || h <= 0 || strip_on() || defer_on() || unsafe { TF });
+    if !check {
+        draw();
+        return;
+    }
+    unsafe { TF = true };
+    #[cfg(test)]
+    crate::probe::tear_free(true, (x, y, w, h));
+    draw();
+    #[cfg(test)]
+    crate::probe::tear_free(false, (x, y, w, h));
+    unsafe { TF = false };
+}
+
+/// `draw` straight to the panel, its large fills deferred until its other
+/// windows (the `tear_free` fallback without the strip buffer: no bare
+/// background between a fill and its text, if the scan comes by).
+pub fn draw_deferred(draw: &mut dyn FnMut()) {
+    defer_start();
+    draw();
+    defer_flush();
+}
+
 /// Pixels to the panel, from RAM (the window is open).
 #[inline(never)]
 fn push(px: &[Color]) {

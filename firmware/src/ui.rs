@@ -66,6 +66,19 @@ static SHORT_STYLE_T: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU
 pub fn set_short_style(s: u8) {
     SHORT_STYLE_T.store(s, core::sync::atomic::Ordering::Relaxed);
 }
+/// `draw` redraws box `r` (all of it, nothing outside) without tearing:
+/// lcd::tear_free.
+#[inline(always)]
+fn tf(r: sf::Rect, draw: &mut dyn FnMut()) {
+    lcd::tear_free(r.x, r.y, r.w, r.h, draw);
+}
+
+/// `sf::label` without tearing (`tf`).
+#[inline(never)]
+pub(crate) fn label_tf(font: sf::Font, r: sf::Rect, text: &str, fg: Color, bg: Color, align: u8, spacing: i8) {
+    tf(r, &mut || sf::label(font, r, text, fg, bg, align, spacing));
+}
+
 #[cfg(test)]
 fn short_style() -> u8 {
     SHORT_STYLE_T.load(core::sync::atomic::Ordering::Relaxed)
@@ -194,8 +207,10 @@ const BURDEN_CAP: &str = "Burden";
 /// (te no further left than the caption's own width allows).
 fn caption_value(cx: i16, end: i16, cap: &str, txt: &str, vcol: Color) {
     let te = (end - sf::text_width(sf::LETTERS, txt, 0) - 6).max(cx + sf::text_width(sf::F14, cap, 1) + 1);
-    sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
-    sf::label(sf::F14, rect(cx, 36, te - cx, 30), cap, VALUE, BG, 4, 1);
+    tf(rect(cx, 36, end - cx, 30), &mut || {
+        sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
+        sf::label(sf::F14, rect(cx, 36, te - cx, 30), cap, VALUE, BG, 4, 1);
+    });
 }
 
 /// Power meter, "At load" on (doc 3.16): the mark after the compensated V's
@@ -703,13 +718,15 @@ impl DmmView {
         }
         let b = Self::short_rect(if want != 0 { want } else { self.short_drawn });
         self.short_drawn = want;
-        if want != 0 {
-            sf::rbox(b, 6, SHORT_BG, BG);
-            // The scope's 26 px face (the status bar's F21 lacks B / E).
-            sf::glyphs(sf::ASCII26, b, if want == 2 { "BEEP" } else { "SHORT" }, 0xFFFF, SHORT_BG, 8, 2);
-        } else {
-            lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-        }
+        tf(b, &mut || {
+            if want != 0 {
+                sf::rbox(b, 6, SHORT_BG, BG);
+                // The scope's 26 px face (the status bar's F21 lacks B / E).
+                sf::glyphs(sf::ASCII26, b, if want == 2 { "BEEP" } else { "SHORT" }, 0xFFFF, SHORT_BG, 8, 2);
+            } else {
+                lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+            }
+        });
         // The band covers / uncovers the aux values and the test current:
         // nothing of them is on the screen now.
         self.aux_val = [None; 2];
@@ -741,70 +758,88 @@ impl DmmView {
     #[inline(never)]
     #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
     fn acc_draw(&self) {
-        let b = ACC_RECT;
-        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-        let Some((u, dec, unit)) = self.acc_k else { return };
-        let mut nb = [0u8; 16];
-        let mut ub = [0u8; 16];
-        let num = acc_fmt(&mut nb, u, dec);
-        let mut t = crate::scope_ui::Txt::new(num);
-        t.push(sf::unit_text(unit, &mut ub));
-        let t = if sf::text_width(sf::F14, t.as_str(), 1) <= b.w - PM_W { t } else { crate::scope_ui::Txt::new(num) };
-        let w = sf::text_width(sf::F14, t.as_str(), 1);
-        let x = b.x + b.w - w;
-        sf::label(sf::F14, rect(x, b.y, w, b.h), t.as_str(), DIM, BG, 4, 1);
-        pm(x - PM_W, b.y + 1, DIM);
+        let k = self.acc_k;
+        tf(ACC_RECT, &mut || acc_paint(k));
     }
 
     /// Bargraph scale labels for full scale `fs` in `unit` (empty = none,
-    /// temperature).
+    /// temperature): the row and the accuracy label in it.
     fn bar_labels(&self, fs: f32, unit: &str) {
-        lcd::fill_rect(8, BAR_LBL_Y as u16, 468, BAR_LBL_H as u16, BG);
-        // The row clear took the accuracy label too.
-        if self.acc_drawn {
-            self.acc_draw();
-        }
-        if unit.is_empty() {
-            return;
-        }
-        let num = scale_num;
-        // The unit as the readout and the accuracy label beside it spell
-        // it (F14 has the ohm glyph): "600 KΩ", not "600 kOhm".
-        let mut ub = [0u8; 16];
-        let us = sf::unit_text(unit, &mut ub);
-        let (bx, mid, end) = (self.bar.x as i16, self.bar.mid_x() as i16, self.bar.end_x() as i16);
-        // Left / centre / right labels.
-        let mut l = [0u8; 16];
-        let mut c = [0u8; 16];
-        let mut r = [0u8; 24];
-        let mut v = [0u8; 16];
-        let k = num(&mut v, fs);
-        let (nl, nc, mut nr);
-        if self.bar.bipolar {
-            l[0] = b'-';
-            l[1..1 + k].copy_from_slice(&v[..k]);
-            nl = 1 + k;
-            c[0] = b'0';
-            nc = 1;
-            r[0] = b'+';
-            r[1..1 + k].copy_from_slice(&v[..k]);
-            nr = 1 + k;
-        } else {
-            l[0] = b'0';
-            nl = 1;
-            nc = num(&mut c, fs / 2.0);
-            r[..k].copy_from_slice(&v[..k]);
-            nr = k;
-        }
-        sf::label(sf::F14, rect(bx, BAR_LBL_Y, 80, BAR_LBL_H), core::str::from_utf8(&l[..nl]).unwrap_or(""), DIM, BG, 1, 1);
-        r[nr] = b' ';
-        let k = us.len().min(24 - nr - 1);
-        r[nr + 1..nr + 1 + k].copy_from_slice(&us.as_bytes()[..k]);
-        nr += 1 + k;
-        sf::label(sf::F14, rect(mid - 40, BAR_LBL_Y, 81, BAR_LBL_H), core::str::from_utf8(&c[..nc]).unwrap_or(""), DIM, BG, 8, 1);
-        sf::label(sf::F14, rect(end - 120, BAR_LBL_Y, 120, BAR_LBL_H), core::str::from_utf8(&r[..nr]).unwrap_or(""), DIM, BG, 4, 1);
+        let (acc, bar) = (if self.acc_drawn { Some(self.acc_k) } else { None }, (self.bar.x as i16, self.bar.mid_x() as i16, self.bar.end_x() as i16, self.bar.bipolar));
+        tf(rect(8, BAR_LBL_Y, 468, BAR_LBL_H), &mut || {
+            bar_paint(fs, unit, bar);
+            // The row clear took the accuracy label too.
+            if let Some(k) = acc {
+                acc_paint(k);
+            }
+        });
     }
+}
 
+/// ACC_RECT painted with the accuracy label `k` (DmmView::acc_draw).
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+fn acc_paint(k: Option<(u32, u8, &'static str)>) {
+    let b = ACC_RECT;
+    lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+    let Some((u, dec, unit)) = k else { return };
+    let mut nb = [0u8; 16];
+    let mut ub = [0u8; 16];
+    let num = acc_fmt(&mut nb, u, dec);
+    let mut t = crate::scope_ui::Txt::new(num);
+    t.push(sf::unit_text(unit, &mut ub));
+    let t = if sf::text_width(sf::F14, t.as_str(), 1) <= b.w - PM_W { t } else { crate::scope_ui::Txt::new(num) };
+    let w = sf::text_width(sf::F14, t.as_str(), 1);
+    let x = b.x + b.w - w;
+    sf::label(sf::F14, rect(x, b.y, w, b.h), t.as_str(), DIM, BG, 4, 1);
+    pm(x - PM_W, b.y + 1, DIM);
+}
+
+/// The bargraph's scale label row (DmmView::bar_labels; `bar`: its x,
+/// middle, end and bipolar), the accuracy label's box cleared.
+fn bar_paint(fs: f32, unit: &str, bar: (i16, i16, i16, bool)) {
+    lcd::fill_rect(8, BAR_LBL_Y as u16, 468, BAR_LBL_H as u16, BG);
+    if unit.is_empty() {
+        return;
+    }
+    let num = scale_num;
+    // The unit as the readout and the accuracy label beside it spell
+    // it (F14 has the ohm glyph): "600 KΩ", not "600 kOhm".
+    let mut ub = [0u8; 16];
+    let us = sf::unit_text(unit, &mut ub);
+    let (bx, mid, end, bipolar) = bar;
+    // Left / centre / right labels.
+    let mut l = [0u8; 16];
+    let mut c = [0u8; 16];
+    let mut r = [0u8; 24];
+    let mut v = [0u8; 16];
+    let k = num(&mut v, fs);
+    let (nl, nc, mut nr);
+    if bipolar {
+        l[0] = b'-';
+        l[1..1 + k].copy_from_slice(&v[..k]);
+        nl = 1 + k;
+        c[0] = b'0';
+        nc = 1;
+        r[0] = b'+';
+        r[1..1 + k].copy_from_slice(&v[..k]);
+        nr = 1 + k;
+    } else {
+        l[0] = b'0';
+        nl = 1;
+        nc = num(&mut c, fs / 2.0);
+        r[..k].copy_from_slice(&v[..k]);
+        nr = k;
+    }
+    sf::label(sf::F14, rect(bx, BAR_LBL_Y, 80, BAR_LBL_H), core::str::from_utf8(&l[..nl]).unwrap_or(""), DIM, BG, 1, 1);
+    r[nr] = b' ';
+    let k = us.len().min(24 - nr - 1);
+    r[nr + 1..nr + 1 + k].copy_from_slice(&us.as_bytes()[..k]);
+    nr += 1 + k;
+    sf::label(sf::F14, rect(mid - 40, BAR_LBL_Y, 81, BAR_LBL_H), core::str::from_utf8(&c[..nc]).unwrap_or(""), DIM, BG, 8, 1);
+    sf::label(sf::F14, rect(end - 120, BAR_LBL_Y, 120, BAR_LBL_H), core::str::from_utf8(&r[..nr]).unwrap_or(""), DIM, BG, 4, 1);
+}
+
+impl DmmView {
     /// UF-30: feed the bargraph with a raw (un-smoothed, pre-REL) reading;
     /// bipolar in DC V / mV / A (not AC+DC), unipolar elsewhere, empty in
     /// temperature (no meaningful full scale). No-op in history mode.
@@ -824,7 +859,7 @@ impl DmmView {
         let ol = f.is_none();
         if self.bar_ol != Some(ol) {
             self.bar_ol = Some(ol);
-            sf::label(sf::F14, BAR_OL, if ol { "OL" } else { "" }, 0xF800, BG, 1, 1);
+            label_tf(sf::F14, BAR_OL, if ol { "OL" } else { "" }, 0xF800, BG, 1, 1);
         }
         self.bar.update(f);
     }
@@ -1070,12 +1105,14 @@ impl DmmView {
                 if self.last_chip != self.label || !self.last_aux[1] {
                     let w = sf::text_width(sf::TEXT22, l, 0) + 2 * CHIP_PAD;
                     let c = rect(472 - w, 38, w, 26);
-                    lcd::fill_rect(260, 36, (c.x - 260) as u16, 30, BG);
-                    lcd::fill_rect(c.x as u16, 36, (476 - c.x) as u16, 2, BG);
-                    lcd::fill_rect(c.x as u16, 64, (476 - c.x) as u16, 2, BG);
-                    lcd::fill_rect(472, 38, 4, 26, BG);
-                    sf::rbox(c, 6, CHIP, BG);
-                    sf::glyphs(sf::TEXT22, c, l, FG, CHIP, 8, 0);
+                    tf(rect(260, 36, 216, 30), &mut || {
+                        lcd::fill_rect(260, 36, (c.x - 260) as u16, 30, BG);
+                        lcd::fill_rect(c.x as u16, 36, (476 - c.x) as u16, 2, BG);
+                        lcd::fill_rect(c.x as u16, 64, (476 - c.x) as u16, 2, BG);
+                        lcd::fill_rect(472, 38, 4, 26, BG);
+                        sf::rbox(c, 6, CHIP, BG);
+                        sf::glyphs(sf::TEXT22, c, l, FG, CHIP, 8, 0);
+                    });
                     self.last_chip = self.label;
                     self.aux_val[1] = None;
                     self.aux_unit[1] = None;
@@ -1127,18 +1164,22 @@ impl DmmView {
                         // of the text (both labels repaint their bg).
                         let end = vx - 30 + 137;
                         let te = (end - sf::text_width(sf::LETTERS, txt, 0) - 4).max(AUX_TAG_X[i] + 24);
-                        sf::label(sf::AUX_TAG, rect(AUX_TAG_X[i], 36, te - AUX_TAG_X[i], 30), AUX_TAGS[i], VALUE, BG, 4, 0);
-                        sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
+                        tf(rect(AUX_TAG_X[i], 36, end - AUX_TAG_X[i], 30), &mut || {
+                            sf::label(sf::AUX_TAG, rect(AUX_TAG_X[i], 36, te - AUX_TAG_X[i], 30), AUX_TAGS[i], VALUE, BG, 4, 0);
+                            sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
+                        });
                     } else if v.ol && !r.main.ol {
                         // "0L" with "Overflow" (F14) before it, unless the
                         // main readout's caption already says it (the
                         // power meter's V / I are OL only with it): two
                         // boxes tiling the plain one, so a value after it
                         // leaves nothing behind.
-                        sf::label(sf::F14, rect(vx - 30, 36, 81, 30), "Overflow", vcol, BG, 4, 1);
-                        sf::label(sf::LETTERS, rect(vx + 51, 36, 56, 30), txt, vcol, BG, 4, 0);
+                        tf(rect(vx - 30, 36, 137, 30), &mut || {
+                            sf::label(sf::F14, rect(vx - 30, 36, 81, 30), "Overflow", vcol, BG, 4, 1);
+                            sf::label(sf::LETTERS, rect(vx + 51, 36, 56, 30), txt, vcol, BG, 4, 0);
+                        });
                     } else {
-                        sf::label(sf::LETTERS, rect(vx - 30, 36, 137, 30), txt, vcol, BG, 4, 0);
+                        label_tf(sf::LETTERS, rect(vx - 30, 36, 137, 30), txt, vcol, BG, 4, 0);
                     }
                     if self.aux_val[i] != vkey {
                         // The power meter's parts sub-line under it.
@@ -1155,19 +1196,21 @@ impl DmmView {
                         self.aux_unit[i] = ukey;
                         self.pwc.sub_invalidate(i);
                         let uw = if i == 0 && r.parts() { 54 } else { 76 };
-                        lcd::fill_rect((ux - 1) as u16, 36, 4, 30, BG);
                         // Energy units (Wh, VAh: power meter): the 'h'
                         // ascender is above the caps; 1 px lower, its glyphs
                         // 1 px apart (W and h touch at 0).
                         let hh = v.unit.ends_with('h') as i16;
                         let ut = sf::unit_text(v.unit, &mut u);
                         let sp = if hh == 1 && sf::text_width(sf::LETTERS, ut, 2) <= uw - 3 { 2 } else { 0 };
-                        lcd::fill_rect((ux + 3) as u16, 36, (uw - 3) as u16, 1, BG);
-                        sf::label(sf::LETTERS, rect(ux + 3, 36 + hh, uw - 3, 30 - hh), ut, VALUE, BG, 1, sp);
-                        if lm {
-                            let mx = ux + 3 + sf::text_width(sf::LETTERS, ut, sp) + 6;
-                            sf::label(sf::F14, rect(mx, 36, ux + uw - mx, 30), LOAD_CAP, VALUE, BG, 1, 1);
-                        }
+                        tf(rect(ux - 1, 36, uw + 1, 30), &mut || {
+                            lcd::fill_rect((ux - 1) as u16, 36, 4, 30, BG);
+                            lcd::fill_rect((ux + 3) as u16, 36, (uw - 3) as u16, 1, BG);
+                            sf::label(sf::LETTERS, rect(ux + 3, 36 + hh, uw - 3, 30 - hh), ut, VALUE, BG, 1, sp);
+                            if lm {
+                                let mx = ux + 3 + sf::text_width(sf::LETTERS, ut, sp) + 6;
+                                sf::label(sf::F14, rect(mx, 36, ux + uw - mx, 30), LOAD_CAP, VALUE, BG, 1, 1);
+                            }
+                        });
                     }
                     self.last_aux[i] = true;
                 }
@@ -1219,7 +1262,7 @@ impl DmmView {
             self.last_label = self.label;
             let s = range_text(r);
             if let (Some(l), false) = (self.label, temp) {
-                sf::label(sf::F14, rect(BAR_X, 1, 105, 32), l, STATUS_FG, BAR, 1, 1);
+                label_tf(sf::F14, rect(BAR_X, 1, 105, 32), l, STATUS_FG, BAR, 1, 1);
             } else {
                 range_status(s);
             }
@@ -1294,8 +1337,10 @@ pub fn ol_range_text<'a>(b: &'a mut [u8; 24], r: &Reading) -> &'a str {
 /// stream runs (V / A functions).
 #[inline(never)] // drawn on entering OL only
 fn ol_word(r: sf::Rect, range: &str, c: Color) {
-    sf::label(sf::TEXT22, rect(r.x, r.y - OL_RANGE_H, r.w, OL_RANGE_H), range, c, BG, 1, 1);
-    sf::label(sf::F14, r, "Overflow", c, BG, 2, 1);
+    tf(rect(r.x, r.y - OL_RANGE_H, r.w, OL_RANGE_H + r.h), &mut || {
+        sf::label(sf::TEXT22, rect(r.x, r.y - OL_RANGE_H, r.w, OL_RANGE_H), range, c, BG, 1, 1);
+        sf::label(sf::F14, r, "Overflow", c, BG, 2, 1);
+    });
 }
 
 /// The test current label's box: the aux1 slot's left part (the burden
@@ -1316,10 +1361,6 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
     let b = CAP_DIS_RECT;
     // (The value from a word space after the prefix.)
     let w = sf::text_width(sf::F14, PRE, 1) + 10;
-    if full {
-        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-        sf::label(sf::F14, rect(b.x, b.y, w, b.h), PRE, DIM, BG, 1, 1);
-    }
     let mut t = [0u8; 16];
     let mut s = crate::scope_ui::Txt::new("");
     if clamp {
@@ -1328,7 +1369,14 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
         s.push(crate::dmm::format(&mut t, v, 2));
     }
     s.push(" V");
-    sf::label(sf::F14, rect(b.x + w, b.y, b.w - w, b.h), s.as_str(), DIM, BG, 1, 1);
+    let vb = rect(b.x + w, b.y, b.w - w, b.h);
+    tf(if full { b } else { vb }, &mut || {
+        if full {
+            lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+            sf::label(sf::F14, rect(b.x, b.y, w, b.h), PRE, DIM, BG, 1, 1);
+        }
+        sf::label(sf::F14, vb, s.as_str(), DIM, BG, 1, 1);
+    });
 }
 
 /// Capacitance, the hunting hold (dmm.rs `CAP_HOLD_MS`): the ranges went
@@ -1337,9 +1385,11 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
 #[inline(never)] // during a hold only
 pub fn cap_noise_label() {
     let b = CAP_DIS_RECT;
-    lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-    // F14: English in Chinese (too small).
-    sf::label(sf::F14, b, crate::tr!("Unstable: unplug USB?"), DIM, BG, 1, 1);
+    tf(b, &mut || {
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        // F14: English in Chinese (too small).
+        sf::label(sf::F14, b, crate::tr!("Unstable: unplug USB?"), DIM, BG, 1, 1);
+    });
 }
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
@@ -1352,7 +1402,7 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
         // No value (60 M): clear the box, a range change from 6 M left the
         // 6 M label (device check 2f56ff9).
         let b = OHM_I_RECT;
-        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        tf(b, &mut || lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG));
         return;
     };
     // Continuity's is negative (its source drives the other way).
@@ -1369,7 +1419,7 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
     let mut t = crate::scope_ui::Txt::new(if exp { "EXP  I " } else { "I " });
     t.push(crate::dmm::format(&mut b, v, if v.abs() < 1.0 { 2 } else if v.abs() < 10.0 { 1 } else { 0 }));
     t.push(u);
-    sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
+    label_tf(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
 }
 
 /// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
@@ -1511,6 +1561,10 @@ pub fn slot_alert(hold: u8, alert: crate::sentinel::Alert, alt: bool) -> bool {
 /// With HOLD / A-HOLD, A-JACK and LIVE? take the slot every other second
 /// (`slot_alert`); each phase repaints the whole 119..201 box.
 fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
+    tf(rect(119, 1, 83, 32), &mut || hold_paint(hold, alert, alt));
+}
+
+fn hold_paint(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
     use crate::sentinel::Alert;
     let r = rect(119, 1, 71, 32);
     if (hold == 0 && alert != Alert::None) || slot_alert(hold, alert, alt) {
@@ -1540,7 +1594,7 @@ fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
 /// "AUTO" (AUTO coupling) in the limit badge's slot (`DmmView::reading`).
 #[inline(never)] // .cold (link-native.x): drawn on a change only
 fn auto_cpl_label() {
-    sf::label(sf::F14, rect(403, 72, 31, 17), "AUTO", VALUE, BG, 8, 1);
+    label_tf(sf::F14, rect(403, 72, 31, 17), "AUTO", VALUE, BG, 8, 1);
 }
 
 pub(crate) fn lim_badge(v: u8) {
@@ -1550,13 +1604,16 @@ pub(crate) fn lim_badge(v: u8) {
         crate::meter::V_PASS => ("OK", 0x04A9),
         crate::meter::V_HI => ("HI", 0xF800),
         crate::meter::V_LO => ("LO", 0xF800),
-        _ => {
-            lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, BG);
-            return;
-        }
+        _ => ("", BG),
     };
-    sf::rbox(r, 4, bg, BG);
-    sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), t, 0xFFFF, bg, 8, 1);
+    tf(r, &mut || {
+        if t.is_empty() {
+            lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, BG);
+        } else {
+            sf::rbox(r, 4, bg, BG);
+            sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), t, 0xFFFF, bg, 8, 1);
+        }
+    });
 }
 
 /// MF range page (stock "Voltage / Current / Resistor Settings"): title bar,
@@ -1648,7 +1705,7 @@ pub fn range_text(r: &Reading) -> &'static str {
 #[inline(never)] // .cold (link-native.x): drawn on a change only
 fn range_status(s: &str) {
     let sp = if sf::text_width(sf::F21, s, 0) <= 104 { 0 } else if sf::text_width(sf::F21, s, -1) <= 104 { -1 } else { -2 };
-    sf::label(sf::F21, rect(BAR_X, 1, 105, 32), s, STATUS_FG, BAR, 1, sp);
+    label_tf(sf::F21, rect(BAR_X, 1, 105, 32), s, STATUS_FG, BAR, 1, sp);
 }
 
 fn range_rect(i: usize) -> sf::Rect {
@@ -2088,8 +2145,10 @@ const T_INFO: sf::Rect = rect(8, 282, 464, 34);
 /// The info line again, while the page is shown (App::temp_info_tick: the
 /// cold junction changes with each thermocouple reading and the offset).
 pub fn temp_info(info: &str) {
-    lcd::fill_rect(T_INFO.x as u16, T_INFO.y as u16, T_INFO.w as u16, T_INFO.h as u16, BG);
-    sf::glyphs(sf::TEXT22, T_INFO, info, STATUS_FG, BG, 1, 0);
+    tf(T_INFO, &mut || {
+        lcd::fill_rect(T_INFO.x as u16, T_INFO.y as u16, T_INFO.w as u16, T_INFO.h as u16, BG);
+        sf::glyphs(sf::TEXT22, T_INFO, info, STATUS_FG, BG, 1, 0);
+    });
 }
 
 /// Temperature page touch: a T_CODES code (3 px of slop into the gaps:
@@ -2117,13 +2176,17 @@ pub const HIST_HIT: core::ops::Range<u16> = 151..175;
 pub fn history(items: &[(f32, u8, &'static str); 5], n: usize, newest: usize) {
     for i in 0..5 {
         let r = rect(5 + 95 * i as i16, 153, 88, 19);
-        sf::rbox(r, 3, BAR, BG);
-        if i < n {
-            let mut b = [0u8; 32];
+        let mut b = [0u8; 32];
+        let t = if i < n {
             let (v, d, u) = items[i];
-            let t = num_unit(&mut b, v, d, u);
+            num_unit(&mut b, v, d, u)
+        } else {
+            ""
+        };
+        tf(r, &mut || {
+            sf::rbox(r, 3, BAR, BG);
             sf::glyphs(sf::HIST, r, t, if i == newest { 0xFC40 } else { STATUS_FG }, BAR, 8, 0);
-        }
+        });
     }
 }
 
@@ -2245,12 +2308,12 @@ pub fn status_right(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
     let bc = battery_color(st);
-    sf::label(sf::F21, rect(205, 5, 112, 24), hms(&mut t, st.uptime_s), STATUS_FG, BAR, 1, -1);
+    label_tf(sf::F21, rect(205, 5, 112, 24), hms(&mut t, st.uptime_s), STATUS_FG, BAR, 1, -1);
     status_rec(st, BAR, 10);
-    sf::label(sf::LOCK, rect(327, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
-    sf::label(sf::SAVE_BT, rect(390, 0, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
-    sf::label(sf::SAVE_BT, rect(412, 0, 16, 32), usb_glyph(st), STATUS_FG, BAR, 1, 0);
-    sf::label(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
+    label_tf(sf::LOCK, rect(327, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
+    label_tf(sf::SAVE_BT, rect(390, 0, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
+    label_tf(sf::SAVE_BT, rect(412, 0, 16, 32), usb_glyph(st), STATUS_FG, BAR, 1, 0);
+    label_tf(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
 }
 
 /// Strip chart (stock frame (80,176,321,97)) with labels, rate button and
@@ -2512,8 +2575,10 @@ pub fn rate_chip(c: &mut ChartCache, rc: RateChip) {
     let name = if rc.applies { crate::dmm::RATE_NAMES[rc.rate as usize % 3] } else { "n/a" };
     let txt = join(&mut b, &[name, " ", rps_text(&mut rb, rc.period_ms)]);
     let r = rect(4, chart_geom().rate, 73, RATE_CHIP_H);
-    sf::rbox(r, 4, BTN, BG);
-    sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
+    tf(r, &mut || {
+        sf::rbox(r, 4, BTN, BG);
+        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
+    });
 }
 
 /// The Wave chip in the trend chart's bottom-left corner (owner request
@@ -2684,8 +2749,11 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         l[k..k + u.len()].copy_from_slice(u);
         // Timebase chip (tap: next rate), between the top and middle labels.
         let r = rect(4, g.tb, 73, 17);
-        sf::rbox(r, 4, BTN, BG);
-        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + u.len()]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
+        let txt = core::str::from_utf8(&l[..k + u.len()]).unwrap_or("");
+        tf(r, &mut || {
+            sf::rbox(r, 4, BTN, BG);
+            sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, STATUS_FG, BTN, 8, 1);
+        });
     }
     rate_chip(c, rc);
     let Some(side) = side else { return };
@@ -2730,19 +2798,22 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
                 d -= 1;
             }
             let s = v.map(|v| crate::dmm::format(&mut t, v, d)).unwrap_or("");
-            sf::label(sf::F14, rect(SIDE_X + 25, STAT_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
+            label_tf(sf::F14, rect(SIDE_X + 25, STAT_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
         }
     }
     let k = q(side.rel.or(Some(0.0)));
     if c.rows[4] != k {
         c.rows[4] = k;
         let r = rect(405, 205, 71, 36);
-        sf::rbox(r, 6, BTN, BG);
-        sf::glyphs(sf::F14, rect(409, 209, 30, 14), "REL", STATUS_FG, BTN, 0, 1);
         let mut u = [0u8; 16];
-        sf::glyphs(sf::F14, rect(430, 209, 42, 14), sf::unit_text(unit, &mut u), DIM, BTN, 3, 1);
+        let us = sf::unit_text(unit, &mut u);
         let rv = crate::dmm::format(&mut t, side.rel.unwrap_or(0.0), dec);
-        sf::glyphs(sf::F14, rect(409, 225, 63, 14), rv, STATUS_FG, BTN, 3, 1);
+        tf(r, &mut || {
+            sf::rbox(r, 6, BTN, BG);
+            sf::glyphs(sf::F14, rect(409, 209, 30, 14), "REL", STATUS_FG, BTN, 0, 1);
+            sf::glyphs(sf::F14, rect(430, 209, 42, 14), us, DIM, BTN, 3, 1);
+            sf::glyphs(sf::F14, rect(409, 225, 63, 14), rv, STATUS_FG, BTN, 3, 1);
+        });
     }
     let tk = side.secs.map(|t| (t, side.rec));
     if c.time != tk {
@@ -2766,7 +2837,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
             txt
         };
         let fg = if side.rec { 0xFC40 } else { DIM };
-        sf::label(sf::F14, rect(SIDE_X, STAT_Y[4], SIDE_R - SIDE_X, 14), txt, fg, BG, 3, 1);
+        label_tf(sf::F14, rect(SIDE_X, STAT_Y[4], SIDE_R - SIDE_X, 14), txt, fg, BG, 3, 1);
     }
 }
 
@@ -2832,13 +2903,13 @@ fn gen_box_value(k: usize, v: &str, letters: bool, unit: &str, fg: Color, bg: Co
 /// selected prefill: K_SEL).
 fn gen_box_value_bg(k: usize, v: &str, letters: bool, unit: &str, fg: Color, vbg: Color, bg: Color) {
     let y = GEN_BOX_Y[k];
-    sf::label(if letters { sf::LETTERS } else { sf::TEXT22 }, rect(262, y + 33, 150, 30), v, fg, vbg, 4, 0);
-    sf::label(sf::TEXT22, rect(421, y + 36, 50, 26), unit, fg, bg, 1, 0);
+    label_tf(if letters { sf::LETTERS } else { sf::TEXT22 }, rect(262, y + 33, 150, 30), v, fg, vbg, 4, 0);
+    label_tf(sf::TEXT22, rect(421, y + 36, 50, 26), unit, fg, bg, 1, 0);
 }
 
 /// Note at the right of box `k`'s name row ("" clears it).
 fn gen_box_note(k: usize, note: &str, fg: Color, bg: Color) {
-    sf::label(sf::F14, rect(360, GEN_BOX_Y[k] + 3, 112, 26), note, fg, bg, 4, 1);
+    label_tf(sf::F14, rect(360, GEN_BOX_Y[k] + 3, 112, 26), note, fg, bg, 4, 1);
 }
 
 /// Box `k` (0..3; 4 = the wave drop-down) normal or pressed (K_SEL, the
@@ -2896,12 +2967,12 @@ pub fn gen_status(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
     let bc = battery_color(st);
-    sf::label(sf::F21, rect(186, 6, 120, 24), hms(&mut t, st.uptime_s), STATUS_FG, G_BAR, 1, -1);
+    label_tf(sf::F21, rect(186, 6, 120, 24), hms(&mut t, st.uptime_s), STATUS_FG, G_BAR, 1, -1);
     status_rec(st, G_BAR, 11);
-    sf::label(sf::LOCK, rect(327, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
-    sf::label(sf::SAVE_BT, rect(390, 2, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
-    sf::label(sf::SAVE_BT, rect(412, 2, 16, 32), usb_glyph(st), STATUS_FG, G_BAR, 1, 0);
-    sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
+    label_tf(sf::LOCK, rect(327, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
+    label_tf(sf::SAVE_BT, rect(390, 2, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
+    label_tf(sf::SAVE_BT, rect(412, 2, 16, 32), usb_glyph(st), STATUS_FG, G_BAR, 1, 0);
+    label_tf(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
 }
 
 /// `gen_preview` in strips: the wave the table holds (its `sel` + 1, the
@@ -3021,7 +3092,7 @@ fn libsin(x: f32) -> f32 {
 pub fn gen_values(g: &gen::Gen) {
     let s = &g.s;
     // Top bar: RUN/STOP (output state).
-    sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 1, 0);
+    label_tf(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 1, 0);
     gen_wave_box(s.wave, G_BOX);
     gen_preview(s.wave, g.out.duty);
     for k in 0..4 {
@@ -3172,8 +3243,8 @@ pub fn keypad_input(freq: bool, input: &str, unit: &str, sel: bool) {
     } else {
         // 300..439: room for "-12.345" (112 px); titles end before 300.
         let (fg, bg) = if sel { (STATUS_FG, K_SEL) } else { (0x0000, K_PANEL) };
-        sf::label(sf::LETTERS, rect(300, 104, 139, 34), input, fg, bg, 4, 0);
-        sf::label(sf::TEXT22, rect(446, 110, 30, 22), unit, 0x0000, K_PANEL, 1, 0);
+        label_tf(sf::LETTERS, rect(300, 104, 139, 34), input, fg, bg, 4, 0);
+        label_tf(sf::TEXT22, rect(446, 110, 30, 22), unit, 0x0000, K_PANEL, 1, 0);
     }
 }
 

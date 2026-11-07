@@ -149,12 +149,15 @@ pub fn energy_reset() {
 #[inline(never)]
 fn confirm(title: &str, body: &str) {
     let b = BOX;
-    centred((b.0, b.1, b.2, 40), title, FG, TITLE_BG);
-    centred((b.0, b.1 + 40, b.2, 60), body, FG, BODY_BG);
-    lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
-    frame(b, FRAME);
-    button(NO, crate::tr!("No"), BTN);
-    button(YES, crate::tr!("Yes"), BTN_RED);
+    // In one go, without tearing (lcd::tear_free).
+    lcd::tear_free(b.0 as i16, b.1 as i16, b.2 as i16, b.3 as i16, &mut || {
+        centred((b.0, b.1, b.2, 40), title, FG, TITLE_BG);
+        centred((b.0, b.1 + 40, b.2, 60), body, FG, BODY_BG);
+        lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
+        frame(b, FRAME);
+        button(NO, crate::tr!("No"), BTN);
+        button(YES, crate::tr!("Yes"), BTN_RED);
+    });
 }
 
 /// Draw the Reset settings confirm; hit test = `power_off_hit`.
@@ -246,8 +249,10 @@ pub fn toast(s: &str, ok: bool) {
     let st = log_state();
     st.hold |= st.shown;
     let bg = if ok { OK_BG } else { ERR_BG };
-    centred_sp(r, s, FG, bg, 2);
-    frame(r, FRAME);
+    lcd::tear_free(r.0 as i16, r.1 as i16, r.2 as i16, r.3 as i16, &mut || {
+        centred_sp(r, s, FG, bg, 2);
+        frame(r, FRAME);
+    });
 }
 
 /// The toast went (expired or dismissed; app.rs): over the logger panel,

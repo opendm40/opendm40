@@ -281,6 +281,10 @@ fn fft() -> &'static mut crate::fft::Fft {
     unsafe { &mut *core::ptr::addr_of_mut!(FFT) }
 }
 
+pub(super) fn fft_busy() -> bool {
+    fft().busy()
+}
+
 /// The FFT work buffer (diskbuf.rs `fft_work`: the disk buffer arena;
 /// `fresh` = a new job's load). None while a disk job holds it, or a disk
 /// user wrote it since the load: the job in flight, if any, is dropped (the
@@ -341,6 +345,9 @@ pub(super) struct Sp {
     /// was drawn grey, bit 1: the math label, bit 7: pending).
     pub uncover: u8,
     pressed_cell: Option<u8>,
+    /// Popup draws so far (wrapping): a tap that drew it already needs no
+    /// second draw for its released cell.
+    popup_draws: u8,
     slider: Option<u8>,
     sampling: bool,
     /// Pinch bubble shown / to be (re)drawn.
@@ -422,6 +429,7 @@ impl Sp {
             popup: su::Popup::None,
             uncover: 0,
             pressed_cell: None,
+            popup_draws: 0,
             slider: None,
             sampling: false,
             bubble: false,
@@ -2417,10 +2425,23 @@ impl App {
     }
 
     pub(super) fn sp_popup_draw(&mut self) {
-        // The box's fills wait for its widgets (lcd.rs "deferred fills").
-        crate::lcd::defer_start();
+        self.sp.popup_draws = self.sp.popup_draws.wrapping_add(1);
         let v = self.sp_popvals();
-        su::draw_popup(self.sp.popup, &v);
+        let p = self.sp.popup;
+        // In strips over its box, behind the scan when that fits
+        // (lcd::tear_free; scanline.rs: the MF box does not, ~35..137 ms).
+        // Directly, the box's fills waiting for its widgets (lcd.rs
+        // "deferred fills"), without a box (the timebase list), inside a
+        // page strip pass or while the AD2 stream runs (the Wave view).
+        match su::popup_box(p) {
+            Some(r) if !crate::lcd::in_strip() && !crate::hy3131::streaming() => {
+                crate::lcd::tear_free(r.x, r.y, r.w, r.h, &mut || su::draw_popup(p, &v));
+            }
+            _ => {
+                crate::lcd::defer_start();
+                su::draw_popup(p, &v);
+            }
+        }
     }
 
     /// Open (or switch) the popup; the CH1 / math label turns grey.
@@ -2546,6 +2567,7 @@ impl App {
                 self.beep(now, 30);
                 let (x, y) = (p.x as i16, p.y as i16);
                 let had_press = self.sp.pressed_cell.take().is_some();
+                let draws = self.sp.popup_draws;
                 match self.sp.popup {
                     // A toast from the tap (CH2 refused, "Generator is
                     // off", ...) waits for the popup's repaint (`toast_hold`).
@@ -2584,7 +2606,7 @@ impl App {
 
                     su::Popup::None => {}
                 }
-                if had_press && self.sp.popup != su::Popup::None && !self.redraw {
+                if had_press && self.sp.popup_draws == draws && self.sp.popup != su::Popup::None && !self.redraw {
                     self.sp_popup_draw();
                 }
             }

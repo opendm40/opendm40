@@ -129,6 +129,15 @@ pub mod probe {
             unsafe { (*core::ptr::addr_of_mut!(crate::CLIPS)).push(m) };
         }
     }
+    /// lcd::tear_free's box: from `on` to the matching off, the drawing
+    /// must write every pixel of `r` (x, y, w, h) and none outside it
+    /// (the strip pass it stands for on the device sends the box only,
+    /// and an unwritten pixel would come from the strip buffer).
+    pub fn tear_free(on: bool, r: (i16, i16, i16, i16)) {
+        if let Some(m) = crate::host::tear_free(on, r) {
+            unsafe { (*core::ptr::addr_of_mut!(crate::CLIPS)).push(m) };
+        }
+    }
     pub fn begin(kind: u8, bg: u16) {
         crate::host::begin(kind, bg)
     }
