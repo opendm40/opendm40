@@ -2772,6 +2772,20 @@ impl App {
             su::MfHit::Ch2Step(up) => {
                 self.ch2_step(up, now);
             }
+            su::MfHit::GenColour => {
+                // The next GEN colour (not CH1's): the whole page again (as
+                // CH2's).
+                su::set_gen_colour(su::next_gen_colour(self.sp.colour));
+                self.sp_settings_changed();
+                self.redraw = true;
+            }
+            su::MfHit::Ch2Colour => {
+                // The next CH2 colour (not CH1's): the whole page again (trace, marker,
+                // DMM block, CH2 cells; the popup over it).
+                su::set_ch2_colour(su::next_ch2_colour(self.sp.colour));
+                self.sp_settings_changed();
+                self.redraw = true;
+            }
             su::MfHit::Ch2Func(amps) => self.ch2_func(clk, amps),
             su::MfHit::GenTrace(on) => self.gen_trace_set(on, now),
             su::MfHit::PCond(c) => {
@@ -2839,14 +2853,14 @@ impl App {
                     self.sp_settings_changed();
                 }
             }
-            su::SideHit::Colour(i) => self.sp.colour = i.min(8),
+            su::SideHit::Colour(i) => self.sp.colour = i.min(su::NPAL as u8 - 1),
             su::SideHit::MathMode(md) => {
                 if md != self.sp.math.mode {
                     self.sp.math.mode = md;
                     self.sp_math_changed(true);
                 }
             }
-            su::SideHit::MathColour(i) => self.sp.math.colour = i.min(8),
+            su::SideHit::MathColour(i) => self.sp.math.colour = i.min(su::NPAL as u8 - 1),
             su::SideHit::HzDiv(i) => {
                 self.sp.math.hz = i.min(3);
                 self.sp_math();
@@ -3133,6 +3147,11 @@ impl App {
             | (self.sp.ch1_off as u32) << 13
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
+        // [5] bits 16..19: the CH2 colour (scope_ui::CH2_COLOUR, 0 = magenta).
+        p[5] |= (su::ch2_colour_idx() as u32 & 0xF) << 16;
+        // [5] bits 20..23: the GEN colour (PALETTE index XOR its default
+        // cyan, so 0 = cyan in older records).
+        p[5] |= ((su::gen_colour_idx() ^ su::GEN_COLOUR_DEFAULT) as u32 & 0xF) << 20;
         // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
         p[5] |= self.ch2.pos as u16 as u32;
     }
@@ -3144,7 +3163,7 @@ impl App {
         self.sp.math = Math {
             on: w & 1 != 0,
             mode: if w >> 1 & 1 != 0 { 6 } else { 5 },
-            colour: ((w >> 2 & 0xF) as u8 ^ d.colour).min(8),
+            colour: ((w >> 2 & 0xF) as u8 ^ d.colour).min(su::NPAL as u8 - 1),
             db: ((w >> 6 & 0xF) as u8 ^ d.db).min(12),
             vdiv: ((w >> 10 & 0x1F) as u8 ^ d.vdiv).min(21),
             vrms: w >> 15 & 1 != 0,
@@ -3162,6 +3181,8 @@ impl App {
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
+        su::set_ch2_colour(((p[5] >> 16 & 0xF) as u8).min(su::NPAL as u8));
+        su::set_gen_colour(((p[5] >> 20 & 0xF) as u8 ^ su::GEN_COLOUR_DEFAULT).min(su::NPAL as u8 - 1));
         self.sp.ch1_cur = p[3] >> 14 & 1 != 0;
         self.sp.ch1_off = p[3] >> 13 & 1 != 0;
         self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
@@ -3174,7 +3195,7 @@ impl App {
 
     pub(super) fn sp_restore(&mut self, p1: u32, p11: u32) {
         let s = &mut self.sp;
-        s.colour = ((p1 >> 17 & 0xF) ^ 2).min(8) as u8;
+        s.colour = ((p1 >> 17 & 0xF) ^ 2).min(su::NPAL as u32 - 1) as u8;
         s.bright = 100 - (p1 >> 21 & 0x7F).min(100) as u8;
         s.swipes = p11 >> 3 & 1 != 0;
         s.persist = (p11 >> 4 & 3) as u8;

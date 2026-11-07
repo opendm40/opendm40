@@ -7,6 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
 - **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
 - **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
 - **Scope:** a second tap on the CH1 title with its popup open hides CH1.

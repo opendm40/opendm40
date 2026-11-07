@@ -1343,7 +1343,7 @@ in the left or right half of the graph steps), **Off**.
     readings, not the hardware. **Type**: **Vol**, or **Cur** for a current
     probe or shunt: CH1's values are in A, and the probe factor means A per
     volt at the input (×10 reads a 100 mV/A clamp). Kept over a restart.
-  - **Color** of the trace.
+  - **Color** of the trace (the stock nine and cyan; MATH's the same).
 - Tap the **CH1** title again with the popup open to hide CH1: no trace or
   **A** marker, the block dimmed; the trigger, measurements and MATH keep
   working. Tap the dimmed title to show it again. Kept over a restart.
@@ -1555,7 +1555,7 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 **Brightness** and **Grid** intensity; **GEN trace** on / off.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
-in cyan under CH1, on CH1's position and its own V/div (the **GEN** block's
+in cyan (**Color** beside it, a tap: the next one, never CH1's) under CH1, on CH1's position and its own V/div (the **GEN** block's
 magnifiers; it starts at CH1's): computed from the generator's settings and
 timers, not measured (the trace is the ideal waveform; a probe on the output
 shows the real one). It is not drawn in roll mode, zoomed out past the record, or
@@ -1565,7 +1565,8 @@ not use the trigger hardware.
 **CH2 (DMM)** draws the multimeter's input as a second channel (magenta)
 over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
 signal, alongside the scope. Its on / off and V/div (A/div) are also on the
-**DMM** block. Drag its **2** marker on the left to move the trace (long
+**DMM** block (**Color** beside it, a tap: the next one, never CH1's; magenta by
+default). Drag its **2** marker on the left to move the trace (long
 press: back to the centre); kept in the settings. **V** / **A** beside **On** /
 **Off** puts the multimeter into that function (V, or AC A) in one tap; neither
 is selected in another function, and it does nothing in the Wave view or during
