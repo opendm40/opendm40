@@ -942,10 +942,11 @@ impl App {
         }
         // The digital phosphor (Persist DPO / HOT): CH1 from its counts, fed
         // with each fresh frame's rows; a preview (drag, pinch), roll and
-        // STOP show the plain trace (and forget the counts).
+        // STOP show the plain trace (and forget the counts), as while a data
+        // logger session (CH2 on, LOG:STATe ON) has the counts' memory.
         let fresh = core::mem::replace(&mut c.fresh, false);
         let ident = d_pos == 0 && hpos == c.hpos && ky == 1.0 && kx == 1.0;
-        let dm = if crate::scope_dpo::ENABLED && self.sp.persist >= 4 && ident && !self.scope.rolling() && s.run { self.sp.persist - 3 } else { 0 };
+        let dm = if crate::scope_dpo::ENABLED && self.sp.persist >= 4 && ident && !self.scope.rolling() && s.run && crate::scope_dpo::ready() { self.sp.persist - 3 } else { 0 };
         if dm != 0 {
             if fresh {
                 crate::scope_dpo::frame(&g.tr, h as i16);

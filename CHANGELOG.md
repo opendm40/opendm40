@@ -7,7 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
-- **Scope: digital phosphor, MF > Display > Persist DPO / HOT:** CH1 bright where the trace runs most often, dim where it goes rarely ([manual](docs/manual/README.md#display-settings)). Its memory shortens the scope record to 36 864 samples (from 44 032; 55 688 from 65 520 at 100 ms/div and slower).
+- **Scope: digital phosphor, MF > Display > Persist DPO / HOT:** CH1 bright where the trace runs most often, dim where it goes rarely ([manual](docs/manual/README.md#display-settings)). With CH2 on or the data logger running, CH1 is drawn as a plain trace.
 
 - Continuity and diode: the green band says **BEEP**, not **SHORT**: in continuity it comes on below about 67 Ω, which is not always a short. Ω has no beep and no band.
 

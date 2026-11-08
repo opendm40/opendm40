@@ -2292,7 +2292,9 @@ impl Graph {
             self.ps = [EMPTY; NCOL];
             self.dpo = 0;
         }
-        let dm = self.dpo;
+        // The phosphor's memory may have gone to a logger session
+        // (scope_dpo::ready): the plain trace then (sp_render follows).
+        let dm = if self.dpo != 0 && crate::scope_dpo::ready() { self.dpo } else { 0 };
         if dm == 0 && crate::scope_dpo::any() {
             crate::scope_dpo::discard();
         }
@@ -3688,6 +3690,9 @@ pub enum MfHit {
     Outside,
 }
 
+/// A tap only: region C (.cold).
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".cold")]
 pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
     let tab = tab.min(4);
     let hh = 40 + MF_PAGE_H[tab as usize];
