@@ -6,6 +6,7 @@
 #                     SPI disk as the USB LUN, no generated volume)
 #   fatren-dry-run, keep-screen
 #   memprobe          DBG:PEEK? / POKE / MTEST? ... (src/memprobe.rs)
+#   vdisk-one         the one USB disk mode (src/vwrite.rs "one mode")
 #   dev               the developer image (./build.sh --dev, feature dbg-dev)
 # Each one is a full build.sh run (link asserts: TCM stack, SRAM, regions
 # A2 / B / C; stackdepth.py --check 20480; pack + whole 128-byte blocks) into
@@ -33,6 +34,7 @@ run spi-disk --no-default-features --features ad2-isr
 run fatren-dry-run --features fatren-dry-run
 run keep-screen --features keep-screen
 run memprobe --features memprobe
+run vdisk-one --features vdisk-one
 run dev --dev
 [ -f opendm40.bin ] && echo "opendm40.bin untouched: $(stat -c %y opendm40.bin)"
 if [ $fail = 0 ]; then echo PASS; else echo FAIL; exit 1; fi

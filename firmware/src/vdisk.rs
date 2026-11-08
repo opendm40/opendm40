@@ -70,6 +70,18 @@
 //! changes only by the host's own writes (tomb flags `T_*` in the table,
 //! vwrite.rs records) until the session ends.
 //!
+//! One mode (feature `vdisk-one`, prototype): no read-only mode, no
+//! freeze. The meter keeps adding files while a host has the volume: a new
+//! file gets a fresh slot and clusters from the high-water mark, below
+//! HOST_LO; every cluster there without a file reads as bad (0xFFF7), so a
+//! host never allocates it; the last HOST_CL clusters (4 MiB) are free for
+//! the host (a firmware file, its own folders). Once a host has read the
+//! volume (`SEEN`), a file deleted on the meter stays as a tombstone (its
+//! slot 0xE5, its clusters bad) and nothing is renumbered until the next
+//! bus reset, which compacts at once. The media change goes out only on
+//! TEST UNIT READY after vwrite::UA_QUIET_MS without a host write
+//! (`UA_MODE`). The host's writes: vwrite.rs "one mode".
+//!
 //! RAM: the file table (MAX_VF x 16 bytes) and the built-in table in SRAM
 //! (.sram_bss / .dmabuf), the CSV / BMP read cursors in .bss.
 //!
@@ -143,6 +155,34 @@ pub(crate) fn id_dir(id: u16) -> usize {
 }
 /// Slots of a one-cluster directory.
 const SLOTS: u32 = CB / 32;
+
+/// One USB disk mode (feature `vdisk-one`, module text "One mode").
+pub(crate) const ONE: bool = cfg!(feature = "vdisk-one");
+/// One mode: the clusters offered to the host (the volume's last HOST_CL,
+/// 4 MiB: a firmware file, the hosts' own folders); the meter's files are
+/// allocated below HOST_LO only, and every cluster there that holds no file
+/// reads as a bad cluster (0xFFF7), so a host never allocates it.
+pub(crate) const HOST_CL: u32 = 128;
+pub(crate) const HOST_LO: u32 = if ONE { CLUSTERS + 2 - HOST_CL } else { CLUSTERS + 2 };
+/// One mode: a host has read the volume since the last bus reset: no file
+/// leaves the table (a tombstone instead) and nothing is renumbered until
+/// the next bus reset.
+static SEEN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// One mode, DBG:VDISK:UA: which command gets the media-change UNIT
+/// ATTENTION after the meter added / removed a file: 0 none (the host sees
+/// it at the next plug), 1 TEST UNIT READY only (default: a READ / WRITE
+/// never fails with it), 2 any command; either only after
+/// vwrite::UA_QUIET_MS without a host write.
+pub static UA_MODE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(1);
+/// One mode, DBG:VDISK:UA?: TEST UNIT READYs seen, media-change UNIT
+/// ATTENTIONs sent, commands that found one due but held it back.
+pub static UA_STAT: [core::sync::atomic::AtomicU32; 3] = [const { core::sync::atomic::AtomicU32::new(0) }; 3];
+
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+#[inline(always)]
+fn seen() -> bool {
+    ONE && SEEN.load(core::sync::atomic::Ordering::Relaxed)
+}
 /// Files of LOGS / SCOPE / SHOTS at most (16 bytes of SRAM each).
 pub const MAX_VF: usize = 400;
 
@@ -268,6 +308,10 @@ pub(crate) const T_SRC: u16 = 1 << 14;
 pub(crate) const T_MOVED: u16 = 1 << 15;
 /// Every flag.
 pub(crate) const T_ALL: u16 = T_DIR | T_FAT | T_SRC | T_MOVED;
+/// One mode: a tombstone (the SPI file is gone, the host may have seen
+/// it): its slot shows the entry with 0xE5, its clusters bad (or free if
+/// the host freed them, T_FAT), kept until the next bus reset.
+pub(crate) const T_GONE: u16 = T_DIR | T_SRC;
 
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn kind(id: u16) -> usize {
@@ -495,6 +539,15 @@ fn remove(t: &mut Tab, i: usize) {
 /// Renumber every file from the start: slots 2.. per directory, clusters
 /// from dyn0, in table order. True if anything moved.
 fn compact(t: &mut Tab) -> bool {
+    if ONE {
+        // Tombstones go (their SPI files are gone); a host delete still
+        // due (T_DIR | T_FAT without T_SRC) stays for `vwrite::poll`.
+        for i in (0..t.n).rev() {
+            if t.e[i].id & T_SRC != 0 {
+                remove(t, i);
+            }
+        }
+    }
     let mut c = st_dyn0();
     let mut sl = [2u16; 3];
     let mut moved = false;
@@ -518,7 +571,7 @@ fn compact(t: &mut Tab) -> bool {
 fn add_new(t: &mut Tab, exclude: Option<[u8; 11]>) -> (u32, u32, u32) {
     let (mut added, mut out, mut full) = (0u32, 0u32, 0u32);
     scan_spi(exclude, &mut |id, src, ssize| {
-        if t.e[..t.n].iter().any(|e| e.id & ID == id) {
+        if t.e[..t.n].iter().any(|e| e.id & ID == id && !(ONE && e.id & T_SRC != 0)) {
             return; // present (or a duplicate number: the first one stays)
         }
         let Some(vsize) = vsize_of(id, src, ssize) else { return };
@@ -528,7 +581,7 @@ fn add_new(t: &mut Tab, exclude: Option<[u8; 11]>) -> (u32, u32, u32) {
             full += 1;
             return;
         }
-        if t.slot_hw[k] as u32 >= SLOTS || t.hw + need > CLUSTERS + 2 {
+        if t.slot_hw[k] as u32 >= SLOTS || t.hw + need > HOST_LO {
             out += 1;
             return;
         }
@@ -562,7 +615,7 @@ pub fn refresh(exclude: Option<[u8; 11]>) -> usize {
     //    and size), drop the others.
     let mut seen = [0u32; MAX_VF.div_ceil(32)];
     let ok = scan_spi(exclude, &mut |id, src, ssize| {
-        if let Some(i) = t.e[..t.n].iter().position(|e| e.id & ID == id && e.src == src && e.ssize == ssize) {
+        if let Some(i) = t.e[..t.n].iter().position(|e| e.id & ID == id && e.src == src && e.ssize == ssize && !(ONE && e.id & T_SRC != 0)) {
             seen[i / 32] |= 1 << (i % 32);
         }
     });
@@ -572,13 +625,22 @@ pub fn refresh(exclude: Option<[u8; 11]>) -> usize {
     let mut changed = false;
     for i in (0..t.n).rev() {
         if seen[i / 32] & (1 << (i % 32)) == 0 {
+            if self::seen() {
+                // One mode, a host has the volume: a tombstone until the
+                // next bus reset (its slot and clusters are never reused).
+                if t.e[i].id & T_SRC == 0 {
+                    t.e[i].id |= T_GONE;
+                    changed = true;
+                }
+                continue;
+            }
             remove(t, i);
             changed = true;
         }
     }
     // 2. Compaction (after a bus reset, or files left out last time), only
     //    while no host has the volume locked.
-    let free = !crate::msc::host_mounted();
+    let free = if ONE { !self::seen() } else { !crate::msc::host_mounted() };
     if t.want_compact && free {
         changed |= compact(t);
     }
@@ -620,8 +682,13 @@ pub fn forget(name: &[u8; 11]) {
     let Some((k, num)) = ours(name) else { return };
     let t = tab();
     let id = (k as u16) << 10 | num;
-    if let Some(i) = t.e[..t.n].iter().position(|e| e.id & ID == id) {
-        if crate::vwrite::frozen() || t.e[i].id & T_ALL != 0 {
+    if let Some(i) = t.e[..t.n].iter().position(|e| e.id & ID == id && !(ONE && e.id & T_SRC != 0)) {
+        if ONE && (seen() || t.e[i].id & T_ALL != 0) {
+            // A tombstone: shown deleted, its clusters never reused while
+            // a host has the volume.
+            t.e[i].id |= T_GONE;
+            CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
+        } else if crate::vwrite::frozen() || t.e[i].id & T_ALL != 0 {
             // The host may hold it (or is deleting it): the entry stays as
             // the host knows it, its data reads zeros from now on.
             t.e[i].id |= T_SRC;
@@ -655,6 +722,9 @@ pub(crate) enum Owner {
     Fixed,
     /// Table entry `i`.
     Dyn(usize),
+    /// One mode: a cluster of the meter's region below HOST_LO holding no
+    /// file (shown bad, 0xFFF7).
+    Held,
     Free,
 }
 
@@ -669,6 +739,7 @@ pub(crate) fn owner(c: u32) -> Owner {
     let i = t.e[..t.n].partition_point(|e| e.vstart as u32 <= c);
     match i.checked_sub(1) {
         Some(j) if c < t.e[j].vstart as u32 + nclus(t.e[j].vsize) => Owner::Dyn(j),
+        _ if ONE && c < HOST_LO => Owner::Held,
         _ => Owner::Free,
     }
 }
@@ -677,7 +748,9 @@ pub(crate) fn owner(c: u32) -> Owner {
 /// host writes with it).
 pub(crate) fn dyn_entry(e: &VF, out: &mut [u8]) {
     out[..32].fill(0);
-    dirent(out, &vname(e.id), 0x01, e.vstart as u32, e.vsize);
+    // One mode: no read-only bit (the host may delete them; Windows
+    // Explorer clears the bit before a delete, Linux rm asks for it).
+    dirent(out, &vname(e.id), if ONE { 0x00 } else { 0x01 }, e.vstart as u32, e.vsize);
 }
 
 /// Which generated directory cluster `c` is: Some(kind) for LOGS / SCOPE /
@@ -701,9 +774,43 @@ pub fn on_bus_reset() {
     if state().is_some() {
         crate::vwrite::release_all(true);
         tab().want_compact = true;
+        if ONE {
+            // A new host has read nothing yet: renumber now (memory only),
+            // before its first READ; the tombstones go.
+            SEEN.store(false, core::sync::atomic::Ordering::Relaxed);
+            compact(tab());
+        }
         dlog::set_stale();
     }
     crate::vwrite::on_bus_reset();
+}
+
+/// One mode: the host ejected the medium (START STOP UNIT, msc.rs): its
+/// session ends (vwrite::release_all: files it moved to its trash are
+/// deleted, its own files and folders dropped).
+pub fn on_eject() {
+    if ONE && state().is_some() {
+        crate::vwrite::end_session();
+        dlog::set_stale();
+    }
+}
+
+/// The volume changed (vwrite.rs): the media-change UNIT ATTENTION is due.
+pub(crate) fn changed() {
+    CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// One mode: the host wrote a directory entry into slot `slot` of LOGS /
+/// SCOPE / SHOTS (`k`) where the meter has no file: the meter's next files
+/// go after it (vwrite.rs), so a host entry is never taken for a file of
+/// ours.
+pub(crate) fn hold_slot(k: usize, slot: u32) {
+    if ONE && state().is_some() && k < 3 && slot < SLOTS {
+        let t = tab();
+        if t.slot_hw[k] as u32 <= slot {
+            t.slot_hw[k] = slot as u16 + 1;
+        }
+    }
 }
 
 /// (files, next free cluster, files left out) for DBG / tests.
@@ -1028,6 +1135,9 @@ impl BlockDevice for VDisk {
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool {
         let t0 = rd_cyc();
+        if ONE {
+            SEEN.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
         let ok = self.read_block_in(lba, buf);
         let dt = rd_cyc().wrapping_sub(t0);
         use core::sync::atomic::Ordering::Relaxed;
@@ -1053,7 +1163,31 @@ impl BlockDevice for VDisk {
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn take_media_changed(&mut self) -> bool {
-        CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
+        let c = CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed);
+        if ONE && c {
+            UA_STAT[1].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        }
+        c
+    }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    fn media_change_now(&self, tur: bool) -> bool {
+        if !ONE {
+            return true;
+        }
+        let ok = match UA_MODE.load(core::sync::atomic::Ordering::Relaxed) {
+            0 => false,
+            1 => tur,
+            _ => true,
+        };
+        use core::sync::atomic::Ordering::Relaxed;
+        if tur {
+            UA_STAT[0].fetch_add(1, Relaxed);
+        }
+        let go = ok && crate::vwrite::host_quiet();
+        if !go && CHANGED.load(Relaxed) {
+            UA_STAT[2].fetch_add(1, Relaxed);
+        }
+        go
     }
 }
 
@@ -1136,6 +1270,13 @@ fn fat_entry(st: &State, c: u32) -> u16 {
         _ if c < st.dyn0 => chain(c, st.spi_start, SPI_BYTES).unwrap_or(0),
         _ => match crate::vwrite::pair(c) {
             Some(v) => v,
+            None if ONE => match at_cluster(tab(), c) {
+                Some(e) if e.id & T_FAT != 0 => 0,
+                Some(e) if e.id & T_SRC != 0 => 0xFFF7,
+                Some(e) => chain(c, e.vstart as u32, e.vsize).unwrap_or(0xFFF7),
+                None if c < HOST_LO => 0xFFF7,
+                None => 0,
+            },
             None => at_cluster(tab(), c).filter(|e| e.id & T_FAT == 0).and_then(|e| chain(c, e.vstart as u32, e.vsize)).unwrap_or(0),
         },
     }

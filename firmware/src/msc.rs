@@ -70,6 +70,13 @@ pub trait BlockDevice {
     fn media_change_immediate(&self) -> bool {
         false
     }
+    /// A media-change UNIT ATTENTION may go out with this command now
+    /// (`tur`: it is a TEST UNIT READY); false holds it for a later one
+    /// (vdisk.rs one mode: never on a READ / WRITE, never while the host
+    /// writes).
+    fn media_change_now(&self, _tur: bool) -> bool {
+        true
+    }
     /// INQUIRY product identification (16 characters).
     fn product(&self) -> &'static [u8; 16] {
         b"DM40 disk       "
@@ -452,7 +459,7 @@ fn handle<B: UsbBus>(
         // After a host load (one UNIT ATTENTION, whatever else is pending).
         let loaded = LOADED_UA.get(lun as usize).is_some_and(|u| u.swap(false, o));
         let ua = loaded | if dev.media_change_immediate() {
-            dev.take_media_changed() | EJECT_UA.swap(false, o)
+            (dev.media_change_now(matches!(kind, ScsiCommand::TestUnitReady)) && dev.take_media_changed()) | EJECT_UA.swap(false, o)
         } else if !LOCKED.get(lun as usize).is_some_and(|l| l.load(o)) {
             if dev.read_only() { dev.take_media_changed() } else { crate::screenshot::MEDIUM_CHANGED.swap(false, o) }
         } else {
@@ -729,6 +736,10 @@ fn handle<B: UsbBus>(
                     // re-read it (06/28/00); a load of a present one: nothing.
                     if load && e.load(o) {
                         u.store(true, o);
+                    }
+                    #[cfg(feature = "vdisk-one")]
+                    if !load && !e.load(o) && dev.media_change_immediate() {
+                        crate::vdisk::on_eject();
                     }
                     e.store(!load, o);
                 }

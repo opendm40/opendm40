@@ -130,6 +130,9 @@ SECTIONS
          * setfile::poll is inline(always) into main.rs `run`: region B. */
         *(.text.*8opendm407setfile*);
         *(.text.*8opendm405vdisk*);
+        /* vwrite.rs one mode (feature vdisk-one): the host-write classifier
+         * (a host WRITE only; vdisk::write_block above is .cold too). */
+        *(.text.vwrite_cold*);
         *(.text.*8opendm406upload*);
         *(.text.*8opendm405hyspi*);
         /* NOT ad2exp (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's dc_enter

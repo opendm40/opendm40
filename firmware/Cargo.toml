@@ -43,6 +43,12 @@ ad2-isr = []
 # MCU memory and the SPI-disk files (src/vdisk.rs: LOGS / SCOPE / SHOTS /
 # INFO / DEBUG). Default; without it the LUN is the writable SPI disk.
 vdisk = []
+# One USB disk mode (prototype, not default): the generated volume is always
+# writable (a firmware file, deletes in LOGS / SCOPE / SHOTS; everything else
+# the host writes is dropped at the eject / re-plug) and the meter keeps
+# adding files while it is connected (src/vdisk.rs, src/vwrite.rs "One
+# mode"). Replaces Settings > Other "USB disk" (Files live / PC can edit).
+vdisk-one = ["vdisk"]
 # fatren (src/fatren.rs: after a boot, rename the installed dm40*.bin on the
 # SPI FAT to _DM40PRV.BIN; its exact condition is owned by fatren.rs) only
 # reports what it would do.
