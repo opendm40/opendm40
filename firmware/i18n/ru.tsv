@@ -24,7 +24,7 @@ Swipe	Смахивание	M
 Press effect	Эфф. нажатия	M
 Tap step	Шаг касания	M
 Help	Справка	M
-Jack alerts	Предупр. гнёзд	M
+Jack alerts	Контроль гнёзд	M
 Danger alarm	Сигн. опасности	M
 USB disk	USB-диск	M
 Burden voltage	Падение напр.	M
@@ -241,8 +241,18 @@ Deleting	Удаление	M
 Selection cleared	Выбор сброшен	M
 Files changed	Файлы изменились	M
 Some skipped	Часть пропущена	M
+Null off	Null выкл	M
+Null: short the leads first	Null: сначала замкните щупы	M
+off	выкл	M
+Continuity beep	Звук прозвонки	M
+Always	Всегда	M
+With volume	По громкости	M
 Low battery! Please charge	Зарядите батарею!	M
 Battery empty: off in 30 s	Батарея пуста: выкл. 30 с	O
 Battery empty: off in 20 s	Батарея пуста: выкл. 20 с	O
 Battery empty: off in 10 s	Батарея пуста: выкл. 10 с	O
 Unstable: unplug USB?	Нестабильно: отключите USB?	M
+Type	Тип	M
+Vol	Напр	M
+Cur	Ток	M
+Trigger source: CH1	Источник триггера: CH1	M

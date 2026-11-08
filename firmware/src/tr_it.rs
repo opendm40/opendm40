@@ -24,6 +24,7 @@ macro_rules! tr {
     ("Accuracy") => { "Precisione" };
     ("Again") => { "Ripeti" };
     ("Alerts") => { "Avvisi" };
+    ("Always") => { "Sempre" };
     ("Analog power") => { "Alim. analog." };
     ("Arm") => { "Arma" };
     ("Auto (per view)") => { "Auto (vista)" };
@@ -49,8 +50,10 @@ macro_rules! tr {
     ("Clear") => { "Cancella" };
     ("Clear limits") => { "Azzera limiti" };
     ("Color") => { "Colore" };
+    ("Continuity beep") => { "Bip continuit\u{1}" };
     ("Corners") => { "Angoli" };
     ("Coupling") => { "Accopp." };
+    ("Cur") => { "Corr" };
     ("Current Settings") => { "Impost. corrente" };
     ("Current in A jack: check leads") => { "Corrente in A: vedi puntali" };
     ("Current too high: reduce it") => { "Corrente alta: riducila" };
@@ -106,7 +109,7 @@ macro_rules! tr {
     ("Install it now?") => { "Installare ora?" };
     ("Installing firmware...") => { "Installazione..." };
     ("Interval") => { "Intervallo" };
-    ("Jack alerts") => { "Avvisi boccole" };
+    ("Jack alerts") => { "Boccole" };
     ("Key/alert volume") => { "Volume tasti" };
     ("Lead from V/ohm jack to A") => { "Puntale da V/\u{3a9} ad A" };
     ("Limits") => { "Limiti" };
@@ -134,6 +137,7 @@ macro_rules! tr {
     ("No ohm reading") => { "Nessuna lettura \u{3a9}" };
     ("No screenshots or logs") => { "Nessuna schermata o log" };
     ("Normal") => { "Normale" };
+    ("Null: short the leads first") => { "Null: prima cortocircuita i puntali" };
     ("OFF (stock)") => { "OFF (orig.)" };
     ("OL: no path from V to A") => { "OL: circuito aperto V-A" };
     ("Off (stock)") => { "Off (orig.)" };
@@ -202,7 +206,9 @@ macro_rules! tr {
     ("Touch calibration") => { "Calibrazione tocco" };
     ("Touch test") => { "Test tocco" };
     ("Triangle") => { "Triangolo" };
+    ("Trigger source: CH1") => { "Sorgente trigger: CH1" };
     ("Try again") => { "Riprova" };
+    ("Type") => { "Tipo" };
     ("Type:") => { "Tipo:" };
     ("USB disk") => { "Disco USB" };
     ("Unstable: unplug USB?") => { "Instabile: scollegare USB?" };
@@ -211,6 +217,7 @@ macro_rules! tr {
     ("Upper = reading") => { "Sup. = lettura" };
     ("Upper limit") => { "Limite sup." };
     ("Vendor") => { "Produttore" };
+    ("Vol") => { "Tens" };
     ("Voltage Settings") => { "Impost. tensione" };
     ("Voltage on V jack, no current") => { "Tensione su V, no corrente" };
     ("Voltage on circuit - power off") => { "Togliere tensione al circuito" };
@@ -218,6 +225,7 @@ macro_rules! tr {
     ("Width:") => { "Larghezza:" };
     ("Window") => { "Finestra" };
     ("Wiring") => { "Schema" };
+    ("With volume") => { "Con il volume" };
     ("Yes") => { "S\u{2}" };
     ("expect ~48 \u{3a9}") => { "attesi ~48 \u{3a9}" };
     ("nothing else connected") => { "nient'altro collegato" };
@@ -248,6 +256,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Accuracy", "Precisione"),
     ("Again", "Ripeti"),
     ("Alerts", "Avvisi"),
+    ("Always", "Sempre"),
     ("Analog power", "Alim. analog."),
     ("Arm", "Arma"),
     ("Auto (per view)", "Auto (vista)"),
@@ -273,8 +282,10 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Clear", "Cancella"),
     ("Clear limits", "Azzera limiti"),
     ("Color", "Colore"),
+    ("Continuity beep", "Bip continuit\u{1}"),
     ("Corners", "Angoli"),
     ("Coupling", "Accopp."),
+    ("Cur", "Corr"),
     ("Current Settings", "Impost. corrente"),
     ("Current in A jack: check leads", "Corrente in A: vedi puntali"),
     ("Current too high: reduce it", "Corrente alta: riducila"),
@@ -330,7 +341,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Install it now?", "Installare ora?"),
     ("Installing firmware...", "Installazione..."),
     ("Interval", "Intervallo"),
-    ("Jack alerts", "Avvisi boccole"),
+    ("Jack alerts", "Boccole"),
     ("Key/alert volume", "Volume tasti"),
     ("Lead from V/ohm jack to A", "Puntale da V/\u{3a9} ad A"),
     ("Limits", "Limiti"),
@@ -358,6 +369,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("No ohm reading", "Nessuna lettura \u{3a9}"),
     ("No screenshots or logs", "Nessuna schermata o log"),
     ("Normal", "Normale"),
+    ("Null: short the leads first", "Null: prima cortocircuita i puntali"),
     ("OFF (stock)", "OFF (orig.)"),
     ("OL: no path from V to A", "OL: circuito aperto V-A"),
     ("Off (stock)", "Off (orig.)"),
@@ -426,7 +438,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Touch calibration", "Calibrazione tocco"),
     ("Touch test", "Test tocco"),
     ("Triangle", "Triangolo"),
+    ("Trigger source: CH1", "Sorgente trigger: CH1"),
     ("Try again", "Riprova"),
+    ("Type", "Tipo"),
     ("Type:", "Tipo:"),
     ("USB disk", "Disco USB"),
     ("Unstable: unplug USB?", "Instabile: scollegare USB?"),
@@ -435,6 +449,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Upper = reading", "Sup. = lettura"),
     ("Upper limit", "Limite sup."),
     ("Vendor", "Produttore"),
+    ("Vol", "Tens"),
     ("Voltage Settings", "Impost. tensione"),
     ("Voltage on V jack, no current", "Tensione su V, no corrente"),
     ("Voltage on circuit - power off", "Togliere tensione al circuito"),
@@ -442,6 +457,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Width:", "Larghezza:"),
     ("Window", "Finestra"),
     ("Wiring", "Schema"),
+    ("With volume", "Con il volume"),
     ("Yes", "S\u{2}"),
     ("expect ~48 \u{3a9}", "attesi ~48 \u{3a9}"),
     ("nothing else connected", "nient'altro collegato"),

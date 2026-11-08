@@ -68,6 +68,10 @@ mod hy3131_tables;
 mod lcd;
 #[path = "../../src/meter.rs"]
 mod meter;
+// The DMM CH2 store (scope.rs: the CH2 trigger source).
+#[allow(dead_code, static_mut_refs)]
+#[path = "../../src/scope_ch2.rs"]
+mod scope_ch2;
 #[path = "../../src/scope.rs"]
 mod scope;
 #[path = "../../src/scope_meas.rs"]
@@ -1129,7 +1133,7 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
         (ui::S_SMOOTH, crate::tr!("OFF")), (ui::S_DMM_ROW, crate::tr!("Bargraph")), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, crate::tr!("Off (stock)")),
         (ui::S_PRESS, crate::tr!("ON")), (ui::S_TAP_STEP, crate::tr!("Corners")), (ui::S_JACK, crate::tr!("ON")), (ui::S_ALARM, crate::tr!("Loud")),
         (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, crate::tr!("OFF (stock)")), (ui::S_ACC, crate::tr!("ON")), (ui::S_OHM_NEG, crate::tr!("OFF (stock)")),
-        (ui::S_REMEMBER, crate::tr!("OFF")),
+        (ui::S_REMEMBER, crate::tr!("OFF")), (ui::S_CONT, crate::tr!("With volume")),
     ] {
         v[id as usize] = t;
     }
@@ -1147,6 +1151,7 @@ fn set_vals_worst() -> Vec<&'static str> {
         (ui::S_DMM_ROW, crate::tr!("Bargraph")), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, crate::tr!("OFF (stock)")),
         (ui::S_TAP_STEP, crate::tr!("Halves (stock)")), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, crate::tr!("Volume")),
         (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, crate::tr!("OFF (stock)")),
+        (ui::S_CONT, crate::tr!("With volume")),
     ])
 }
 
@@ -3820,7 +3825,15 @@ fn main() {
         // selected, the DMM page with the tag on the ohm button.
         host::reset(0);
         ui::range_page(Button::Ohm, Some(7), 1, None);
+        ui::ohm_null_button(0.0);
+        ck.check_opts("range/ohm-null-off", &page_regions, false);
         save(&out, "m07-range-ohm-on");
+        // Ohm null on (Resistor Settings "Null"): the button with its value.
+        host::reset(0);
+        ui::range_page(Button::Ohm, Some(7), 0, None);
+        ui::ohm_null_button(0.123);
+        ck.check_opts("range/ohm-null-on", &page_regions, false);
+        save(&out, "m07c-range-ohm-null");
         host::reset(0);
         ui::range_page(Button::Cap, Some(7), 0, None);
         save(&out, "m07b-range-cap");
@@ -3878,6 +3891,23 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
+        // Ohm null on: "NULL" after the test current (600 ohm range, the
+        // widest current text with the "ON" variant off and on).
+        for on in [false, true] {
+            host::reset(0);
+            let (r, _) = find("ohm_k");
+            let r = Reading { range: 1, ..r };
+            let mut dv = ui::DmmView::new();
+            dv.label = None;
+            dv.ohm_null = true;
+            dv.draw_static(Button::Ohm, r.mode, false, on);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            ck.check(&format!("dmm-ohm-null/{}", on as u8), &dmm_page_regions);
+            if !on {
+                save(&out, "d06b-dmm-ohm-null");
+            }
+        }
         // ui-review #13: the stock >= 30 V red value (230 V AC).
         host::reset(0);
         let (r, _) = find("acv_230");
@@ -3983,7 +4013,7 @@ fn main() {
     }
     ui::set_btn_mem(0);
     // Beeper indicator (continuity / diode, App::beep_ind): every style
-    // (bit 0 the SHORT / BEEP band, bit 1 the digits green) x SHORT / BEEP
+    // (bit 0 the BEEP band, bit 1 the digits green) x short / pattern
     // x bargraph / history row x limit badge, layout checked; on -> off
     // and off -> on (with new readings in between) equal a fresh page.
     // Renders: b01..b11 (the PR's comparison), b12 the bargraph-row
@@ -4069,9 +4099,9 @@ fn main() {
         page(r, *b, 0, true, meter::V_NONE);
         let br = stockfont::rect(8, 147, 464, 26);
         stockfont::rbox(br, 6, ui::SHORT_BG, ui::BG);
-        stockfont::glyphs(stockfont::TEXT22, br, "SHORT", 0xFFFF, ui::SHORT_BG, 8, 2);
+        stockfont::glyphs(stockfont::TEXT22, br, "BEEP", 0xFFFF, ui::SHORT_BG, 8, 2);
         save(&out, &format!("b{n:02}-short-cont-barrow-mockup"));
-        // Combined view: the strip's badge SHORT / BEEP and its value green
+        // Combined view: the strip's badge BEEP and its value green
         // (scope_page.rs sp_strip); off -> on -> off equals a fresh strip.
         for (i, (name, r, _)) in short_cases.iter().enumerate() {
             let k = if *name == "diode-pn" { 2u8 } else { 1 };
@@ -4079,7 +4109,7 @@ fn main() {
                 let mut d = ui::strip_data(r, 0, meter::V_NONE, false, 0, false, None);
                 ui::strip_acc(&mut d, r, Some(ui::Acc { model: 2, tc: true }));
                 if on {
-                    d.badge = if k == 1 { "SHORT" } else { "BEEP" };
+                    d.badge = "BEEP";
                     d.badge_col = ui::SHORT_BG;
                     d.short = true;
                 }

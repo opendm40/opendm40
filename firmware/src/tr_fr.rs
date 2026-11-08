@@ -24,6 +24,7 @@ macro_rules! tr {
     ("Accuracy") => { "Pr\u{1}cision" };
     ("Again") => { "R\u{1}p\u{1}ter" };
     ("Alerts") => { "Alertes" };
+    ("Always") => { "Toujours" };
     ("Analog power") => { "Alim. analog." };
     ("Arm") => { "Armer" };
     ("Auto (per view)") => { "Auto (par vue)" };
@@ -49,8 +50,10 @@ macro_rules! tr {
     ("Clear") => { "Effacer" };
     ("Clear limits") => { "Effacer limites" };
     ("Color") => { "Couleur" };
+    ("Continuity beep") => { "Bip continuit\u{1}" };
     ("Corners") => { "Coins" };
     ("Coupling") => { "Couplage" };
+    ("Cur") => { "Cour" };
     ("Current Settings") => { "R\u{1}glages courant" };
     ("Current in A jack: check leads") => { "Courant en A : voir cordons" };
     ("Current too high: reduce it") => { "Courant trop \u{1}lev\u{1} : r\u{1}duire" };
@@ -108,7 +111,7 @@ macro_rules! tr {
     ("Install it now?") => { "Installer ?" };
     ("Installing firmware...") => { "Installation..." };
     ("Interval") => { "Intervalle" };
-    ("Jack alerts") => { "Alertes bornes" };
+    ("Jack alerts") => { "Bornes" };
     ("Key/alert volume") => { "Volume touches" };
     ("Lead from V/ohm jack to A") => { "Cordon de V/\u{3a9} vers A" };
     ("Limits") => { "Limites" };
@@ -135,6 +138,7 @@ macro_rules! tr {
     ("No disk") => { "Pas de disque" };
     ("No ohm reading") => { "Pas de mesure en \u{3a9}" };
     ("No screenshots or logs") => { "Aucune capture ni log" };
+    ("Null: short the leads first") => { "Null : court-circuitez d'abord les pointes" };
     ("OFF (stock)") => { "OFF (origine)" };
     ("OL: no path from V to A") => { "OL : pas de liaison V-A" };
     ("Off (stock)") => { "Off (origine)" };
@@ -207,6 +211,7 @@ macro_rules! tr {
     ("Touch calibration") => { "Calibrage tactile" };
     ("Touch test") => { "Test tactile" };
     ("Trigger") => { "D\u{1}clench." };
+    ("Trigger source: CH1") => { "Source trigger : CH1" };
     ("Try again") => { "R\u{1}essayer" };
     ("Type:") => { "Type :" };
     ("USB disk") => { "Disque USB" };
@@ -216,6 +221,7 @@ macro_rules! tr {
     ("Upper = reading") => { "Haut = mesure" };
     ("Upper limit") => { "Limite haute" };
     ("Vendor") => { "Fabricant" };
+    ("Vol") => { "Tens" };
     ("Voltage Settings") => { "R\u{1}glages tension" };
     ("Voltage on V jack, no current") => { "Tension sur V, sans courant" };
     ("Voltage on circuit - power off") => { "Couper la tension du circuit" };
@@ -223,6 +229,7 @@ macro_rules! tr {
     ("Width:") => { "Largeur :" };
     ("Window") => { "Fen\u{2}tre" };
     ("Wiring") => { "Sch\u{1}ma" };
+    ("With volume") => { "Avec volume" };
     ("Yes") => { "Oui" };
     ("Zero") => { "Z\u{1}ro" };
     ("expect ~48 \u{3a9}") => { "attendu ~48 \u{3a9}" };
@@ -254,6 +261,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Accuracy", "Pr\u{1}cision"),
     ("Again", "R\u{1}p\u{1}ter"),
     ("Alerts", "Alertes"),
+    ("Always", "Toujours"),
     ("Analog power", "Alim. analog."),
     ("Arm", "Armer"),
     ("Auto (per view)", "Auto (par vue)"),
@@ -279,8 +287,10 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Clear", "Effacer"),
     ("Clear limits", "Effacer limites"),
     ("Color", "Couleur"),
+    ("Continuity beep", "Bip continuit\u{1}"),
     ("Corners", "Coins"),
     ("Coupling", "Couplage"),
+    ("Cur", "Cour"),
     ("Current Settings", "R\u{1}glages courant"),
     ("Current in A jack: check leads", "Courant en A : voir cordons"),
     ("Current too high: reduce it", "Courant trop \u{1}lev\u{1} : r\u{1}duire"),
@@ -338,7 +348,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Install it now?", "Installer ?"),
     ("Installing firmware...", "Installation..."),
     ("Interval", "Intervalle"),
-    ("Jack alerts", "Alertes bornes"),
+    ("Jack alerts", "Bornes"),
     ("Key/alert volume", "Volume touches"),
     ("Lead from V/ohm jack to A", "Cordon de V/\u{3a9} vers A"),
     ("Limits", "Limites"),
@@ -365,6 +375,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("No disk", "Pas de disque"),
     ("No ohm reading", "Pas de mesure en \u{3a9}"),
     ("No screenshots or logs", "Aucune capture ni log"),
+    ("Null: short the leads first", "Null : court-circuitez d'abord les pointes"),
     ("OFF (stock)", "OFF (origine)"),
     ("OL: no path from V to A", "OL : pas de liaison V-A"),
     ("Off (stock)", "Off (origine)"),
@@ -437,6 +448,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Touch calibration", "Calibrage tactile"),
     ("Touch test", "Test tactile"),
     ("Trigger", "D\u{1}clench."),
+    ("Trigger source: CH1", "Source trigger : CH1"),
     ("Try again", "R\u{1}essayer"),
     ("Type:", "Type :"),
     ("USB disk", "Disque USB"),
@@ -446,6 +458,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Upper = reading", "Haut = mesure"),
     ("Upper limit", "Limite haute"),
     ("Vendor", "Fabricant"),
+    ("Vol", "Tens"),
     ("Voltage Settings", "R\u{1}glages tension"),
     ("Voltage on V jack, no current", "Tension sur V, sans courant"),
     ("Voltage on circuit - power off", "Couper la tension du circuit"),
@@ -453,6 +466,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Width:", "Largeur :"),
     ("Window", "Fen\u{2}tre"),
     ("Wiring", "Sch\u{1}ma"),
+    ("With volume", "Avec volume"),
     ("Yes", "Oui"),
     ("Zero", "Z\u{1}ro"),
     ("expect ~48 \u{3a9}", "attendu ~48 \u{3a9}"),
