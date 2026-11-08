@@ -2104,10 +2104,10 @@ pyvisa-py 把表命名为 `USB0::4617::53312::<serial>::0::INSTR`；NI-VISA 命�
 
 ### Windows
 
-U 盘无需驱动程序。对于 SCPI，Windows 没有自带的 USBTMC 驱动：设备管理器在 **Other devices** 下列出该仪器，代码 28。任选其一：
+U 盘无需驱动程序。对于 SCPI，Windows 会自动为 USBTMC 接口加载其 WinUSB 驱动（仪表的 MS OS 2.0 描述符）。未测试。任选其一：
 
-- **NI-VISA** 或 **Keysight IO Libraries Suite**：两者都会安装 USBTMC 驱动。然后使用 `pyvisa.ResourceManager()`（不带 `'@py'`）。未测试。
-- **Zadig + pyvisa-py**：在 [Zadig](https://zadig.akeo.ie/) 中，**Options > List All Devices**，选择 DM40 的 USBTMC 接口（**不是**大容量存储接口），选择 **WinUSB**，**Install Driver**。然后：
+- **NI-VISA** 或 **Keysight IO Libraries Suite**：两者都会安装 USBTMC 驱动。然后使用 `pyvisa.ResourceManager()`（不带 `'@py'`）。未测试；Windows 可能仍为该接口保留 WinUSB。
+- **pyvisa-py**：0.5.0 之前的固件需先安装 WinUSB：在 [Zadig](https://zadig.akeo.ie/) 中，**Options > List All Devices**，选择 DM40 的 USBTMC 接口（**不是**大容量存储接口），选择 **WinUSB**，**Install Driver**。然后：
 
   ```
   pip install pyvisa pyvisa-py pyusb libusb-package
@@ -2163,7 +2163,7 @@ sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<address> --samples 10
 | 回复超时 | 把超时设为 5 秒。切换功能后第一个读数最多需要 4 秒（DC V 和 DC A 约 0.5 秒）。 |
 | 回复似乎对应了错误的命令 | 两个程序共用仪器：回复交叉了。关闭其中一个。通过 USB，在 `READ?` 等待时发送新命令会取消该 `READ?`（`SYST:ERR?` 显示 `Query INTERRUPTED`）。 |
 | 命令没有效果 | 查询 `SYST:ERR?`：它会说明原因。 |
-| Windows：代码 28 | 安装 USBTMC 驱动（[Windows](#windows)）。 |
+| Windows：代码 28 | 0.5.0 之前的固件：安装 USBTMC 或 WinUSB 驱动（[Windows](#windows)）。 |
 | 蓝牙：`Host is down` | 表的设置中蓝牙为 OFF，或手机 App 占用了连接。 |
 | 蓝牙：`Command protected` | 该命令只能通过 USB 使用。 |
 

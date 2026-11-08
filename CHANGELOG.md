@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **USBTMC without a driver on Windows:** Windows binds WinUSB to the USBTMC interface by itself (MS OS 2.0 descriptors), so pyvisa-py, libusb and WebUSB pages need no Zadig ([manual](docs/manual/README.md#windows)).
+
 - Continuity and diode: the green band says **BEEP**, not **SHORT**: in continuity it comes on below about 67 Ω, which is not always a short. Ω has no beep and no band.
 
 - **Multimeter:** Null on the Resistor Settings page takes the test leads' resistance off the ohm reading.

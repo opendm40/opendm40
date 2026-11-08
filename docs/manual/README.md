@@ -2794,15 +2794,17 @@ The PyVISA example is untested as a whole.
 
 ### Windows
 
-The USB disk works without a driver. For SCPI, Windows has no USBTMC driver
-of its own: the device manager lists the instrument under **Other devices**
-with code 28. Choose one:
+The USB disk works without a driver. For SCPI, Windows binds its WinUSB
+driver to the USBTMC interface by itself (the meter's MS OS 2.0
+descriptors). Untested. Choose one:
 
 - **NI-VISA** or **Keysight IO Libraries Suite**: both install a USBTMC
-  driver. Then use `pyvisa.ResourceManager()` (without `'@py'`). Untested.
-- **Zadig + pyvisa-py**: in [Zadig](https://zadig.akeo.ie/), **Options >
-  List All Devices**, choose the DM40's USBTMC interface (**not** the mass
-  storage one), choose **WinUSB**, **Install Driver**. Then:
+  driver. Then use `pyvisa.ResourceManager()` (without `'@py'`). Untested;
+  Windows may keep WinUSB on the interface.
+- **pyvisa-py**: firmware before 0.5.0 needs WinUSB installed first: in
+  [Zadig](https://zadig.akeo.ie/), **Options > List All Devices**, choose
+  the DM40's USBTMC interface (**not** the mass storage one), choose
+  **WinUSB**, **Install Driver**. Then:
 
   ```
   pip install pyvisa pyvisa-py pyusb libusb-package
@@ -2872,7 +2874,7 @@ and cannot set ranges. Untested on a real meter.
 | A reply times out | Set the timeout to 5 s. After a function change the first reading takes up to 4 s (DC V and DC A about 0.5 s). |
 | Replies seem to belong to the wrong command | Two programs share the instrument: their replies cross. Close one. Over USB, a new command while a `READ?` waits cancels that `READ?` (`SYST:ERR?` says `Query INTERRUPTED`). |
 | A command does nothing | Ask `SYST:ERR?`: it tells why. |
-| Windows: code 28 | Install a USBTMC driver ([Windows](#windows)). |
+| Windows: code 28 | Firmware before 0.5.0: install a USBTMC or WinUSB driver ([Windows](#windows)). |
 | Bluetooth: `Host is down` | Bluetooth is OFF in the meter's settings, or the phone app holds the connection. |
 | Bluetooth: `Command protected` | That command works only over USB. |
 

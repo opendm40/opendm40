@@ -2867,16 +2867,17 @@ pyvisa-py называет прибор `USB0::4617::53312::<serial>::0::INSTR`,
 
 ### Windows
 
-USB-диск работает без драйвера. Для SCPI в Windows нет собственного
-драйвера USBTMC: диспетчер устройств показывает прибор в **Other devices**
-(«Другие устройства») с кодом 28. Выберите один из вариантов:
+USB-диск работает без драйвера. Для SCPI Windows сама ставит свой драйвер
+WinUSB на интерфейс USBTMC (дескрипторы MS OS 2.0 прибора). Не проверялось.
+Выберите один из вариантов:
 
 - **NI-VISA** или **Keysight IO Libraries Suite**: оба ставят драйвер
   USBTMC. Затем используйте `pyvisa.ResourceManager()` (без `'@py'`). Не
-  проверялось.
-- **Zadig + pyvisa-py**: в [Zadig](https://zadig.akeo.ie/) включите
-  **Options > List All Devices**, выберите интерфейс USBTMC прибора DM40
-  (**не** mass storage), выберите **WinUSB**, **Install Driver**. Затем:
+  проверялось; Windows может оставить на интерфейсе WinUSB.
+- **pyvisa-py**: прошивке до 0.5.0 сначала нужен WinUSB: в
+  [Zadig](https://zadig.akeo.ie/) включите **Options > List All Devices**,
+  выберите интерфейс USBTMC прибора DM40 (**не** mass storage), выберите
+  **WinUSB**, **Install Driver**. Затем:
 
   ```
   pip install pyvisa pyvisa-py pyusb libusb-package
@@ -2946,7 +2947,7 @@ AC+DC) и не может задавать диапазоны. На реальн
 | Ответ не приходит за тайм-аут | Поставьте тайм-аут 5 с. После смены функции первое показание приходит до 4 с (DC V и DC A — около 0,5 с). |
 | Ответы будто относятся не к той команде | С прибором работают две программы, и их ответы перепутались. Закройте одну. По USB новая команда во время ожидания `READ?` отменяет этот `READ?` (`SYST:ERR?` сообщает `Query INTERRUPTED`). |
 | Команда ничего не делает | Спросите `SYST:ERR?`: он скажет почему. |
-| Windows: код 28 | Установите драйвер USBTMC ([Windows](#windows)). |
+| Windows: код 28 | Прошивка до 0.5.0: установите драйвер USBTMC или WinUSB ([Windows](#windows)). |
 | Bluetooth: `Host is down` | Bluetooth выключен (OFF) в настройках прибора или подключение занято приложением на телефоне. |
 | Bluetooth: `Command protected` | Эта команда работает только по USB. |
 

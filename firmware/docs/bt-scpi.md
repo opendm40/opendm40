@@ -227,16 +227,21 @@ wave = dmm.query_binary_values('WAV:DATA?', datatype='B', container=bytes)
 ### USBTMC on Windows
 
 The same SCPI over the USB cable is a USBTMC interface. Windows has no
-in-box USBTMC driver: Device Manager lists it under "Other devices" with
-code 28. The USB drive (mass storage) works without any driver. Choose one:
+in-box USBTMC driver. The meter carries MS OS 2.0 descriptors (BOS platform
+capability, vendor request 0x20 index 7, `usbtmc.rs`): they ask Windows to bind
+WinUSB to the USBTMC interface (interface 0), with the DeviceInterfaceGUID
+{7B2A1D40-0D40-4E1A-9B4C-40D0A0D04001}; bcdDevice is 0x0100 so a Windows that
+saw the meter before without them asks again. Firmware before them showed code
+28 under "Other devices". The USB drive (mass storage) works without any
+driver. Choose one:
 
 - Install NI-VISA or Keysight IO Libraries Suite. Both bring a USBTMC
   driver. Then `pyvisa.ResourceManager()` (the VISA library) lists the
   meter as `USB0::0x1209::0xD040::...::INSTR`.
-- Or bind WinUSB to the USBTMC interface with Zadig (Options > List All
-  Devices, pick the DM40's USBTMC interface, **not** the mass-storage one,
-  choose WinUSB, Install Driver). Then use pyvisa-py with pyusb and
-  libusb: `pip install pyvisa-py pyusb libusb-package`, and
+- Or use WinUSB (bound by itself; on firmware without the descriptors
+  bind it with Zadig: Options > List All Devices, pick the DM40's USBTMC
+  interface, **not** the mass-storage one, choose WinUSB, Install Driver).
+  Then use pyvisa-py with pyusb and libusb: `pip install pyvisa-py pyusb libusb-package`, and
   `pyvisa.ResourceManager('@py')`.
 
 ```python
@@ -247,7 +252,8 @@ dmm = rm.open_resource(rm.list_resources('USB?*::0x1209::0xD040::?*')[0],
 print(dmm.query('*IDN?'))
 ```
 
-Both ways are untested with the meter: only the code 28 state was seen (Windows 11,
+Both ways and the automatic WinUSB binding are untested with the meter: only the
+code 28 state was seen, before the descriptors (Windows 11,
 [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md) "c92b605: ... Windows 11", item 6).
 
 ### sigrok
