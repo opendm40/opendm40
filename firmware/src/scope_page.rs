@@ -337,6 +337,9 @@ pub(super) struct Sp {
     /// Measure cell under the finger, a slider being dragged (0 brightness,
     /// 1 grid), the "Sampling" box shown.
     pub popup: su::Popup,
+    /// The MF tab shown last: the MF key opens it again (persisted,
+    /// sp_persist_ext).
+    mf_tab: u8,
     /// A closed popup to repaint over (`sp_uncover`; bit 0: the CH1 label
     /// was drawn grey, bit 1: the math label, bit 7: pending).
     pub uncover: u8,
@@ -420,6 +423,7 @@ impl Sp {
             autoset: None,
             frozen: false,
             popup: su::Popup::None,
+            mf_tab: 0,
             uncover: 0,
             pressed_cell: None,
             slider: None,
@@ -2370,7 +2374,7 @@ impl App {
                 self.scope_set(s, now);
             }
             2 => self.autoset_start(now),
-            _ => self.sp_popup_open(su::Popup::Mf(0)),
+            _ => self.sp_popup_open(su::Popup::Mf(self.sp.mf_tab)),
         }
     }
 
@@ -2434,6 +2438,9 @@ impl App {
     fn sp_popup_open(&mut self, p: su::Popup) {
         self.sp_end_hold(self.now);
         self.sp.popup = p;
+        if let su::Popup::Mf(t) = p {
+            self.sp.mf_tab = t;
+        }
         self.sp.list = None;
         self.sp.tb_drawn = (255, false);
         self.sp.rec_drawn = None;
@@ -2694,6 +2701,7 @@ impl App {
                 if t != tab {
                     let old = su::popup_box(self.sp.popup);
                     self.sp.popup = su::Popup::Mf(t);
+                    self.sp.mf_tab = t;
                     let new = su::popup_box(self.sp.popup);
                     if let (View::Scope, Some(o), Some(n)) = (self.view, old, new) {
                         // The new box, then the graph rows the old one
@@ -3117,9 +3125,11 @@ impl App {
         *p11 |= ((s.grid.min(100) as u32 / 10) ^ 5) << 12;
     }
 
-    /// Extension words (persist::W_SCOPE_EXT..): [0] math flags / indices,
-    /// [1] math offsets, [2] FFT centre (f32 bits); 0 = defaults
-    /// everywhere (fields stored XOR their default).
+    /// Extension words (persist::W_SCOPE_EXT..): [0] math flags / indices
+    /// (bits 0..20), [1] math offsets, [2] FFT centre (f32 bits), [3]
+    /// trigger / channels (bit 15 free), [4] pulse width, [5] CH2 position
+    /// and colours (bits 0..23), [6] the last MF tab (bits 0..2), [7] free;
+    /// 0 = defaults everywhere (fields stored XOR their default).
     pub(super) fn sp_persist_ext(&self, p: &mut [u32]) {
         let m = &self.sp.math;
         let d = Math::DEFAULT;
@@ -3161,6 +3171,8 @@ impl App {
         p[5] |= ((su::gen_colour_idx() ^ su::GEN_COLOUR_DEFAULT) as u32 & 0xF) << 20;
         // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
         p[5] |= self.ch2.pos as u16 as u32;
+        // [6] bits 0..2: the last MF tab (su::Popup::Mf index, 0 = Measure).
+        p[6] = self.sp.mf_tab as u32 & 7;
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3194,6 +3206,8 @@ impl App {
         self.sp.ch1_off = p[3] >> 13 & 1 != 0;
         self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
         self.scope.ch2_pos = self.ch2.pos;
+        // [6] bits 0..2: the last MF tab (0 = Measure in older records).
+        self.sp.mf_tab = ((p[6] & 7) as u8).min(4);
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };

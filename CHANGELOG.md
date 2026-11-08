@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Scope:** MF opens the menu on the tab open last time (kept across restarts), not always on Measure.
+
 - Continuity and diode: the green band says **BEEP**, not **SHORT**: in continuity it comes on below about 67 Ω, which is not always a short. Ω has no beep and no band.
 
 - **Multimeter:** Null on the Resistor Settings page takes the test leads' resistance off the ohm reading.
