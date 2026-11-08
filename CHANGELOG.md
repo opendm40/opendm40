@@ -9,7 +9,20 @@ section named after the tag as the release notes; how to cut a release:
 
 - **Scope:** MF opens the menu on the tab open last time (kept across restarts), not always on Measure.
 
+- Continuity and diode: the green band says **BEEP**, not **SHORT**: in continuity it comes on below about 67 Ω, which is not always a short. Ω has no beep and no band.
+
+- **Multimeter:** Null on the Resistor Settings page takes the test leads' resistance off the ohm reading.
+- **Settings:** Alerts > Continuity beep: Always lets the continuity / diode beeper sound at volume 0 %.
+- **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
+- **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
+- **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
+- **Scope:** a second tap on the CH1 title with its popup open hides CH1.
+- **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; DMM turns CH2 on; GEN cannot be picked while the generator is off.
+- **Scope:** drag the DMM channel's 2 marker to move its trace.
+- **Combined view:** the meter strip's reading is orange, as on the multimeter page.
 - DMM: 2 px more between the big digits and the bargraph.
+
+- Scope: the CUR tab turns the cursors off again when they were chosen in the Measure tab or kept over a restart (the tap did nothing).
 
 - Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
 
@@ -23,7 +36,7 @@ section named after the tag as the release notes; how to cut a release:
 - Settings > Other > Reset settings: back to the defaults after a confirm; calibration, files and Bluetooth pairing stay.
 
 - **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
-- **Scope:** the MF menu spans the screen to the right edge, over the right panel, with wider columns; the panel is drawn again when it closes.
+- **Scope:** the MF menu runs over the right panel, the same 13 px from both screen edges, with wider columns; the panel is drawn again when it closes.
 ### New
 
 - **Chinese README and user manual** (machine translation, not yet reviewed
