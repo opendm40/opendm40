@@ -20,6 +20,7 @@ section named after the tag as the release notes; how to cut a release:
 - **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; DMM turns CH2 on; GEN cannot be picked while the generator is off.
 - **Scope:** drag the DMM channel's 2 marker to move its trace.
 - **Combined view:** the meter strip's reading is orange, as on the multimeter page.
+- **Scope:** CH2's V/div steps switch the multimeter's range where the range cannot show the step, as in the Wave view.
 - **Scope:** channels keep their block, colour and marker; the Wave view is the scope with only the DMM channel on (DMM colour and 2 marker, CH1 and GEN off; tap CH1 or DMM to leave).
 - DMM: 2 px more between the big digits and the bargraph.
 

@@ -283,10 +283,19 @@ impl App {
         self.last_raw = None;
     }
 
-    /// MF > Display CH2 V/div - / +: the next `scope::wave_steps` value
-    /// (screen only: the DMM range stays).
-    /// The Wave view: its V/div steps (`wave_range_step`, the range follows).
-    pub(super) fn ch2_step(&mut self, up: bool, now: u64) {
+    /// CH2 V/div - / + (the DMM block's magnifiers, MF > Display): the next
+    /// `scope::wave_steps` value. As in the Wave view, a step on the DMM's
+    /// current range only rescales the screen; a step of another range
+    /// (CH2 on, the DMM in its unit) also sets that range (a manual one:
+    /// the autorange ends, as a range picked in the Wave view). The DMM
+    /// write stops the running stream (hy3131 `guard`); it starts again at
+    /// once on the new range (`ch2_lost`, `quick`): a short gap in the
+    /// trace. The trigger level stays on its row (CH2's scale).
+    /// The Wave view: its V/div steps (`wave_range_step`).
+    // Region B, not .cold: the tap comes while CH2's stream runs (the ISR).
+    #[inline(never)]
+    pub(super) fn ch2_step(&mut self, clk: &mut Clock, up: bool) {
+        let now = clk.now_ms();
         if self.scope.wave_on() {
             self.wave_range_step(!up, now);
             return;
@@ -295,17 +304,36 @@ impl App {
         let st = scope::wave_steps(amps);
         let i = scope::wave_step_of(amps, self.ch2.vdiv).unwrap_or(0);
         let j = if up { (i + 1 < st.len()).then_some(i + 1) } else { i.checked_sub(1) };
-        match j {
-            Some(j) => {
-                self.ch2.vdiv = st[j].0;
-                let mut sc = scope_ch2::store().scale();
-                sc.vdiv = self.ch2.vdiv;
-                scope_ch2::store().set_scale(sc);
-                self.scope.refresh();
-                self.sp_settings_changed();
+        let Some(j) = j else {
+            self.toast(now, if up { "Highest V/div" } else { "Lowest V/div" }, false);
+            return;
+        };
+        let (v, item, _) = st[j];
+        let other = self.dmm.ad2_scale().filter(|a| a.amps == amps).is_some_and(|a| a.item != item);
+        if self.ch2.on && other {
+            let why = if crate::csvlog::active() {
+                Some("CH2: recording runs")
+            } else if crate::hy3131::streaming() && !self.ch2.live {
+                // The data logger or the inrush capture owns the DMM chip.
+                Some("CH2: data logger running")
+            } else {
+                None
+            };
+            if let Some(t) = why {
+                self.toast(now, t, false);
+                return;
             }
-            None => self.toast(now, if up { "Highest V/div" } else { "Lowest V/div" }, false),
+            self.dmm.set_range(clk, Some(item));
+            self.meter.rel_off();
+            self.ch2.quick = self.ch2.live;
+            self.last_raw = None;
         }
+        self.ch2.vdiv = v;
+        let mut sc = scope_ch2::store().scale();
+        sc.vdiv = v;
+        scope_ch2::store().set_scale(sc);
+        self.scope.refresh();
+        self.sp_settings_changed();
     }
 
     /// The CH2 V/div ("1.5V", "200mA"; the DMM block, the Display tab):
