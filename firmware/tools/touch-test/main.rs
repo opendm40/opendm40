@@ -1063,6 +1063,31 @@ fn hit_tests(ck: &mut Ck) {
     };
     page(ck, "dmm function row", &dmm_hit, &|b| b.y0 >= ui::BTN_Y as i32 - 4, &[0, 1, 2, 3, 4, 5, 6]);
     page(ck, "dmm REL + rate chip + Wave chip", &dmm_hit, &|b| b.y0 >= 175 && b.y1 < 279, &[100, 103, 106]);
+    // Ω, the 60 ohm range, the leads shorted: the "Set null" chip in the
+    // aux row (App::tap checks it before the main value), >= 19 px tall.
+    {
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.draw_static(dmm::Button::Ohm, 10, false, false);
+        dv.null_chip = true;
+        let main = dmm::Val { v: 0.234, dec: 3, unit: "\u{3a9}", ol: false, ext: false };
+        let r = dmm::Reading { mode: 10, range: 0, main, aux1: None, aux2: None, si: 0.234, auto: true, auto_plus: false, acdc: false, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false };
+        dv.reading(&r, 0, 0);
+        ck.t("Set null chip drawn", dv.null_shown());
+        let shown = dv.null_shown();
+        let null_hit = move |x: u16, y: u16| -> Option<u32> {
+            if shown && ui::null_chip_hit(x, y) {
+                Some(108) // Set null
+            } else if ui::value_hit(x, y) {
+                Some(105)
+            } else {
+                o(ui::button_hit(x, y))
+            }
+        };
+        page(ck, "dmm Set null chip", &null_hit, &|b| b.y1 < 64 && b.y0 >= 36, &[108]);
+        let n = ui::NULL_CHIP;
+        ck.t("Set null chip >= 19 px tall, clear of the status bar and the value target", n.h >= 19 && n.y >= ui::BAR_H as i16 && !ui::value_hit((n.x + n.w / 2) as u16, (n.y + n.h - 1) as u16) && ui::null_chip_hit((n.x + n.w / 2) as u16, (n.y + n.h - 1) as u16));
+    }
     // The Wave chip's tap zone: >= 40 rows, the drawn chip inside it, clear
     // of the timebase / rate chips' left column and the function row.
     let wc = ui::WAVE_CHIP;

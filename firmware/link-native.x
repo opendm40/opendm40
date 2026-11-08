@@ -271,6 +271,8 @@ SECTIONS
          * 1000;...'), so they stay in B. */
         *(.text.*8opendm407new_app*);
         *(.text.*8opendm403app*3App11fuse_dialog*);
+        /* The ohm null's tap (range page "Null", DMM page "Set null"). */
+        *(.text.*8opendm403app*3App12ohm_null_tap*);
         /* The low-battery messages (once per level; never during a stream). */
         *(.text.*8opendm403app*3App11low_battery*);
         *(.text.*8opendm403app*3App15low_battery_off*);
@@ -294,6 +296,8 @@ SECTIONS
         /* The ohm / diode test-current label: drawn on a function / range /
          * variant change only (no AD2 stream runs in ohm / diode). */
         *(.text.*8opendm402ui18test_current_label*);
+        /* The DMM page's "Set null" chip: drawn / cleared on a change only. */
+        *(.text.*8opendm402ui9null_chip*);
         *(.text.*8opendm402ui10range_page*);
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);

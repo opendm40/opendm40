@@ -616,6 +616,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - **Null** (range page): takes your test leads' resistance off every reading.
   Short the leads, wait for a steady reading, tap **Null**; tap again for off.
   Up to 10 Ω, not on 600 MΩ, independent of REL, kept over a power-off.
+- **Set null** (main screen): shows on the 60 Ω range while the shorted leads read
+  under 0.5 Ω; a tap does what **Null** does. Not shown with a null, REL or HOLD on.
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |

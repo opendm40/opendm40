@@ -359,6 +359,10 @@ pub struct DmmView {
     /// says BEEP for all (chat 675); and the band as drawn (`short_sync`).
     pub short: u8,
     short_drawn: u8,
+    /// The "Set null" chip (`NULL_CHIP`) to show (set by the app,
+    /// `App::null_chip_want`; drawn in Ω range 0 only), and as drawn.
+    pub null_chip: bool,
+    null_drawn: bool,
 }
 
 /// Bargraph geometry in the history row's place (rows 152..174 between the
@@ -684,6 +688,8 @@ impl DmmView {
             acc_drawn: false,
             short: 0,
             short_drawn: 0,
+            null_chip: false,
+            null_drawn: false,
         }
     }
 
@@ -878,6 +884,7 @@ impl DmmView {
         self.last_iohm = 254;
         self.acc_drawn = false;
         self.short_drawn = 0;
+        self.null_drawn = false;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -1251,6 +1258,18 @@ impl DmmView {
             self.power_row(&pv, lim);
         }
         self.acc_update(r, ulps);
+        // "Set null": Ω, the 60 Ω range (also guards a stale flag against
+        // another function's reading); drawn / cleared on a change only.
+        let n = self.null_chip && r.mode == 10 && r.range == 0 && !self.power;
+        if n != self.null_drawn {
+            self.null_drawn = n;
+            null_chip(n);
+        }
+    }
+
+    /// The "Set null" chip is on the screen (its tap applies: App::tap).
+    pub fn null_shown(&self) -> bool {
+        self.null_drawn
     }
 
 }
@@ -1771,6 +1790,49 @@ pub fn ohm_null_button(ohm: f32) {
     };
     sf::rbox(NULL_BTN, 6, c, BG);
     sf::glyphs(sf::TEXT22, NULL_BTN, t.as_str(), STATUS_FG, c, 8, 0);
+}
+
+/// "Set null" on the DMM page (Ω, the 60 Ω range, the leads shorted:
+/// App::null_chip_want): the aux row's right end (y 38..63 as the BEEP band;
+/// Ω has no aux values, the test current and "NULL" end before x 210), clear
+/// of the status bar (..33), the digits' cells (68..) and the limit badge
+/// (403, 72..). A tap applies the null as the range page's "Null".
+pub const NULL_CHIP: sf::Rect = rect(318, 38, 154, 26);
+
+/// The chip shows below NULL_ON ohm and goes above NULL_OFF (100 counts
+/// of the 60 ohm range between them: no flicker at the threshold).
+pub const NULL_ON: f32 = 0.5;
+pub const NULL_OFF: f32 = 0.6;
+
+/// The "Set null" chip after reading `r` (`was`: shown before; `ok`: the
+/// app allows it, App::null_chip_want): Ω on the 60 ohm range (the lowest;
+/// the "ON" variant never takes it), not OL, 0 < r < NULL_ON (the leads
+/// shorted), kept up to NULL_OFF. A provisional reading changes nothing.
+pub fn null_chip_want(was: bool, r: &Reading, ok: bool) -> bool {
+    if r.prov {
+        return was && ok;
+    }
+    ok && r.mode == 10 && r.range == 0 && !r.main.ol && r.si > 0.0 && r.si < if was { NULL_OFF } else { NULL_ON }
+}
+
+/// Draw (`on`) or clear the "Set null" chip.
+#[inline(never)] // .cold (link-native.x): drawn on a change only
+fn null_chip(on: bool) {
+    let r = NULL_CHIP;
+    if on {
+        sf::rbox(r, 6, 0x2966, BG);
+        // 1 px up: a descender (ru "Задать", it "Imposta") keeps 3 px.
+        sf::glyphs(sf::TEXT22, rect(r.x, r.y - 1, r.w, r.h), crate::tr!("Set null"), STATUS_FG, 0x2966, 8, 0);
+    } else {
+        lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, BG);
+    }
+}
+
+/// The "Set null" chip was hit: its box, 4 px to the left, from the status
+/// bar's edge (36; the bar's targets are y < 37 at x < 206) to the main
+/// value's target (64..), to the screen edge (28 x 166 px).
+pub fn null_chip_hit(x: u16, y: u16) -> bool {
+    (36..64).contains(&y) && x >= 314
 }
 
 /// "Inrush" on the Current Settings page (the inrush capture, app_inrush.rs;

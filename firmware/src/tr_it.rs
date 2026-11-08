@@ -181,6 +181,7 @@ macro_rules! tr {
     ("Screenshot failed") => { "Errore schermata" };
     ("Select") => { "Scegli" };
     ("Selection cleared") => { "Selezione annullata" };
+    ("Set null") => { "Imposta Null" };
     ("Settings") => { "Impostaz." };
     ("Shutdown") => { "Spegnimento" };
     ("Signal") => { "Generatore" };
@@ -413,6 +414,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Screenshot failed", "Errore schermata"),
     ("Select", "Scegli"),
     ("Selection cleared", "Selezione annullata"),
+    ("Set null", "Imposta Null"),
     ("Settings", "Impostaz."),
     ("Shutdown", "Spegnimento"),
     ("Signal", "Generatore"),

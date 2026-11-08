@@ -184,6 +184,7 @@ macro_rules! tr {
     ("Screenshot failed") => { "Erreur capture" };
     ("Select") => { "Choisir" };
     ("Selection cleared") => { "S\u{1}lection effac\u{1}e" };
+    ("Set null") => { "D\u{1}finir Null" };
     ("Settings") => { "R\u{1}glages" };
     ("Shutdown") => { "Extinction" };
     ("Signal") => { "G\u{1}n\u{1}rateur" };
@@ -421,6 +422,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Screenshot failed", "Erreur capture"),
     ("Select", "Choisir"),
     ("Selection cleared", "S\u{1}lection effac\u{1}e"),
+    ("Set null", "D\u{1}finir Null"),
     ("Settings", "R\u{1}glages"),
     ("Shutdown", "Extinction"),
     ("Signal", "G\u{1}n\u{1}rateur"),

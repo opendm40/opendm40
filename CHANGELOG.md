@@ -10,6 +10,7 @@ section named after the tag as the release notes; how to cut a release:
 - Continuity and diode: the green band says **BEEP**, not **SHORT**: in continuity it comes on below about 67 Ω, which is not always a short. Ω has no beep and no band.
 
 - **Multimeter:** Null on the Resistor Settings page takes the test leads' resistance off the ohm reading.
+- **Multimeter:** Ω: a **Set null** button on the main screen while the shorted leads read under 0.5 Ω on the 60 Ω range.
 - **Settings:** Alerts > Continuity beep: Always lets the continuity / diode beeper sound at volume 0 %.
 - **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
 - **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
