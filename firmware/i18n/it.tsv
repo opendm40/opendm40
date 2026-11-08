@@ -24,7 +24,7 @@ Swipe	Swipe	M
 Press effect	Effetto tocco	M
 Tap step	Passo tocco	M
 Help	Aiuto	M
-Jack alerts	Avvisi boccole	M
+Jack alerts	Boccole	M
 Danger alarm	Allarme pericolo	M
 USB disk	Disco USB	M
 Burden voltage	Caduta tens.	M
@@ -241,8 +241,18 @@ Deleting	Eliminazione	M
 Selection cleared	Selezione annullata	M
 Files changed	File modificati	M
 Some skipped	Alcuni saltati	M
+Null off	Null off	M
+Null: short the leads first	Null: prima cortocircuita i puntali	M
+off	off	M
+Continuity beep	Bip continuità	M
+Always	Sempre	M
+With volume	Con il volume	M
 Low battery! Please charge	Batteria scarica! Ricaricare	M
 Battery empty: off in 30 s	Batteria: si spegne tra 30 s	M
 Battery empty: off in 20 s	Batteria: si spegne tra 20 s	M
 Battery empty: off in 10 s	Batteria: si spegne tra 10 s	M
 Unstable: unplug USB?	Instabile: scollegare USB?	M
+Type	Tipo	M
+Vol	Tens	M
+Cur	Corr	M
+Trigger source: CH1	Sorgente trigger: CH1	M
