@@ -298,6 +298,9 @@ SECTIONS
         *(.text.*8opendm402ui18test_current_label*);
         /* The DMM page's "Set null" chip: drawn / cleared on a change only. */
         *(.text.*8opendm402ui9null_chip*);
+        *(.text.*8opendm402ui14null_chip_rect*);
+        *(.text.*8opendm402ui13null_chip_hit*);
+        *(.text.*8opendm402ui10ohm_i_text*);
         *(.text.*8opendm402ui10range_page*);
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);

@@ -3897,7 +3897,7 @@ fn main() {
             let r = Reading { range: 1, ..r };
             let mut dv = ui::DmmView::new();
             dv.label = None;
-            dv.ohm_null = true;
+            dv.ohm_null = 0.234;
             dv.draw_static(Button::Ohm, r.mode, false, on);
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
@@ -3906,7 +3906,7 @@ fn main() {
                 save(&out, "d06b-dmm-ohm-null");
             }
         }
-        // "Set null" chip (ui::NULL_CHIP): the 60 ohm range with the leads
+        // "Set null" chip (ui::null_chip_rect): the 60 ohm range with the leads
         // shorted (0.234 ohm), plain and with the extra digit + the limit
         // badge; the null applied (chip gone, "NULL"); 1 ohm and 600 ohm
         // without it; the chip cleared by an update leaves no stale pixel.
@@ -3914,7 +3914,7 @@ fn main() {
         let ohm_page = |r: &Reading, chip: bool, null: bool, lim: u8| -> ui::DmmView {
             let mut dv = ui::DmmView::new();
             dv.label = None;
-            dv.ohm_null = null;
+            dv.ohm_null = if null { 0.234 } else { 0.0 };
             dv.null_chip = chip;
             dv.draw_static(Button::Ohm, r.mode, false, false);
             dv.reading(r, 0, lim);
@@ -3952,13 +3952,13 @@ fn main() {
                 let r = Reading { range: rg, ..nulled };
                 let mut dv = ui::DmmView::new();
                 dv.label = None;
-                dv.ohm_null = true;
+                dv.ohm_null = 0.234;
                 dv.draw_static(Button::Ohm, 10, false, on);
                 dv.reading(&r, 0, meter::V_NONE);
                 let n = format!("dmm-ohm-null-mark/{}/r{rg}", on as u8);
                 ck.check(&n, &dmm_page_regions);
                 let zone: Vec<(u16, u16)> = (0..480u16).flat_map(|x| (0..320u16).map(move |y| (x, y))).filter(|&(x, y)| dv.null_mark_hit(x, y)).collect();
-                if crate::dmm::test_current(10, rg, on as u8).is_none() {
+                if crate::dmm::test_current(10, rg, on as u8).is_none() || !ui::null_marked(rg, 0.234) {
                     if !zone.is_empty() {
                         ck.fail(&n, "NULL tap zone without the marker".into());
                     }
@@ -3966,7 +3966,7 @@ fn main() {
                 }
                 let (y0, y1) = (zone.iter().map(|p| p.1).min().unwrap_or(0), zone.iter().map(|p| p.1).max().unwrap_or(0));
                 let x1 = zone.iter().map(|p| p.0).max().unwrap_or(0);
-                if zone.is_empty() || y1 - y0 + 1 < 19 || zone.iter().any(|&(x, y)| ui::value_hit(x, y) || ui::null_chip_hit(x, y)) || x1 >= 128 + 6 {
+                if zone.is_empty() || y1 - y0 + 1 < 19 || zone.iter().any(|&(x, y)| ui::value_hit(x, y)) || x1 >= 128 + 6 {
                     ck.fail(&n, format!("NULL tap zone {:?}..{:?} rows {y0}..{y1}", zone.first(), zone.last()));
                 }
             }

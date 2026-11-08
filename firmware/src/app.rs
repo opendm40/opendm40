@@ -990,7 +990,7 @@ impl App {
     /// What a page draw takes from the app state, before drawing.
     fn draw_state(&mut self) {
         self.dmm_view.label = self.t_label();
-        self.dmm_view.ohm_null = self.dmm.ohm_null() > 0.0;
+        self.dmm_view.ohm_null = self.dmm.ohm_null();
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
         ui::set_btn_mem(self.dmm.sub_mem());
