@@ -1139,7 +1139,7 @@ fn hit_tests(ck: &mut Ck) {
         ck.t("scope panel: the graph side (x < PANEL_X) is no panel target", ph(scope_ui::PANEL_X as u16 - 1, 60).is_none() && ph(scope_ui::PANEL_X as u16, 60).is_some());
     }
     ck.t("range page: Null on the ohm page only, the note row's right half", ui::range_hit(dmm::Button::Ohm, Some(0), 300, 160) == Some(Err(8)) && ui::range_hit(dmm::Button::Volt, Some(0), 300, 160) != Some(Err(8)));
-    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, cur: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY, ch2_func: 0, dec: scope_ui::dec::SetupVals::DEFAULT };
+    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11, 0], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, cur: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY, ch2_func: 0, dec: scope_ui::dec::SetupVals::DEFAULT };
     for tab in 0..5u8 {
         host::reset(0);
         scope_ui::draw_mf(tab, &pv);

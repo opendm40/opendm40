@@ -153,6 +153,9 @@ SECTIONS
         *(.text.log_cold*);
         *(.text.*8opendm408scope_ui3log12panel_button*);
         *(.text.*8opendm408scope_ui3log9panel_hit*);
+        /* The scope page's press decision: once per touch-down (sp_select,
+         * the wide graph's right-edge press). */
+        *(.text.*8opendm408scope_ui11graph_press*);
         /* The keypad's digit font: read only by ui::keypad_key (above, in
          * C: the Keypad page / popup, no stream). */
         *(.rodata.fonts.K_FONT_E);

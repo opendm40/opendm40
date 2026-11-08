@@ -79,6 +79,14 @@ const TAP_SLOP: i32 = LOCK_MAX;
 const TAP_AFTER_LONG: bool = true;
 /// The next `capture` makes the touch a raw-move touch (`raw_next`).
 static RAW_NEXT: AtomicBool = AtomicBool::new(false);
+/// x of the touch-down of the last SwipeLeft / SwipeRight (the scope's
+/// panel swipes: from its right edge, on the panel).
+static SWIPE_X0: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
+
+/// The touch-down x of the last horizontal swipe.
+pub fn swipe_x0() -> u16 {
+    SWIPE_X0.load(Ordering::Relaxed)
+}
 
 /// Ask for raw `Move` events on the touch the app is about to capture (call
 /// it from the `Down` handler before returning true; any later `capture`
@@ -456,6 +464,7 @@ impl Tracker {
             if TAP_AFTER_LONG && self.far <= TAP_SLOP { Some(Gesture::Tap(p0)) } else { none(2, 0) }
         } else if dt <= SWIPE_MAX_MS && (dx.abs() >= SWIPE_MIN || dy.abs() >= SWIPE_MIN) {
             if dx.abs() > 2 * dy.abs() {
+                SWIPE_X0.store(p0.x, Ordering::Relaxed);
                 Some(if dx > 0 { Gesture::SwipeRight } else { Gesture::SwipeLeft })
             } else if dy.abs() > 2 * dx.abs() {
                 Some(if dy > 0 { Gesture::SwipeDown } else { Gesture::SwipeUp })

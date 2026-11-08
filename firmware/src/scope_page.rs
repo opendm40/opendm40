@@ -323,6 +323,14 @@ pub(super) struct Sp {
     /// a whole engine column; the graph has su::GW px per COLS columns).
     hpos_rem: i32,
     pub swipes: bool,
+    /// The wide graph (the panel hidden by a swipe; su::wide).
+    pub wide: bool,
+    /// A touch that began on the panel / the wide graph's right edge: its
+    /// touch-down x (the panel's own swipe, by the drag's travel).
+    edge_x0: Option<u16>,
+    /// The touch that hid / brought back the panel: its other events are
+    /// eaten until it lifts (no graph drag from it).
+    edge_done: bool,
     pub press_fx: bool,
     pressed: u8,
     pressed_until: u64,
@@ -379,7 +387,7 @@ pub(super) struct Sp {
     /// The press picked the item that was already selected (a still tap
     /// then cycles to the next overlapping one, `sp_release`).
     presel: bool,
-    cur_saved: Option<([u8; 4], usize)>,
+    cur_saved: Option<([u8; crate::scope_meas::MAX_SEL], usize)>,
     last_tap: Option<(u64, Point)>,
     /// Math display settings; what the FFT additions show (from `sp_math`).
     pub math: Math,
@@ -410,6 +418,9 @@ impl Sp {
             pinch: None,
             hpos_rem: 0,
             swipes: false,
+            wide: false,
+            edge_x0: None,
+            edge_done: false,
             press_fx: true,
             pressed: 0,
             pressed_until: 0,
@@ -734,6 +745,7 @@ impl App {
     /// Full page draw (after `redraw`).
     pub(super) fn sp_draw_static(&mut self) {
         self.sp.uncover = 0;
+        su::set_wide(self.sp_wide_on());
         su::invalidate();
         self.sp_draw_page();
     }
@@ -747,6 +759,7 @@ impl App {
 
     /// The page's graph rows from the cached frame (no drawing).
     pub(super) fn sp_prepare(&mut self) {
+        su::set_wide(self.sp_wide_on());
         // An open popup's box is drawn last: the graph leaves it alone.
         su::graph().set_hole_at(su::H_POPUP, su::popup_box(self.sp.popup));
         self.sp_render();
@@ -775,8 +788,32 @@ impl App {
         }
     }
 
+    /// The wide graph shown: wanted, in the scope view (not the combined
+    /// one).
+    fn sp_wide_on(&self) -> bool {
+        self.sp.wide && self.view == View::Scope
+    }
+
+    /// Hide (`on`) or bring back the right panel.
+    fn sp_set_wide(&mut self, on: bool, now: u64) {
+        self.beep(now, 30);
+        self.sp.wide = on;
+        // At once: drawing before the full redraw (a drag's preview) is in
+        // the new layout too.
+        su::set_wide(self.sp_wide_on());
+        su::invalidate();
+        self.redraw = true;
+    }
+
     /// Repaint whatever changed (model diff, graph rows).
     pub(super) fn sp_update(&mut self, now: u64) {
+        // The wide graph on / off: set here (the scope view's full redraw
+        // goes by App::repaint_strips, not sp_draw_static), then the whole
+        // page again.
+        if su::set_wide(self.sp_wide_on()) {
+            self.redraw = true;
+            return;
+        }
         let m = self.sp_model(now);
         su::update(&m);
         if self.sp.bubble && self.sp.bubble_dirty {
@@ -801,9 +838,9 @@ impl App {
     /// changed cell and return whether one was drawn.
     fn sp_cells_with(&mut self, one: bool) -> bool {
         let m = self.sp_model(self.now);
-        let mut b: [[u8; 24]; 4] = [[0; 24]; 4];
-        let mut n = [0usize; 4];
-        for i in 0..self.meas_n.min(4) {
+        let mut b: [[u8; 24]; 5] = [[0; 24]; 5];
+        let mut n = [0usize; 5];
+        for i in 0..self.meas_n.min(su::meas_cells()) {
             let id = self.meas_sel[i];
             // Stock label "Vp-p:" (ours: "Vpp:").
             let mut t = [0u8; 24];
@@ -819,11 +856,11 @@ impl App {
             n[i] = k;
         }
         let txt = |i: usize| core::str::from_utf8(&b[i][..n[i]]).unwrap_or("--");
-        let t: [&str; 4] = [txt(0), txt(1), txt(2), txt(3)];
+        let t: [&str; 5] = [txt(0), txt(1), txt(2), txt(3), txt(4)];
         if one {
-            return su::cells_step(&m, &t[..self.meas_n.min(4)]);
+            return su::cells_step(&m, &t[..self.meas_n.min(su::meas_cells())]);
         }
-        su::cells(&m, &t[..self.meas_n.min(4)]);
+        su::cells(&m, &t[..self.meas_n.min(su::meas_cells())]);
         false
     }
 
@@ -1511,11 +1548,75 @@ impl App {
                 _ => {}
             }
         }
+        // opendm40 (owner 2026-11-07): the right panel hides with a swipe
+        // right on it and comes back with a swipe left from the screen's
+        // right edge (EDGE_X.., where no marker is grabbed: not a graph
+        // touch there, so its release is a swipe).
+        if self.view == View::Scope {
+            // The edge zone: 30 px. A touch reports its x when the debounce
+            // takes it (~40 ms in), so a swipe begun at the very edge comes
+            // in some 10 px left of it (the emulator's drags: 466 / 456 from
+            // 476).
+            const EDGE_X: u16 = 450;
+            // The panel is 89 px wide: by the drag's travel (25 px right on
+            // the panel, 30 px left from the edge), not gesture.rs's swipe
+            // (60 px within 800 ms).
+            const HIDE_DX: u16 = 25;
+            const SHOW_DX: u16 = 30;
+            if let Gesture::Down(_) = g {
+                self.sp.edge_x0 = None;
+                self.sp.edge_done = false;
+            }
+            if self.sp.edge_done {
+                match g {
+                    Gesture::Up(_) | Gesture::Cancel => self.sp.edge_done = false,
+                    Gesture::Drag(..) | Gesture::Move(..) | Gesture::Tap(_) | Gesture::LongPress(_) | Gesture::SwipeLeft | Gesture::SwipeRight => return Some(true),
+                    _ => {}
+                }
+            }
+            match g {
+                Gesture::Down(p) if su::wide() && p.x >= EDGE_X => {
+                    let m = self.sp_model(now);
+                    if !matches!(su::graph_press(&m, su::TAP_OFF, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16), su::Press::Marker(..)) {
+                        self.sp.edge_x0 = Some(p.x);
+                        return Some(false);
+                    }
+                }
+                Gesture::Down(p) if !su::wide() && p.x >= su::PANEL_X as u16 => self.sp.edge_x0 = Some(p.x),
+                Gesture::Drag(_, p, _) | Gesture::Move(_, p) if self.sp.edge_x0.is_some() => {
+                    let x0 = self.sp.edge_x0.unwrap_or(0);
+                    if !su::wide() && p.x >= x0 + HIDE_DX {
+                        self.sp.edge_x0 = None;
+                        self.sp.edge_done = true;
+                        self.sp.pressed = 0;
+                        self.sp_set_wide(true, now);
+                        return Some(true);
+                    }
+                    if su::wide() && p.x + SHOW_DX <= x0 {
+                        self.sp.edge_x0 = None;
+                        self.sp.edge_done = true;
+                        self.sp_set_wide(false, now);
+                        return Some(true);
+                    }
+                    return Some(false);
+                }
+                Gesture::Tap(p) if su::wide() && p.x >= EDGE_X => return Some(false),
+                Gesture::SwipeLeft if su::wide() && crate::gesture::swipe_x0() >= EDGE_X => {
+                    self.sp_set_wide(false, now);
+                    return Some(false);
+                }
+                Gesture::SwipeRight if !su::wide() && crate::gesture::swipe_x0() >= su::PANEL_X as u16 => {
+                    self.sp_set_wide(true, now);
+                    return Some(false);
+                }
+                _ => {}
+            }
+        }
         match g {
             // A top-bar badge (before the graph area: INNER starts at y 15):
             // not captured, its release is the Tap below.
             Gesture::Down(p) if su::top_badge(p.x, p.y).is_some() => Some(false),
-            Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
+            Gesture::Down(p) if su::inner().has(p.x as i16, p.y as i16) => {
                 let prev = (self.sp.sel_v, self.sp.sel_h, self.sp.last_h);
                 let (hit, side) = self.sp_select(p);
                 // A marker grab zone: that marker along its own axis.
@@ -1693,7 +1794,8 @@ impl App {
             // refreshes as for any drag.
             self.sp.frozen = true;
         }
-        let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
+        // In graph columns (the wide graph: screen px over 1.23 columns).
+        let (mut dx, mut dy) = (su::lcol(p.x as i16) as i32 - su::lcol(t.applied.x as i16) as i32, p.y as i32 - t.applied.y as i32);
         (dx, dy) = su::drag_delta(t.axis == Some(Axis::H), dx, dy);
         t.applied = p;
         self.sp.touch = Some(t);
@@ -1972,7 +2074,7 @@ impl App {
                 // Nothing saved while cursors show (chosen in the Measure
                 // tab, kept over a restart): the selection without them, so
                 // that "off" turns them off (it restored itself before).
-                let mut b = ([0u8; 4], 0);
+                let mut b = ([0u8; crate::scope_meas::MAX_SEL], 0);
                 for &id in self.meas_sel[..self.meas_n].iter().filter(|id| !cur(id)) {
                     b.0[b.1] = id;
                     b.1 += 1;
@@ -1982,7 +2084,7 @@ impl App {
             }
         };
         let rest = base.0[..base.1].iter().copied().filter(|id| !cur(id));
-        let mut sel = [0u8; 4];
+        let mut sel = [0u8; crate::scope_meas::MAX_SEL];
         let mut n = 0;
         let lead: &[u8] = match state {
             su::CUR_OFF => &XS,
@@ -1996,7 +2098,7 @@ impl App {
             self.sp.cur_saved = None;
         } else {
             for id in lead.iter().copied().chain(rest) {
-                if n < 4 {
+                if n < crate::scope_meas::MAX_SEL {
                     sel[n] = id;
                     n += 1;
                 }
@@ -2734,8 +2836,8 @@ impl App {
                 return;
             }
             su::MfHit::Cell(i) => {
-                // Refuse a duplicate or a 5th item silently (stock).
-                if self.meas_n < 4 && !self.meas_sel[..self.meas_n].contains(&i) {
+                // Refuse a duplicate or a 6th item silently (stock: 5th).
+                if self.meas_n < crate::scope_meas::MAX_SEL && !self.meas_sel[..self.meas_n].contains(&i) {
                     self.meas_sel[self.meas_n] = i;
                     self.meas_n += 1;
                     self.cursors_from_selection();
