@@ -990,7 +990,7 @@ impl App {
     /// What a page draw takes from the app state, before drawing.
     fn draw_state(&mut self) {
         self.dmm_view.label = self.t_label();
-        self.dmm_view.ohm_null = self.dmm.ohm_null() > 0.0;
+        self.dmm_view.ohm_null = self.dmm.ohm_null();
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
         ui::set_btn_mem(self.dmm.sub_mem());
@@ -2194,6 +2194,7 @@ impl App {
     /// Resistor Settings "Null": on, the reading now (the shorted leads,
     /// 0 .. dmm::OHM_NULL_MAX ohm, settled, without the null) becomes the
     /// null; on again: off. Independent of REL; kept in the settings.
+    #[inline(never)] // .cold (link-native.x): on a tap
     fn ohm_null_tap(&mut self, now: u64) {
         if self.dmm.ohm_null() > 0.0 {
             self.dmm.set_ohm_null(0.0);
@@ -2212,6 +2213,16 @@ impl App {
             }
             _ => self.toast(now, crate::tr!("Null: short the leads first"), false),
         }
+    }
+
+    /// The DMM page's "Set null" chip (ui::null_chip_want, on the
+    /// unsmoothed pre-REL reading): no null yet, no REL, HOLD or AutoHold,
+    /// not the power meter. True: it changed.
+    fn null_chip_want(&mut self, raw: &Reading) -> bool {
+        let was = self.dmm_view.null_chip;
+        let ok = !self.dmm.pw.on && self.dmm.ohm_null() == 0.0 && !self.meter.rel_active() && self.meter.hold_state() == 0;
+        self.dmm_view.null_chip = ui::null_chip_want(was, raw, ok);
+        self.dmm_view.null_chip != was
     }
 
     /// Open the keypad for `target`. The generator targets open with the
@@ -2818,7 +2829,8 @@ impl App {
         self.hv_level = hv_level;
         // DMM page: the stock >= 30 V red value (ui-review #13).
         self.dmm_view.hv_red = hv_level >= 1;
-        if dmm_view && (u.show.is_some() || hv_changed || had_prov) {
+        let null_changed = self.null_chip_want(&raw);
+        if dmm_view && (u.show.is_some() || hv_changed || had_prov || null_changed && self.view == View::Dmm) {
             if self.pw_rng_key != 0 {
                 // The first power reading after the "I ranging" texts (the
                 // combined view: after its strip placeholder, #108).
@@ -4136,7 +4148,12 @@ impl App {
                 }
             }
             View::Dmm => {
-                if ui::value_hit(x, y) {
+                if (self.dmm_view.null_shown() && ui::null_chip_hit(x, y)) || (self.dmm.ohm_null() > 0.0 && self.dmm_view.null_mark_hit(x, y)) {
+                    // As the range page's "Null": "Set null" applies it,
+                    // the "NULL" marker turns it off (its toast; the page
+                    // under the toast redraws with / without "NULL").
+                    self.ohm_null_tap(now);
+                } else if ui::value_hit(x, y) {
                     self.resolution_cycle(now);
                 } else if ui::rate_chip_hit(x, y) {
                     self.rate_cycle(now);

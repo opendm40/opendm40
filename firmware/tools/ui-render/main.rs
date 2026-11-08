@@ -3899,7 +3899,7 @@ fn main() {
             let r = Reading { range: 1, ..r };
             let mut dv = ui::DmmView::new();
             dv.label = None;
-            dv.ohm_null = true;
+            dv.ohm_null = 0.234;
             dv.draw_static(Button::Ohm, r.mode, false, on);
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
@@ -3907,6 +3907,120 @@ fn main() {
             if !on {
                 save(&out, "d06b-dmm-ohm-null");
             }
+        }
+        // "Set null" chip (ui::null_chip_rect): the 60 ohm range with the leads
+        // shorted (0.234 ohm), plain and with the extra digit + the limit
+        // badge; the null applied (chip gone, "NULL"); 1 ohm and 600 ohm
+        // without it; the chip cleared by an update leaves no stale pixel.
+        let short = rd(10, val(0.234, 3, "\u{3a9}"), None, None, false);
+        let ohm_page = |r: &Reading, chip: bool, null: bool, lim: u8| -> ui::DmmView {
+            let mut dv = ui::DmmView::new();
+            dv.label = None;
+            dv.ohm_null = if null { 0.234 } else { 0.0 };
+            dv.null_chip = chip;
+            dv.draw_static(Button::Ohm, r.mode, false, false);
+            dv.reading(r, 0, lim);
+            ui::status_right(&status(0));
+            dv
+        };
+        for (ext, lim) in [(false, meter::V_NONE), (true, meter::V_PASS), (true, meter::V_HI)] {
+            host::reset(0);
+            let r = Reading { main: Val { ext, ..short.main }, ..short };
+            let dv = ohm_page(&r, ui::null_chip_want(false, &r, true), false, lim);
+            let n = format!("dmm-ohm-null-chip/x{}/l{lim}", ext as u8);
+            ck.check(&n, &dmm_page_regions);
+            if !dv.null_shown() {
+                ck.fail(&n, "Set null chip not drawn".into());
+            }
+            if !ext {
+                save(&out, "d06c-dmm-ohm-null-chip");
+            }
+        }
+        // The null applied: the app clears the chip (ohm_null set).
+        host::reset(0);
+        let nulled = Reading { main: val(0.002, 3, "\u{3a9}"), si: 0.002, ..short };
+        let dv = ohm_page(&nulled, ui::null_chip_want(true, &nulled, false), true, meter::V_NONE);
+        ck.check("dmm-ohm-null-chip/nulled", &dmm_page_regions);
+        if dv.null_shown() {
+            ck.fail("dmm-ohm-null-chip/nulled", "chip drawn with the null on".into());
+        }
+        save(&out, "d06d-dmm-ohm-null-applied");
+        // The "NULL" marker's outline and tap zone, every range / variant
+        // with a test current: inside the test-current box (its repaint
+        // clears it), >= 19 px tall, clear of the main value's target.
+        for on in [false, true] {
+            for rg in 0..7i8 {
+                host::reset(0);
+                let r = Reading { range: rg, ..nulled };
+                let mut dv = ui::DmmView::new();
+                dv.label = None;
+                dv.ohm_null = 0.234;
+                dv.draw_static(Button::Ohm, 10, false, on);
+                dv.reading(&r, 0, meter::V_NONE);
+                let n = format!("dmm-ohm-null-mark/{}/r{rg}", on as u8);
+                ck.check(&n, &dmm_page_regions);
+                let zone: Vec<(u16, u16)> = (0..480u16).flat_map(|x| (0..320u16).map(move |y| (x, y))).filter(|&(x, y)| dv.null_mark_hit(x, y)).collect();
+                if crate::dmm::test_current(10, rg, on as u8).is_none() || !ui::null_marked(rg, 0.234) {
+                    if !zone.is_empty() {
+                        ck.fail(&n, "NULL tap zone without the marker".into());
+                    }
+                    continue;
+                }
+                let (y0, y1) = (zone.iter().map(|p| p.1).min().unwrap_or(0), zone.iter().map(|p| p.1).max().unwrap_or(0));
+                let x1 = zone.iter().map(|p| p.0).max().unwrap_or(0);
+                if zone.is_empty() || y1 - y0 + 1 < 19 || zone.iter().any(|&(x, y)| ui::value_hit(x, y)) || x1 >= 128 + 6 {
+                    ck.fail(&n, format!("NULL tap zone {:?}..{:?} rows {y0}..{y1}", zone.first(), zone.last()));
+                }
+            }
+        }
+        // Null on -> off (a static redraw after the toast): no marker, no zone.
+        host::reset(0);
+        let dv = ohm_page(&nulled, false, false, meter::V_NONE);
+        if (0..480u16).any(|x| (0..320u16).any(|y| dv.null_mark_hit(x, y))) {
+            ck.fail("dmm-ohm-null-mark/off", "tap zone without a null".into());
+        }
+        // 1 ohm on 60 ohm; 0.234 ohm on 600 ohm (a stale flag): no chip.
+        for (n, r) in [("1ohm", Reading { main: val(1.0, 3, "\u{3a9}"), si: 1.0, ..short }), ("r1", Reading { range: 1, main: val(0.23, 2, "\u{3a9}"), ..short })] {
+            host::reset(0);
+            let dv = ohm_page(&r, ui::null_chip_want(false, &r, true) || n == "r1", false, meter::V_NONE);
+            if dv.null_shown() {
+                ck.fail(&format!("dmm-ohm-null-chip/{n}"), "chip drawn".into());
+            }
+            if n == "1ohm" {
+                save(&out, "d06e-dmm-ohm-1ohm-no-chip");
+            }
+        }
+        // Hysteresis (on below NULL_ON, off above NULL_OFF; a provisional
+        // reading keeps the state; OL, another range or the app's gate off).
+        {
+            let at = |v: f32| Reading { main: val(v, 3, "\u{3a9}"), si: v, ..short };
+            let mut on = false;
+            let mut seq = vec![];
+            for (r, ok, want) in [
+                (at(0.70), true, false), (at(0.45), true, true), (at(0.55), true, true), (at(0.59), true, true),
+                (at(0.61), true, false), (at(0.55), true, false), (at(0.49), true, true),
+                (Reading { prov: true, ..at(0.9) }, true, true), (Reading { main: ol(3, "\u{3a9}"), ..at(0.3) }, true, false),
+                (at(0.3), true, true), (Reading { range: 1, ..at(0.3) }, true, false), (at(0.3), false, false),
+                (at(0.0), true, false), (Reading { mode: 11, ..at(0.3) }, true, false),
+            ] {
+                on = ui::null_chip_want(on, &r, ok);
+                seq.push(on);
+                if on != want {
+                    ck.fail("null-chip-hysteresis", format!("step {}: {} ohm ok {ok} -> {on}, want {want}", seq.len(), r.si));
+                }
+            }
+        }
+        // Chip on -> off by an update (null applied, range change): the
+        // screen as drawn fresh without it.
+        for (n, b) in [("nulled", nulled), ("r1", Reading { range: 1, main: val(0.23, 2, "\u{3a9}"), ..short })] {
+            host::reset(0);
+            ohm_page(&b, false, n == "nulled", meter::V_NONE);
+            let want = emu().fb.clone();
+            host::reset(0);
+            let mut dv = ohm_page(&short, true, n == "nulled", meter::V_NONE);
+            dv.null_chip = false;
+            dv.reading(&b, 0, meter::V_NONE);
+            ck.same_as(&format!("dmm-ohm-null-chip/off-{n}"), &want);
         }
         // ui-review #13: the stock >= 30 V red value (230 V AC).
         host::reset(0);

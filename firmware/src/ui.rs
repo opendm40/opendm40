@@ -328,9 +328,10 @@ pub struct DmmView {
     pub pwc: pw::PwCache,
     /// The "ON" ohm variant is selected (`draw_static`'s `ohm_on`).
     ohm_on: bool,
-    /// The ohm null is on (Dmm::ohm_null; set by the app before
-    /// `draw_static`): "NULL" after the ohm test current.
-    pub ohm_null: bool,
+    /// The ohm null in ohm, 0 = off (Dmm::ohm_null; set by the app before
+    /// `draw_static`): "NULL" after the ohm test current where it moves the
+    /// last digit (`null_marked`).
+    pub ohm_null: f32,
     /// Test current label as last drawn: ohm range | variant << 3 | null <<
     /// 6, 0x10
     /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
@@ -359,6 +360,12 @@ pub struct DmmView {
     /// says BEEP for all (chat 675); and the band as drawn (`short_sync`).
     pub short: u8,
     short_drawn: u8,
+    /// The "Set null" chip (`null_chip_rect`) to show (set by the app,
+    /// `App::null_chip_want`; drawn in Ω range 0 only), and as drawn.
+    pub null_chip: bool,
+    null_drawn: bool,
+    /// The "NULL" marker's x as drawn (0 = none; `test_current_label`).
+    null_mark: i16,
 }
 
 /// Bargraph geometry in the history row's place (rows 152..174 between the
@@ -674,7 +681,7 @@ impl DmmView {
             power: false,
             pwc: pw::PwCache::new(),
             ohm_on: false,
-            ohm_null: false,
+            ohm_null: 0.0,
             last_iohm: 254,
             ol_word: false,
             ol_range: 0,
@@ -684,6 +691,9 @@ impl DmmView {
             acc_drawn: false,
             short: 0,
             short_drawn: 0,
+            null_chip: false,
+            null_drawn: false,
+            null_mark: 0,
         }
     }
 
@@ -721,6 +731,7 @@ impl DmmView {
         self.aux_unit = [None; 2];
         self.last_aux = [false; 2];
         self.last_iohm = 255;
+        self.null_mark = 0;
     }
 
     /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
@@ -878,6 +889,8 @@ impl DmmView {
         self.last_iohm = 254;
         self.acc_drawn = false;
         self.short_drawn = 0;
+        self.null_drawn = false;
+        self.null_mark = 0;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -1046,7 +1059,7 @@ impl DmmView {
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
             _ if band => 255,
-            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3 | (self.ohm_null as u8) << 6,
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3 | (null_marked(r.range, self.ohm_null) as u8) << 6,
             12 if aux[0].is_none() && !self.power => 0x10,
             13 if !self.power => match r.aux2 {
                 Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
@@ -1061,6 +1074,7 @@ impl DmmView {
             let b = if self.last_iohm & 0xF0 == 0x20 { CAP_DIS_RECT } else { OHM_I_RECT };
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
             self.last_iohm = 255;
+            self.null_mark = 0;
         }
         let temp = r.mode == 15 && self.label.is_some();
         let load = r.power.is_some_and(|p| p.comp) && self.power;
@@ -1192,6 +1206,18 @@ impl DmmView {
                 None => {}
             }
         }
+        // "Set null": Ω, the 60 Ω range (also guards a stale flag against
+        // another function's reading); drawn / cleared on a change only. It
+        // sits in the test current's box, where "NULL" goes: a clear
+        // repaints the label (below), a label repaint the chip.
+        let n = self.null_chip && r.mode == 10 && r.range == 0 && !self.power;
+        if n != self.null_drawn {
+            self.null_drawn = n;
+            null_chip(n);
+            if !n {
+                self.last_iohm = 254;
+            }
+        }
         if ik == 0x22 {
             if self.last_iohm != ik {
                 cap_noise_label();
@@ -1202,8 +1228,11 @@ impl DmmView {
             cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
             self.last_iohm = ik;
         } else if ik != 255 && self.last_iohm != ik {
-            test_current_label(r.mode, r.range, self.ohm_on, self.ohm_null);
+            self.null_mark = test_current_label(r.mode, r.range, self.ohm_on, self.ohm_null);
             self.last_iohm = ik;
+            if self.null_drawn {
+                null_chip(true);
+            }
         }
         // The phase is part of the key only while it alternates: no
         // repaint every second otherwise.
@@ -1251,6 +1280,16 @@ impl DmmView {
             self.power_row(&pv, lim);
         }
         self.acc_update(r, ulps);
+    }
+
+    /// A tap on the "NULL" marker (on the screen: it turns the null off).
+    pub fn null_mark_hit(&self, x: u16, y: u16) -> bool {
+        null_mark_hit(self.null_mark, x, y)
+    }
+
+    /// The "Set null" chip is on the screen (its tap applies: App::tap).
+    pub fn null_shown(&self) -> bool {
+        self.null_drawn
     }
 
 }
@@ -1347,20 +1386,10 @@ pub fn cap_noise_label() {
     sf::label(sf::F14, b, crate::tr!("Unstable: unplug USB?"), DIM, BG, 1, 1);
 }
 
-/// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
-/// measured short-circuit current of range `range` in the variant `on`
-/// (none on 60 M: the box is cleared); continuity / diode, the source current (measured, continuity negative). Two significant digits, DIM F14 (small: a
-/// property of the function, not a reading). `null`: the ohm null is on
-/// (r0..r6): "NULL" after it, in the reading's colour.
-#[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
-fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
-    let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
-        // No value (60 M): clear the box, a range change from 6 M left the
-        // 6 M label (device check 2f56ff9).
-        let b = OHM_I_RECT;
-        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-        return;
-    };
+/// The test current line: "I 1.0 mA" ("EXP  I ..." on the experimental
+/// 600 Mohm, `exp`) for test current `i` (A).
+#[inline(never)] // .cold (link-native.x)
+fn ohm_i_text(mode: u8, range: i8, i: f32) -> (crate::scope_ui::Txt, bool) {
     // Continuity's is negative (its source drives the other way).
     let (v, u) = if i.abs() >= 0.2e-3 {
         (i * 1e3, " mA")
@@ -1375,11 +1404,74 @@ fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
     let mut t = crate::scope_ui::Txt::new(if exp { "EXP  I " } else { "I " });
     t.push(crate::dmm::format(&mut b, v, if v.abs() < 1.0 { 2 } else if v.abs() < 10.0 { 1 } else { 0 }));
     t.push(u);
+    (t, exp)
+}
+
+/// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
+/// measured short-circuit current of range `range` in the variant `on`
+/// (none on 60 M: the box is cleared); continuity / diode, the source current (measured, continuity negative). Two significant digits, DIM F14 (small: a
+/// property of the function, not a reading). `null`: the ohm null (ohm);
+/// where it moves the last digit (`null_marked`): "NULL" after it, in the reading's colour, outlined (a tap
+/// turns the null off: App::tap, `null_mark_hit`). Returns the marker's x
+/// (0 = none drawn).
+#[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
+fn test_current_label(mode: u8, range: i8, on: bool, null: f32) -> i16 {
+    let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
+        // No value (60 M): clear the box, a range change from 6 M left the
+        // 6 M label (device check 2f56ff9).
+        let b = OHM_I_RECT;
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        return 0;
+    };
+    let (t, exp) = ohm_i_text(mode, range, i);
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
-    if null && mode == 10 && !exp {
-        let w = sf::text_width(sf::F14, t.as_str(), 1);
-        sf::label(sf::F14, rect(OHM_I_RECT.x + w + 12, OHM_I_RECT.y, OHM_I_RECT.w - w - 12, OHM_I_RECT.h), "NULL", VALUE, BG, 1, 1);
+    if mode == 10 && !exp && null_marked(range, null) {
+        // 1 px lines, the corners cut (a rounded look; lines, not a
+        // filled shape: the text sits inside).
+        let b = null_mark_rect(sf::text_width(sf::F14, t.as_str(), 1));
+        let (x, y, w, h) = (b.x as u16, b.y as u16, b.w as u16, b.h as u16);
+        sf::label(sf::F14, rect(b.x + 3, b.y + 3, b.w - 6, b.h - 6), "NULL", VALUE, BG, 8, 1);
+        // One shape for ui-render / touch-test (the outline's box).
+        #[cfg(test)]
+        crate::probe::begin(crate::probe::SHAPE, BG);
+        lcd::fill_rect(x + 2, y, w - 4, 1, VALUE);
+        lcd::fill_rect(x + 2, y + h - 1, w - 4, 1, VALUE);
+        lcd::fill_rect(x, y + 2, 1, h - 4, VALUE);
+        lcd::fill_rect(x + w - 1, y + 2, 1, h - 4, VALUE);
+        for (cx, cy) in [(x + 1, y + 1), (x + w - 2, y + 1), (x + 1, y + h - 2), (x + w - 2, y + h - 2)] {
+            lcd::fill_rect(cx, cy, 1, 1, VALUE);
+        }
+        #[cfg(test)]
+        crate::probe::end();
+        return b.x;
     }
+    0
+}
+
+/// The "NULL" marker's outline after a test-current text `w` px wide
+/// (inside OHM_I_RECT: its label repaint clears it).
+/// The ohm null `null` (ohm) is marked on range `range`: it moves the
+/// reading by at least one last digit (10^range mohm: 60 ohm 0.001, 600 ohm
+/// 0.01, 6 k 0.1 ohm, ...; owner 2026-11-08). A "Set null" null (under
+/// 0.6 ohm) shows on 60 ohm .. 6 kohm; one of up to 10 ohm (the range page)
+/// up to 60 kohm; above, it changes nothing shown.
+pub fn null_marked(range: i8, null: f32) -> bool {
+    const LSD: [u32; 7] = [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000];
+    let mohm = (null * 1000.0 + 0.5) as u32;
+    mohm > 0 && LSD.get(range as usize).is_some_and(|&d| mohm >= d)
+}
+
+fn null_mark_rect(w: i16) -> sf::Rect {
+    rect(OHM_I_RECT.x + w + 8, 41, sf::text_width(sf::F14, "NULL", 1) + 12, 20)
+}
+
+/// The "NULL" marker (drawn at x `mx`, 0 = none) was hit: its outline, 6 px
+/// to each side, rows 36..63 (the main value's target starts at 64; the
+/// "Set null" chip in the same place is never up with a null on).
+pub fn null_mark_hit(mx: i16, x: u16, y: u16) -> bool {
+    let w = sf::text_width(sf::F14, "NULL", 1) + 12;
+    let x = x as i16;
+    mx != 0 && (36..64).contains(&y) && x >= mx - 6 && x < mx + w + 6
 }
 
 /// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
@@ -1771,6 +1863,59 @@ pub fn ohm_null_button(ohm: f32) {
     };
     sf::rbox(NULL_BTN, 6, c, BG);
     sf::glyphs(sf::TEXT22, NULL_BTN, t.as_str(), STATUS_FG, c, 8, 0);
+}
+
+/// "Set null" on the DMM page (Ω, the 60 Ω range, the leads shorted:
+/// App::null_chip_want): where its tap puts "NULL" (owner 2026-11-08: the
+/// two in one place), after the 60 Ω test current (`null_mark_rect`), in
+/// the aux row (y 38..63 as the BEEP band; Ω has no aux values); clear of
+/// the status bar (..33) and the digits' cells (68..). A tap applies the
+/// null as the range page's "Null".
+#[inline(never)] // .cold (link-native.x)
+pub fn null_chip_rect() -> sf::Rect {
+    let i = crate::dmm::test_current(10, 0, 0).unwrap_or(0.0);
+    let (t, _) = ohm_i_text(10, 0, i);
+    let x = null_mark_rect(sf::text_width(sf::F14, t.as_str(), 1)).x;
+    rect(x, 38, sf::text_width(sf::TEXT22, crate::tr!("Set null"), 0) + 16, 26)
+}
+
+/// The chip shows below NULL_ON ohm and goes above NULL_OFF (100 counts
+/// of the 60 ohm range between them: no flicker at the threshold).
+pub const NULL_ON: f32 = 0.5;
+pub const NULL_OFF: f32 = 0.6;
+
+/// The "Set null" chip after reading `r` (`was`: shown before; `ok`: the
+/// app allows it, App::null_chip_want): Ω on the 60 ohm range (the lowest;
+/// the "ON" variant never takes it), not OL, 0 < r < NULL_ON (the leads
+/// shorted), kept up to NULL_OFF. A provisional reading changes nothing.
+pub fn null_chip_want(was: bool, r: &Reading, ok: bool) -> bool {
+    if r.prov {
+        return was && ok;
+    }
+    ok && r.mode == 10 && r.range == 0 && !r.main.ol && r.si > 0.0 && r.si < if was { NULL_OFF } else { NULL_ON }
+}
+
+/// Draw (`on`) or clear the "Set null" chip.
+#[inline(never)] // .cold (link-native.x): drawn on a change only
+fn null_chip(on: bool) {
+    let r = null_chip_rect();
+    if on {
+        sf::rbox(r, 6, 0x2966, BG);
+        // 1 px up: a descender (ru "Задать", it "Imposta") keeps 3 px.
+        sf::glyphs(sf::TEXT22, rect(r.x, r.y - 1, r.w, r.h), crate::tr!("Set null"), STATUS_FG, 0x2966, 8, 0);
+    } else {
+        lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, BG);
+    }
+}
+
+/// The "Set null" chip was hit: its box, 4 px to each side, from the status
+/// bar's edge (36; the bar's targets are y < 37 at x < 206) to the main
+/// value's target (64..): 28 px tall.
+#[inline(never)] // .cold (link-native.x)
+pub fn null_chip_hit(x: u16, y: u16) -> bool {
+    let r = null_chip_rect();
+    let x = x as i16;
+    (36..64).contains(&y) && x >= r.x - 4 && x < r.x + r.w + 4
 }
 
 /// "Inrush" on the Current Settings page (the inrush capture, app_inrush.rs;

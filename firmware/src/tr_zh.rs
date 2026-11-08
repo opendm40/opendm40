@@ -172,6 +172,7 @@ macro_rules! tr {
     ("Screenshot") => { "\u{466}\u{442}" };
     ("Select") => { "\u{4e0}\u{46b}" };
     ("Selection cleared") => { "\u{454}\u{496}\u{4ee}\u{4e0}\u{46b}" };
+    ("Set null") => { "\u{4ce}\u{4b9} Null" };
     ("Settings") => { "\u{4ce}\u{4b9}" };
     ("Shutdown") => { "\u{41e}\u{480}\u{479}\u{4ea}" };
     ("Signal") => { "\u{415}\u{438}\u{432}\u{4a0}\u{440}" };
@@ -392,6 +393,7 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("Screenshot", "\u{466}\u{442}"),
     ("Select", "\u{4e0}\u{46b}"),
     ("Selection cleared", "\u{454}\u{496}\u{4ee}\u{4e0}\u{46b}"),
+    ("Set null", "\u{4ce}\u{4b9} Null"),
     ("Settings", "\u{4ce}\u{4b9}"),
     ("Shutdown", "\u{41e}\u{480}\u{479}\u{4ea}"),
     ("Signal", "\u{415}\u{438}\u{432}\u{4a0}\u{440}"),
