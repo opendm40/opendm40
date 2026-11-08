@@ -1573,7 +1573,9 @@ over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-mul
 signal, alongside the scope. Its on / off and V/div (A/div) are also on the
 **DMM** block (**Color** beside it, a tap: the next one, never CH1's; magenta by
 default). Drag its **2** marker on the left to move the trace (long
-press: back to the centre); kept in the settings. **V** / **A** beside **On** /
+press: back to the centre); kept in the settings. A V/div step that the
+multimeter's range cannot show switches the range, as in the Wave view (a
+short gap; the autorange ends). **V** / **A** beside **On** /
 **Off** puts the multimeter into that function (V, or AC A) in one tap; neither
 is selected in another function, and it does nothing in the Wave view or during
 a recording. It works in V, mV and

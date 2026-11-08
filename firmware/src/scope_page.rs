@@ -2308,7 +2308,7 @@ impl App {
                 st.set_vidx(if zin { st.vidx().saturating_sub(1) } else { st.vidx() + 1 });
                 self.scope_set(st, now);
             }
-            su::BLK_DMM => self.ch2_step(!zin, now),
+            su::BLK_DMM => self.ch2_step(clk, !zin),
             su::BLK_GEN => self.gen_step(zin, now),
             _ => {
                 // Math scale: FFT dB/div, else the math V/div.
@@ -2802,7 +2802,7 @@ impl App {
                 self.ch2_set(clk, on);
             }
             su::MfHit::Ch2Step(up) => {
-                self.ch2_step(up, now);
+                self.ch2_step(clk, up);
             }
             su::MfHit::GenColour => {
                 // The next GEN colour (not CH1's): the whole page again (as
