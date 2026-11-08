@@ -250,6 +250,7 @@ DM40B
 DM40C
 DMM
 DMM + Scope
+DPO
 Data out of range
 Data stale
 Decode log
@@ -296,6 +297,7 @@ Good fit: Save applies it
 HI
 HIGH
 HOLD
+HOT
 HV
 Hamming
 Hanning

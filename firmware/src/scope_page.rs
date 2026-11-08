@@ -165,6 +165,8 @@ struct Cache {
     ps_a: [(i16, i16); su::NCOL],
     ps_b: [(i16, i16); su::NCOL],
     ps_t: u64,
+    /// A fresh frame for `sp_render` (the digital phosphor counts it once).
+    fresh: bool,
 }
 
 // In SRAM (.dmabuf, NOLOAD) on the device (4.8 KB out of TCM); set up by
@@ -183,6 +185,7 @@ static mut CACHE: Cache = Cache {
     ps_a: [su::EMPTY; su::NCOL],
     ps_b: [su::EMPTY; su::NCOL],
     ps_t: 0,
+    fresh: false,
 };
 
 /// The shown frame's column rows (the decoder's bar, app_decode.rs).
@@ -213,6 +216,7 @@ pub(super) fn sp_init() {
     c.range = 8;
     c.tb = 13;
     c.ps_t = 0;
+    c.fresh = false;
     su::init();
     crate::scope_ch2::init();
 }
@@ -834,7 +838,8 @@ impl App {
         let s = self.scope.s;
         // Persistence: the previous frame joins the current layer (stock
         // 4.3); layers swap every period; off in roll and STOP.
-        let pm = if self.scope.rolling() || !s.run { 0 } else { self.sp.persist as usize };
+        // Persist DPO / HOT (4 / 5): no layers (the digital phosphor, sp_render).
+        let pm = if self.scope.rolling() || !s.run || self.sp.persist >= 4 { 0 } else { self.sp.persist as usize };
         if pm == 0 {
             c.ps_a = [su::EMPTY; su::NCOL];
             c.ps_b = [su::EMPTY; su::NCOL];
@@ -912,6 +917,7 @@ impl App {
         // The protocol decoder's band (app_decode.rs).
         self.dec_frame(f);
         self.sp_math_frame(f);
+        cache().fresh = true;
         self.sp_render();
     }
 
@@ -947,6 +953,22 @@ impl App {
                 (su::trace_fy(h, lo as i32), su::trace_fy(h, hi as i32))
             };
         }
+        // The digital phosphor (Persist DPO / HOT): CH1 from its counts, fed
+        // with each fresh frame's rows; a preview (drag, pinch), roll and
+        // STOP show the plain trace (and forget the counts), as while a data
+        // logger session (CH2 on, LOG:STATe ON) has the counts' memory.
+        let fresh = core::mem::replace(&mut c.fresh, false);
+        let ident = d_pos == 0 && hpos == c.hpos && ky == 1.0 && kx == 1.0;
+        let dm = if crate::scope_dpo::ENABLED && self.sp.persist >= 4 && ident && !self.scope.rolling() && s.run && crate::scope_dpo::ready() { self.sp.persist - 3 } else { 0 };
+        if dm != 0 {
+            if fresh {
+                crate::scope_dpo::frame(&g.tr, h as i16);
+            }
+            g.tr = [su::EMPTY; su::NCOL];
+        } else if g.dpo != 0 {
+            crate::scope_dpo::clear();
+        }
+        g.dpo = dm;
         // ABS math follows CH1's columns (the FFT keeps its spectrum).
         if self.sp.math.on && self.sp.math.mode != 5 {
             self.sp_math();
@@ -1348,6 +1370,7 @@ impl App {
         let c = cache();
         c.ps_a = [su::EMPTY; su::NCOL];
         c.ps_b = [su::EMPTY; su::NCOL];
+        crate::scope_dpo::clear();
     }
 
     /// Per main-loop pass on the scope page (from scope_poll): timers, the
@@ -2765,7 +2788,7 @@ impl App {
                 self.scope_set(st, now);
             }
             su::MfHit::Persist(i) => {
-                self.sp.persist = i.min(3);
+                self.sp.persist = i.min(if crate::scope_dpo::ENABLED { 5 } else { 3 });
                 self.sp_settings_changed();
             }
             su::MfHit::Rising(r) => {
@@ -3129,7 +3152,7 @@ impl App {
 
     // ------------------------------------------------------------ persist
 
-    /// Page settings -> persist words (p[1] bits 17..29, p[11] bits 3..6,
+    /// Page settings -> persist words (p[1] bits 17..29, p[11] bits 3..7,
     /// 12..15; p[11] bits 1..2, the removed "Scope drag" mode, stay 0 and
     /// are ignored on load).
     /// 12..15). p[1] bits 28..29: tap-step mode XOR TAP_DEFAULT (older
@@ -3138,7 +3161,8 @@ impl App {
         let s = &self.sp;
         *p1 |= ((s.colour as u32 ^ 2) & 0xF) << 17 | ((100 - s.bright.min(100)) as u32 & 0x7F) << 21;
         *p1 |= su::tap_code(s.tap_mode) << 28;
-        *p11 |= (s.swipes as u32) << 3 | (s.persist as u32 & 3) << 4 | (!s.press_fx as u32) << 6;
+        // Bit 7: Persist DPO / HOT (bits 4..5 then 0 / 1).
+        *p11 |= (s.swipes as u32) << 3 | (s.persist as u32 & 3) << 4 | (!s.press_fx as u32) << 6 | ((s.persist >= 4) as u32) << 7;
         *p11 |= ((s.grid.min(100) as u32 / 10) ^ 5) << 12;
     }
 
@@ -3231,6 +3255,9 @@ impl App {
         s.bright = 100 - (p1 >> 21 & 0x7F).min(100) as u8;
         s.swipes = p11 >> 3 & 1 != 0;
         s.persist = (p11 >> 4 & 3) as u8;
+        if p11 >> 7 & 1 != 0 && crate::scope_dpo::ENABLED {
+            s.persist = 4 + (s.persist & 1);
+        }
         s.press_fx = p11 >> 6 & 1 == 0;
         s.grid = (((p11 >> 12 & 0xF) ^ 5).min(10) * 10) as u8;
         s.tap_mode = su::tap_decode(p1 >> 28);

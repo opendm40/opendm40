@@ -255,6 +255,40 @@ pub struct Ring {
     trg_ev_n: AtomicU32,
     trg_first_at: AtomicU32,
     trg_first_gen: AtomicU32,
+    /// Who has the slots (main loop only): IDLE, SESSION (a stream session
+    /// started, until `stop`), LENT (the digital phosphor's, `lend_slots`).
+    owner: AtomicU32,
+}
+
+const IDLE: u32 = 0;
+const SESSION: u32 = 1;
+const LENT: u32 = 2;
+
+/// Bytes of the ring's slots (`lend_slots`).
+pub const SLOT_BYTES: usize = CAP * core::mem::size_of::<Rec>();
+
+/// The ring's slots as the digital phosphor's memory (scope_dpo.rs, Persist
+/// DPO / HOT) while no stream session runs (LOG:STATe ON, CH2, the wave
+/// view, inrush, fast log) and nothing waits for LOG:DATA? (records stay
+/// readable after `stop`). Main loop only; a session's `start` takes them
+/// back (their contents never matter to a session: `reset`). The pointer
+/// (SLOT_BYTES, 4-aligned) and true when (re)lent since the last call: the
+/// contents are then not the borrower's. None: in use.
+pub fn lend_slots() -> Option<(*mut u8, bool)> {
+    let r = &RING;
+    match r.owner.load(Relaxed) {
+        LENT => Some((r.buf.get() as *mut u8, false)),
+        IDLE if r.len() == 0 => {
+            r.owner.store(LENT, Relaxed);
+            Some((r.buf.get() as *mut u8, true))
+        }
+        _ => None,
+    }
+}
+
+/// The slots are lent (`lend_slots`) and not taken back since.
+pub fn slots_lent() -> bool {
+    RING.owner.load(Relaxed) == LENT
 }
 
 /// Trigger events the ISR keeps (the newest TRG_EV - 1 are safe to read
@@ -294,6 +328,7 @@ impl Ring {
             trg_ev_n: Z,
             trg_first_at: Z,
             trg_first_gen: Z,
+            owner: Z,
         }
     }
 
@@ -571,6 +606,8 @@ impl Logger {
             (*this).ring = ring;
         }
         ring.reset();
+        // NOLOAD: not zeroed at reset.
+        ring.owner.store(IDLE, Relaxed);
     }
 
     /// All-zero (see `init_in_place`). Runtime defaults (OSR) are applied in
@@ -836,6 +873,8 @@ impl Logger {
         } else if on_isr {
             hy::stream::use_div(hy::DIV, false);
         }
+        // The slots are the session's (a phosphor's lend ends here).
+        self.ring().owner.store(SESSION, Relaxed);
         self.ring().reset();
         self.drained = false;
         // The chip set-up is the last main-loop bus access of an ISR session.
@@ -876,6 +915,9 @@ impl Logger {
             isr::stopped();
         }
         self.isr = false;
+        if self.active {
+            self.ring().owner.store(IDLE, Relaxed);
+        }
         self.active = false;
         self.planned = false;
         self.dc_keep = false;

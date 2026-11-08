@@ -1557,8 +1557,15 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 ### Display settings
 
-**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
-**Brightness** and **Grid** intensity; **GEN trace** on / off.
+**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF, DPO,
+HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
+
+**Persist DPO / HOT** (digital phosphor) draws CH1 by how often the trace
+hits each spot: bright where it runs in most frames, dim where it went rarely
+(jitter, noise, a rare runt); **DPO** in CH1's colour, **HOT** blue (rare) to
+red (always). It fades over some seconds; a drag, a pinch, a settings change,
+roll and STOP show the plain trace and start over, as does CH2 on or a
+running data logger (LOG:STATe ON).
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan (**Color** beside it, a tap: the next one, never CH1's) under CH1, on CH1's position and its own V/div (the **GEN** block's
