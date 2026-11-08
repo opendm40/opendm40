@@ -224,7 +224,8 @@ fn scene(ck: &mut Checker, name: &str, b: &[bool], spb: f64, cfg: dc::Cfg, chars
     if wave {
         m.wave = true;
         m.wvdiv = 2.0;
-        m.ch1_txt = "DC V";
+        m.ch1_scale = scope_ui::Txt::new("1V");
+        m.tsrc = scope::TSRC_CH2;
     }
     let sc = stock::Scene { name: "decode", m, popup: scope_ui::Popup::None, trace: Some(tr), persist: None, cols: 400, cells: base.cells.clone() };
     stock::draw(&sc);
