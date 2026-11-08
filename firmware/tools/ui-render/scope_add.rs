@@ -336,9 +336,9 @@ pub fn run(ck: &mut Checker, out: &str) {
             m.ac = !amps && ch1 == "AC V";
             m.trig_v = tv;
             if amps {
-                vec!["\u{2}Freq:50.0Hz", "\u{2}Ip-p:999.9mA", "\u{2}Cycl:20.0ms", "\u{2}Irms:-12.3uA"]
+                vec!["Freq:50.0Hz", "Ip-p:999.9mA", "Cycl:20.0ms", "Irms:-12.3uA"]
             } else {
-                vec!["\u{2}Freq:50.0Hz", "\u{2}Vp-p:999.9mV", "\u{2}Cycl:20.0ms", "\u{2}Vrms:-12.3uV"]
+                vec!["Freq:50.0Hz", "Vp-p:999.9mV", "Cycl:20.0ms", "Vrms:-12.3uV"]
             }
         } else {
             base.cells.clone()
