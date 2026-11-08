@@ -79,6 +79,9 @@ const CAPABILITIES: [u8; 24] = [
 
 pub struct Usbtmc<'a, B: UsbBus> {
     iface: InterfaceNumber,
+    /// A long EP0 reply was accepted (the MS OS 2.0 set, 23 packets of 8
+    /// bytes): main.rs polls the device on until it is out.
+    ep0_pump: bool,
     ep_out: EndpointOut<'a, B>,
     ep_in: EndpointIn<'a, B>,
 
@@ -132,9 +135,15 @@ pub struct Usbtmc<'a, B: UsbBus> {
 }
 
 impl<'a, B: UsbBus> Usbtmc<'a, B> {
+    /// A long EP0 reply went out this poll (taken once): poll on.
+    pub fn take_ep0_pump(&mut self) -> bool {
+        core::mem::take(&mut self.ep0_pump)
+    }
+
     pub fn new(alloc: &'a UsbBusAllocator<B>) -> Self {
         Usbtmc {
             iface: alloc.interface(),
+            ep0_pump: false,
             ep_out: alloc.bulk(MPS as u16),
             ep_in: alloc.bulk(MPS as u16),
             hdr: [0; 12],
@@ -586,12 +595,19 @@ impl<B: UsbBus> UsbClass<B> for Usbtmc<'_, B> {
     }
 
     fn reset(&mut self) {
+        // A bus reset in an EP0 data stage: its packet out of Tx FIFO 0
+        // (usb.rs abort_in0).
+        crate::usb::abort_in0();
+        self.ep0_pump = false;
         self.reset_all();
     }
 
     fn control_out(&mut self, xfer: ControlOut<B>) {
         let req = *xfer.request();
         self.log(&req, 0);
+        if crate::usb::in0_busy() {
+            crate::usb::abort_in0();
+        }
         // Standard CLEAR_FEATURE(ENDPOINT_HALT) on any endpoint (ours and the
         // disk's): reset the data toggle the driver leaves alone; usb-device
         // then clears STALL and acknowledges (not accepted here).
@@ -639,12 +655,19 @@ impl<B: UsbBus> UsbClass<B> for Usbtmc<'_, B> {
     fn control_in(&mut self, xfer: ControlIn<B>) {
         let req = *xfer.request();
         self.log(&req, 0x80);
+        // A new SETUP (this class sees every request first): an EP0 IN
+        // packet still pending belongs to a transfer the host gave up.
+        if crate::usb::in0_busy() {
+            crate::usb::abort_in0();
+        }
         if req.request_type == RequestType::Vendor
             && req.recipient == Recipient::Device
             && req.request == MS_VENDOR_CODE
             && req.index == MS_OS_20_DESCRIPTOR_INDEX
         {
-            xfer.accept_with_static(&MS_OS_20_SET).ok();
+            // Copied into the control buffer (control-buffer-256, Cargo.toml).
+            xfer.accept_with(&MS_OS_20_SET).ok();
+            self.ep0_pump = true;
             return;
         }
         if req.request_type != RequestType::Class {

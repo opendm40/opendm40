@@ -135,6 +135,48 @@ pub fn reset_toggle(addr: u8) {
     unsafe { modify32(ctl, DXEPCTL_EPENA | DXEPCTL_EPDIS, DXEPCTL_SD0PID) };
 }
 
+/// Drop an EP0 IN packet the host has not taken: a SETUP or a bus reset
+/// ended its control transfer (the host gave up on it, e.g. a timeout in a
+/// long data stage). synopsys-usb-otg 0.5 flushes only the Rx FIFO on a
+/// bus reset and leaves EP0 IN enabled with its packet in Tx FIFO 0, so
+/// the core sent that stale packet for the next request's data / status
+/// stage and every later EP0 reply came out shifted: after a reset in the
+/// middle of the MS OS 2.0 set (8-byte packets) the host never got a device
+/// descriptor or a SET_ADDRESS status again (error -110 / -62) until the
+/// meter restarted. NAK, disable if enabled, flush Tx FIFO 0; the next
+/// write clears the NAK. Bounded waits (a few us on the core).
+pub fn abort_in0() {
+    let ctl = USBFS + 0x900;
+    let int = ctl + 0x08;
+    const SNAK: u32 = 1 << 27;
+    const INEPNE: u32 = 1 << 6;
+    const EPDISD: u32 = 1 << 1;
+    const TXFFLSH: u32 = 1 << 5;
+    let wait = |a: u32, m: u32, set: bool| {
+        for _ in 0..20_000 {
+            if (unsafe { r32(a) } & m != 0) == set {
+                break;
+            }
+        }
+    };
+    unsafe {
+        if r32(ctl) & DXEPCTL_EPENA != 0 {
+            modify32(ctl, DXEPCTL_EPENA | DXEPCTL_EPDIS, SNAK);
+            wait(int, INEPNE, true);
+            modify32(ctl, DXEPCTL_EPENA, DXEPCTL_EPDIS | SNAK);
+            wait(int, EPDISD, true);
+            w32(int, EPDISD | INEPNE);
+        }
+        w32(GRSTCTL, TXFFLSH); // TXFNUM 0
+        wait(GRSTCTL, TXFFLSH, false);
+    }
+}
+
+/// True while EP0 IN holds a packet the host has not taken (DIEPCTL0 EPENA).
+pub fn in0_busy() -> bool {
+    (unsafe { r32(USBFS + 0x900) } & DXEPCTL_EPENA) != 0
+}
+
 /// Drop a Bulk-IN packet the host has not taken (USB mass storage reset
 /// recovery, a bus reset in a data phase): NAK, disable the endpoint (EPENA
 /// set by the driver's write; a bus reset leaves it: synopsys-usb-otg's

@@ -125,7 +125,10 @@ cortex-m = "0.7.7"
 # interrupts: src/main.rs `NoMask` (the AD2 stream ISR shares no state with it).
 critical-section = "1.2.0"
 synopsys-usb-otg = { version = "0.5.0", features = ["fs"] }
-usb-device = "0.3.2"
+# control-buffer-256: the MS OS 2.0 descriptor set (178 B, usbtmc.rs) goes
+# out of the control buffer, not by accept_with_static (whose slice 0.3.2
+# keeps after a cut-short transfer: the next IN reply sent its bytes).
+usb-device = { version = "0.3.2", features = ["control-buffer-256"] }
 usbd-storage = { version = "3.0.0", features = ["bbb", "scsi"] }
 
 # usbd-storage 3.0.0 with five fixes (vendor/usbd-storage, each marked

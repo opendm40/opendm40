@@ -420,6 +420,15 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
 
         dev.poll(&mut [&mut tmc, &mut msc]);
+        // The MS OS 2.0 set (usbtmc.rs, 23 EP0 packets): out within ~10 ms
+        // instead of one packet per pass (up to ~0.6 s on a busy page, long
+        // enough for a host to give up on it).
+        if tmc.take_ep0_pump() {
+            let t0 = cyc();
+            while cyc().wrapping_sub(t0) < EP0_PUMP_CYC {
+                dev.poll(&mut [&mut tmc, &mut msc]);
+            }
+        }
         // M4: no host disk writes while the logger needs a constant interval.
         msc.set_write_inhibit(logger.disk_writes_blocked());
         msc.set_usb_state(dev.state());
@@ -2159,6 +2168,8 @@ const STREAM_STALL_MS: u64 = 2000;
 /// The main loop's extra USB polling per pass while a host READ of the disk
 /// runs (cycles: 2 ms; 0.5 ms during a logger session).
 const MSC_PUMP_CYC: u32 = clock::HCLK_HZ / 500;
+/// The MS OS 2.0 set's EP0 pump (main loop): 10 ms, once per request.
+const EP0_PUMP_CYC: u32 = clock::HCLK_HZ / 100;
 const MSC_PUMP_LOG_CYC: u32 = clock::HCLK_HZ / 2000;
 
 /// The nominal rate (S/s) of the logger's next session from `ad2` / AD1
