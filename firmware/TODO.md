@@ -465,6 +465,16 @@ the scope full record.
         DBG:HWTRIG[?|:ENABLE|:CAL?|:STAT?|:STAT:RESET]. On by default since 4f876cf (enabled in
         Scope::new; hwtrig::DEFAULT_ENABLED stays the module default). (device-verified: Auto/Normal/
         Single, 100 us..100 ms/div all T'D, 0 misses)
+  - [x] Scope frequency counter on the comparator (hwtrig.rs FreqCounter): TIM2 runs free and captures
+        the PA15 edge (TRGO = CC1 pulse), TIM5 counts the edges, the post-trigger count moved from TIM2 to
+        TIM4 (OC2REF gates TIM1 via ITR3); Freq / Cycl from it on any timebase, else from the window.
+        DBG:HWTRIG:FREQ?. Emulator: emu/hwfreqtest.py. (verify on device: counter vs the generator and the
+        MR9270 at 1 Hz .. 10 MHz, slow edges for comparator chatter, the trigger still T'D at
+        100 us..100 ms/div; open input and a small noisy signal at the level: Freq must stay "--", the
+        counter takes every comparator crossing and has only the comparator's own hysteresis)
+  - [ ] Comparator trigger below ~2.5 kS/s: TIM4 holds the post count in 16 bits (hwtrig::tim4_div), so from
+        1250 S/s (2 s/div, roll off or Single) a long post part falls back to the software trigger; the
+        32-bit TIM2 had no such limit. Chain TIM4 with another timer or use TIM5's prescaler if it matters.
   - [x] Confirm simultaneous DMM+scope accuracy (both-rails crosstalk). Closed 2026-10-27: the fix this item waited
         for passed on bb39569 (end of the item). From "Next up": device d8e249d, the 40 Hz 0..9.6 V square reads
         +0.19 % with the scope rail on (SYST:RAIL AUTO <-> BOTH on the DMM page: +9.3 mV at 40 Hz, +14.1 mV at

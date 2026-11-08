@@ -20,20 +20,32 @@
 //! crossing sits about 2 us *before* the PA15 edge.
 //!
 //! opendm40 has no peripheral interrupts and must not stop the DMA from an ISR,
-//! so the stop is moved into hardware:
-//!   * TIM2 CH2 runs in PWM1 with CCR2 = post count; OC2REF is TIM2's TRGO
-//!     (MMS = 5). Before the trigger CNT = 0 < CCR2, so OC2REF is high.
+//! so the stop is moved into hardware. PA15 reaches only TIM2 (GD32F427
+//! datasheet pin table: TIMER1_CH0 / TIMER1_ETI), and TIM2 also feeds the
+//! frequency counter, so TIM2 only time-stamps the edges and TIM4 counts the
+//! post-trigger samples (GD32F4xx User Manual rev 3.3, the ITI table of the
+//! slave mode controller; GD TIMERn = TIM(n+1) here):
+//!   * TIM2 runs free (32 bit, PSC 0, 200 MHz) with CH1 capturing the PA15
+//!     edge of the trigger polarity into CCR1; its TRGO is the CC1 pulse
+//!     (MMS = 3), one pulse per captured edge.
+//!   * TIM5 (32 bit) counts those pulses: external clock mode 1 from ITR0 =
+//!     TIM2_TRGO. Edge count and the last edge's time stamp give a
+//!     reciprocal frequency counter (`FreqCounter`), independent of the
+//!     timebase and of the record.
+//!   * TIM4 is the post-trigger counter: OC2 "inactive on match" with CCR2 =
+//!     post count, OC2REF is its TRGO (MMS = 5). It is forced high while
+//!     prepared; `arm` puts TIM4 in trigger mode from ITR1 = TIM2_TRGO, the
+//!     next captured edge starts it, CCR2 ticks later OC2REF drops and stays
+//!     low (the 16-bit counter may wrap, the level holds).
 //!   * TIM1 (the sample-request timer, `scope.rs`) is put in gated slave mode
-//!     from ITR1 = TIM2_TRGO: it counts while OC2REF is high.
-//!   * The PA15 edge starts TIM2 (SMS = 6); CCR2 ticks later OC2REF drops,
-//!     TIM1 stops, the DMA (circular over the whole record) freezes with the
-//!     trigger `post` samples before the write pointer `CAP - NDTR`.
+//!     from ITR3 = TIM4_TRGO: it counts while OC2REF is high, so the DMA
+//!     (circular over the whole record) freezes with the trigger `post`
+//!     samples before the write pointer `CAP - NDTR`.
 //!   * The record is then linearised and the stock software search runs in a
 //!     window around that estimate; the display and Single/stored records use
 //!     the refined index. TIM8 (ADC clock, latch stream) is not affected.
-//! TIM2 PSC = TIM1 ARR (one TIM2 tick = TIM1 ARR+1 core ticks), the post count
-//! is in TIM1-prescaler units; this keeps the 16-bit TIM2 PSC in range for all
-//! 31 timebase rows (the stock uses TIM5's PSC the same way).
+//! One TIM4 tick is 1/m sample (`tim4_div`: TIM1's period in core ticks over
+//! the smallest m that fits the 16-bit PSC), the post count is in those ticks.
 //!
 //! Only DAC bits 16..31 are touched (channel 2); `gen.rs` owns bits 0..15.
 //! Nothing here allocates: the module is a thin register driver plus the
@@ -51,6 +63,29 @@ const DAC_DOR2: u32 = DAC + 0x30;
 const TIM1: u32 = 0x4001_0000;
 const TIM1_SMCR: u32 = TIM1 + 0x08;
 const TIM2: u32 = 0x4000_0000;
+const TIM4: u32 = 0x4000_0800;
+const TIM4_CR1: u32 = TIM4 + 0x00;
+const TIM4_CR2: u32 = TIM4 + 0x04;
+const TIM4_SMCR: u32 = TIM4 + 0x08;
+const TIM4_DIER: u32 = TIM4 + 0x0C;
+const TIM4_SR: u32 = TIM4 + 0x10;
+const TIM4_EGR: u32 = TIM4 + 0x14;
+const TIM4_CCMR1: u32 = TIM4 + 0x18;
+const TIM4_CCER: u32 = TIM4 + 0x20;
+const TIM4_CNT: u32 = TIM4 + 0x24;
+const TIM4_PSC: u32 = TIM4 + 0x28;
+const TIM4_ARR: u32 = TIM4 + 0x2C;
+const TIM4_CCR2: u32 = TIM4 + 0x38;
+const TIM5: u32 = 0x4000_0C00;
+const TIM5_CR1: u32 = TIM5 + 0x00;
+const TIM5_CR2: u32 = TIM5 + 0x04;
+const TIM5_SMCR: u32 = TIM5 + 0x08;
+const TIM5_DIER: u32 = TIM5 + 0x0C;
+const TIM5_SR: u32 = TIM5 + 0x10;
+const TIM5_EGR: u32 = TIM5 + 0x14;
+const TIM5_CNT: u32 = TIM5 + 0x24;
+const TIM5_PSC: u32 = TIM5 + 0x28;
+const TIM5_ARR: u32 = TIM5 + 0x2C;
 const TIM2_CR1: u32 = TIM2 + 0x00;
 const TIM2_CR2: u32 = TIM2 + 0x04;
 const TIM2_SMCR: u32 = TIM2 + 0x08;
@@ -63,7 +98,6 @@ const TIM2_CNT: u32 = TIM2 + 0x24;
 const TIM2_PSC: u32 = TIM2 + 0x28;
 const TIM2_ARR: u32 = TIM2 + 0x2C;
 const TIM2_CCR1: u32 = TIM2 + 0x34;
-const TIM2_CCR2: u32 = TIM2 + 0x38;
 /// Offset PWM compare register (scope.rs owns TIM3; written here only during
 /// `calibrate`, the caller re-applies the scope settings afterwards).
 const TIM3_CCR3: u32 = 0x4000_0400 + 0x3C;
@@ -85,20 +119,31 @@ pub const MAP_DEFAULT: (f32, f32) = (300.0, 780.0);
 pub const CCR3_LO: u32 = 8800;
 pub const CCR3_HI: u32 = 11636;
 
-/// TIM2 CCMR1: CH1 input on TI1, no prescaler, filter 3 (fCK_INT, N = 8);
-/// CH2 output compare. OC2M = 101 forces OC2REF active (TIM1 gate open).
-const CCMR1_FORCED: u32 = (0b101 << 12) | (3 << 4) | 1;
-/// Same with OC2M = 110 (PWM mode 1): OC2REF high while CNT < CCR2.
-const CCMR1_PWM1: u32 = (0b110 << 12) | (3 << 4) | 1;
-/// TIM2 SMCR trigger selection TI1FP1.
-const SMCR_TS_TI1FP1: u32 = 0b101 << 4;
-/// TIM1 SMCR: gated mode (SMS = 101) from ITR1 = TIM2_TRGO (TS = 001).
-const TIM1_SMCR_GATED_BY_TIM2: u32 = (0b001 << 4) | 0b101;
+/// Timer clock (TIMPRE = 1: every timer runs at the 200 MHz core clock).
+pub const TIM_CLK: u32 = 200_000_000;
+/// TIM2 CCMR1: CH1 input capture on TI1, no prescaler, filter 3 (fCK_INT,
+/// N = 8: an edge must hold 40 ns).
+const TIM2_CCMR1_CAPTURE: u32 = (3 << 4) | 1;
+/// TIM2 CR2: MMS = 011, TRGO = the CC1 (capture) pulse.
+const TIM2_CR2_CC1_PULSE: u32 = 3 << 4;
+/// TIM5 SMCR: external clock mode 1 (SMS = 111) from ITR0 = TIM2_TRGO.
+const TIM5_SMCR_COUNT_TIM2: u32 = (0b000 << 4) | 0b111;
+/// TIM4 CCMR1: CH2 output compare, OC2M = 101 forces OC2REF active (TIM1
+/// gate open).
+const TIM4_CCMR1_FORCED: u32 = 0b101 << 12;
+/// OC2M = 010: OC2REF goes inactive at CNT = CCR2 and stays there.
+const TIM4_CCMR1_LOW_ON_MATCH: u32 = 0b010 << 12;
+/// TIM4 CR2: MMS = 101, TRGO = OC2REF.
+const TIM4_CR2_OC2REF: u32 = 5 << 4;
+/// TIM4 SMCR: trigger mode (SMS = 110) from ITR1 = TIM2_TRGO (TS = 001).
+const TIM4_SMCR_TRIG_TIM2: u32 = (0b001 << 4) | 0b110;
+/// TIM1 SMCR: gated mode (SMS = 101) from ITR3 = TIM4_TRGO (TS = 011).
+const TIM1_SMCR_GATED_BY_TIM4: u32 = (0b011 << 4) | 0b101;
 
 /// Trigger engine state as seen in the TIM2 registers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
-    /// Not prepared: TIM1 free-running, TIM2 idle.
+    /// Not prepared: TIM1 free-running, TIM4 idle.
     Off,
     /// Prepared (level set, gate open), waiting for `arm` (pre-trigger fill).
     Prepared,
@@ -181,6 +226,13 @@ pub struct HwTrig {
     armed: bool,
     post_ticks: u32,
     pub last_cal: Option<CalResult>,
+    /// Comparator frequency counter (TIM2 time stamps, TIM5 edge count).
+    pub freq: FreqCounter,
+    /// TIM2 CC1P as last written (the captured edge: true = falling PA15 =
+    /// a rising signal).
+    edge: Option<bool>,
+    /// DAC2 code as last written by `track_level`.
+    dac: u16,
 }
 
 const MAX_MISSES: u8 = 3;
@@ -202,6 +254,9 @@ impl HwTrig {
             armed: false,
             post_ticks: 0,
             last_cal: None,
+            freq: FreqCounter::new(),
+            edge: None,
+            dac: 0xFFFF,
         }
     }
 
@@ -209,14 +264,15 @@ impl HwTrig {
         self.stats = Stats { hits: 0, misses: 0, delta_last: 0, delta_min: i32::MAX, delta_max: i32::MIN, delta_sum: 0 };
     }
 
-    /// One-time hardware setup (stock `FUN_08012260`): GPIOA / DAC / TIM2
-    /// clocks, PA5 analog, PA15 AF1 with pull-down, DAC channel 2 enabled
-    /// (buffer on, no trigger, no wave), TIM2 idle with the TIM1 gate open.
-    /// TIM1 SMCR is left at 0 here: `prepare` sets the gate.
+    /// One-time hardware setup (stock `FUN_08012260`): GPIOA / DAC / TIM2 /
+    /// TIM4 / TIM5 clocks, PA5 analog, PA15 AF1 with pull-down, DAC channel 2
+    /// enabled (buffer on, no trigger, no wave), TIM2 time-stamping and TIM5
+    /// counting the edges (they run from here on), TIM4 idle with the TIM1
+    /// gate open. TIM1 SMCR is left at 0 here: `prepare` sets the gate.
     pub fn init(&mut self) {
         unsafe {
             modify32(RCU_AHB1EN, 0, 1 << 0);
-            modify32(RCU_APB1EN, 0, (1 << 29) | (1 << 0));
+            modify32(RCU_APB1EN, 0, (1 << 29) | (1 << 3) | (1 << 2) | (1 << 0));
             // PA5: analog, no pull.
             modify32(GPIOA + 0x0C, 3 << 10, 0);
             modify32(GPIOA + 0x00, 3 << 10, 3 << 10);
@@ -230,18 +286,68 @@ impl HwTrig {
             // bits (generator) untouched.
             modify32(DAC_CR, 0xFFFF_0000, 1 << 16);
             w32(DAC_DHR12R2, 2048);
-            // TIM2 quiet: no interrupts, gate open, counter stopped.
+            // TIM5: edge counter (no interrupts), started before TIM2 so it
+            // sees every pulse.
+            w32(TIM5_CR1, 0);
+            w32(TIM5_DIER, 0);
+            w32(TIM5_CR2, 0);
+            w32(TIM5_SMCR, TIM5_SMCR_COUNT_TIM2);
+            w32(TIM5_PSC, 0);
+            w32(TIM5_ARR, 0xFFFF_FFFF);
+            w32(TIM5_EGR, 1);
+            w32(TIM5_CNT, 0);
+            w32(TIM5_SR, 0);
+            w32(TIM5_CR1, 1);
+            // TIM2: free-running time base, CH1 capture, TRGO = CC1 pulse.
             w32(TIM2_CR1, 0);
             w32(TIM2_DIER, 0);
-            w32(TIM2_SMCR, SMCR_TS_TI1FP1);
+            w32(TIM2_SMCR, 0);
             w32(TIM2_CCER, 0);
-            w32(TIM2_CCMR1, CCMR1_FORCED);
-            w32(TIM2_CR2, 5 << 4);
+            w32(TIM2_CCMR1, TIM2_CCMR1_CAPTURE);
+            w32(TIM2_CR2, TIM2_CR2_CC1_PULSE);
+            w32(TIM2_PSC, 0);
             w32(TIM2_ARR, 0xFFFF_FFFF);
+            w32(TIM2_EGR, 1);
             w32(TIM2_SR, 0);
+            w32(TIM2_CCER, 1 | (1 << 1));
+            w32(TIM2_CR1, 1);
+            // TIM4 quiet: no interrupts, gate open, counter stopped.
+            w32(TIM4_CR1, 0);
+            w32(TIM4_DIER, 0);
+            w32(TIM4_SMCR, 0);
+            w32(TIM4_CCER, 0);
+            w32(TIM4_CCMR1, TIM4_CCMR1_FORCED);
+            w32(TIM4_CR2, TIM4_CR2_OC2REF);
+            w32(TIM4_ARR, 0xFFFF);
+            w32(TIM4_SR, 0);
         }
+        self.edge = Some(true);
+        self.dac = 0xFFFF;
+        self.freq.restart();
         self.prepared = false;
         self.armed = false;
+    }
+
+    /// Captured edge: a rising signal is a falling PA15 edge (CC1P = 1).
+    /// TIM2 keeps running; a new polarity restarts the frequency count.
+    pub fn set_edge(&mut self, rising: bool) {
+        if self.edge == Some(rising) {
+            return;
+        }
+        unsafe { w32(TIM2_CCER, 1 | if rising { 1 << 1 } else { 0 }) };
+        self.edge = Some(rising);
+        self.freq.restart();
+    }
+
+    /// Keep the comparator at the trigger level and edge also while the
+    /// software trigger runs (the frequency counter uses it). Writes only on
+    /// a change.
+    pub fn track_level(&mut self, code: f32, rising: bool) {
+        self.set_edge(rising);
+        let d = self.level_dac(code, rising);
+        if d != self.dac {
+            self.set_level(code, rising);
+        }
     }
 
     /// Policy: use the comparator at all (default on; `note_miss` may turn it
@@ -306,8 +412,9 @@ impl HwTrig {
 
     /// Write the level: DAC2 = `level_dac(code)`. Re-asserts EN2 (cheap and
     /// immune to any future whole-register write on the generator side).
-    pub fn set_level(&self, code: f32, rising: bool) {
+    pub fn set_level(&mut self, code: f32, rising: bool) {
         let d = self.level_dac(code, rising);
+        self.dac = d;
         unsafe {
             modify32(DAC_CR, 0xFFFF_0000, 1 << 16);
             w32(DAC_DHR12R2, d as u32);
@@ -315,7 +422,8 @@ impl HwTrig {
     }
 
     /// Raw DAC2 code (calibration / diagnostics).
-    pub fn set_dac(&self, code: u16) {
+    pub fn set_dac(&mut self, code: u16) {
+        self.dac = 0xFFFF;
         unsafe {
             modify32(DAC_CR, 0xFFFF_0000, 1 << 16);
             w32(DAC_DHR12R2, (code & 0xFFF) as u32);
@@ -331,45 +439,50 @@ impl HwTrig {
     /// TIM1 is enabled (TIM1 CR1 CEN); `tim1_psc` / `tim1_arr` are the row of
     /// the HW table in use, `post` the number of samples to keep after the
     /// trigger, `code` the trigger level in ADC codes.
-    /// After this TIM1 only counts while TIM2's OC2REF is high (it is, until
-    /// a trigger has run its post count), the DAC holds the level, and TIM2
-    /// waits for `arm`.
-    pub fn prepare(&mut self, tim1_psc: u32, tim1_arr: u32, post: u32, code: f32, rising: bool) {
+    /// After this TIM1 only counts while TIM4's OC2REF is high (it is, until
+    /// a trigger has run its post count), the DAC holds the level, and TIM4
+    /// waits for `arm`. False (nothing changed, TIM1 not gated): the post
+    /// count does not fit TIM4 at this rate; use the software trigger.
+    pub fn prepare(&mut self, tim1_psc: u32, tim1_arr: u32, post: u32, code: f32, rising: bool) -> bool {
+        let Some((div, ticks)) = tim4_div((tim1_psc + 1) * (tim1_arr + 1), post.max(1)) else {
+            self.prepared = false;
+            self.armed = false;
+            return false;
+        };
+        self.set_edge(rising);
         self.set_level(code, rising);
-        self.post_ticks = post.max(1) * (tim1_psc + 1);
+        self.post_ticks = ticks;
         unsafe {
-            w32(TIM2_CR1, 0);
-            w32(TIM2_SMCR, SMCR_TS_TI1FP1);
-            w32(TIM2_CCER, 0);
-            w32(TIM2_CCMR1, CCMR1_FORCED);
-            w32(TIM2_CR2, 5 << 4);
-            w32(TIM2_PSC, tim1_arr & 0xFFFF);
-            w32(TIM2_ARR, 0xFFFF_FFFF);
-            w32(TIM2_CCR2, self.post_ticks);
-            w32(TIM2_CNT, 0);
+            w32(TIM4_CR1, 0);
+            w32(TIM4_SMCR, 0);
+            w32(TIM4_CCMR1, TIM4_CCMR1_FORCED);
+            w32(TIM4_CR2, TIM4_CR2_OC2REF);
+            w32(TIM4_PSC, div - 1);
+            w32(TIM4_ARR, 0xFFFF);
+            w32(TIM4_CCR2, ticks);
+            w32(TIM4_CNT, 0);
             // Load PSC (takes effect at an update event), then clear the flags.
-            w32(TIM2_EGR, 1);
-            w32(TIM2_SR, 0);
-            // CH1 capture enable; rising trigger = falling PA15 edge (CC1P = 1).
-            w32(TIM2_CCER, 1 | if rising { 1 << 1 } else { 0 });
-            w32(TIM1_SMCR, TIM1_SMCR_GATED_BY_TIM2);
+            w32(TIM4_EGR, 1);
+            w32(TIM4_SR, 0);
+            w32(TIM1_SMCR, TIM1_SMCR_GATED_BY_TIM4);
         }
         self.prepared = true;
         self.armed = false;
+        true
     }
 
     /// Enable the trigger once the pre-trigger part of the record is written
-    /// (the stock arms from TIM5 CC1 at `pre`). From here the next PA15 edge
-    /// starts the post-trigger count.
+    /// (the stock arms from TIM5 CC1 at `pre`). From here the next captured
+    /// PA15 edge starts the post-trigger count.
     pub fn arm(&mut self) {
         if !self.prepared || self.armed {
             return;
         }
         unsafe {
-            w32(TIM2_CNT, 0);
-            w32(TIM2_SR, 0);
-            w32(TIM2_CCMR1, CCMR1_PWM1);
-            w32(TIM2_SMCR, SMCR_TS_TI1FP1 | 6);
+            w32(TIM4_CNT, 0);
+            w32(TIM4_SR, 0);
+            w32(TIM4_CCMR1, TIM4_CCMR1_LOW_ON_MATCH);
+            w32(TIM4_SMCR, TIM4_SMCR_TRIG_TIM2);
         }
         self.armed = true;
     }
@@ -382,33 +495,35 @@ impl HwTrig {
         if !self.armed {
             return Status::Prepared;
         }
-        let (sr, cr1, cnt) = unsafe { (r32(TIM2_SR), r32(TIM2_CR1), r32(TIM2_CNT)) };
+        let (sr, cr1) = unsafe { (r32(TIM4_SR), r32(TIM4_CR1)) };
         let fired = sr & (1 << 6) != 0 || cr1 & 1 != 0;
         if !fired {
             return Status::Armed;
         }
-        if sr & (1 << 2) != 0 || cnt >= self.post_ticks {
+        // CC2IF: the match that dropped OC2REF (CNT may have wrapped since).
+        if sr & (1 << 2) != 0 {
             Status::Done
         } else {
             Status::Fired
         }
     }
 
-    /// Post-trigger samples of the current preparation (what `prepare` got).
+    /// Post-trigger count of the current preparation in TIM4 ticks.
     pub fn post_ticks(&self) -> u32 {
         self.post_ticks
     }
 
-    /// Release: TIM2 stopped and reset, gate forced open, TIM1 back to its
-    /// free-running (software trigger) configuration. Safe to call any time;
-    /// `Scope::halt` must call it so the plain path is never left gated.
+    /// Release: TIM4 stopped and reset, gate forced open, TIM1 back to its
+    /// free-running (software trigger) configuration. TIM2 / TIM5 (the
+    /// frequency counter) keep running. Safe to call any time; `Scope::halt`
+    /// must call it so the plain path is never left gated.
     pub fn disarm(&mut self) {
         unsafe {
-            w32(TIM2_SMCR, SMCR_TS_TI1FP1);
-            w32(TIM2_CR1, 0);
-            w32(TIM2_CCMR1, CCMR1_FORCED);
-            w32(TIM2_CNT, 0);
-            w32(TIM2_SR, 0);
+            w32(TIM4_SMCR, 0);
+            w32(TIM4_CR1, 0);
+            w32(TIM4_CCMR1, TIM4_CCMR1_FORCED);
+            w32(TIM4_CNT, 0);
+            w32(TIM4_SR, 0);
             w32(TIM1_SMCR, 0);
         }
         self.prepared = false;
@@ -481,6 +596,8 @@ impl HwTrig {
             flip[i][1] = self.sweep(false).ok_or(CalError::NoFlip)?;
         }
         self.set_dac(2048);
+        // The sweeps flipped PA15 thousands of times: TIM5 counted them.
+        self.freq.restart();
         let codes = [lo_code, hi_code];
         // The offset step (~450 codes) must move the flip by a few hundred
         // DAC codes (default slope 1.294 -> ~580).
@@ -516,7 +633,7 @@ impl HwTrig {
     /// Sweep DAC2 over the full range (step 1, ~4 us settle per step, about
     /// 16 ms) and return the first code where PA15 differs from its level at
     /// the sweep start and holds for 8 further codes.
-    fn sweep(&self, up: bool) -> Option<u16> {
+    fn sweep(&mut self, up: bool) -> Option<u16> {
         let start = if up { 0u16 } else { 4095 };
         self.set_dac(start);
         crate::clock::delay_us(50);
@@ -542,10 +659,122 @@ impl HwTrig {
         None
     }
 
-    /// Debug: TIM2 SR, TIM2 CNT, TIM2 CCR1, (PA15 << 16 | DAC DOR2).
+    /// Debug: TIM4 SR, TIM4 CNT, TIM2 CCR1, (PA15 << 16 | DAC DOR2).
     pub fn debug(&self) -> [u32; 4] {
-        unsafe { [r32(TIM2_SR), r32(TIM2_CNT), r32(TIM2_CCR1), ((self.pa15() as u32) << 16) | (r32(DAC_DOR2) & 0xFFF)] }
+        unsafe { [r32(TIM4_SR), r32(TIM4_CNT), r32(TIM2_CCR1), ((self.pa15() as u32) << 16) | (r32(DAC_DOR2) & 0xFFF)] }
     }
+
+    /// Debug: TIM5 CNT (edges), TIM2 CNT (now), TIM2 CCR1 (last edge).
+    pub fn freq_regs(&self) -> [u32; 3] {
+        unsafe { [r32(TIM5_CNT), r32(TIM2_CNT), r32(TIM2_CCR1)] }
+    }
+
+    /// Advance the frequency counter (call every main-loop pass while the
+    /// scope front end is on).
+    pub fn freq_poll(&mut self, now_ms: u64) {
+        let (n, t, now) = read_edges();
+        self.freq.update(n, t, now, now_ms);
+    }
+}
+
+/// A consistent (edge count, time of that count's last edge, TIM2 now):
+/// TIM5 read before and after CCR1 must agree (an edge between the reads
+/// moves both). After four tries (edges denser than the reads, a few MHz):
+/// the count with the current time, at most one period off over the gate.
+fn read_edges() -> (u32, u32, u32) {
+    unsafe {
+        for _ in 0..4 {
+            let a = r32(TIM5_CNT);
+            let c = r32(TIM2_CCR1);
+            let b = r32(TIM5_CNT);
+            if a == b {
+                return (a, c, r32(TIM2_CNT));
+            }
+        }
+        let now = r32(TIM2_CNT);
+        (r32(TIM5_CNT), now, now)
+    }
+}
+
+/// Reciprocal frequency counter on the comparator edges: whole edge-to-edge
+/// intervals of at least `GATE` TIM2 ticks, f = edges x TIM_CLK / ticks.
+/// The resolution is one TIM2 tick (5 ns) per gate, the accuracy that of the
+/// MCU crystal; it needs the signal to cross the trigger level (comparator
+/// hysteresis and chatter on slow edges: not measured on the device).
+pub struct FreqCounter {
+    /// Gate start: edge count and its edge's TIM2 time; None until an edge
+    /// is seen after `restart`.
+    anchor: Option<(u32, u32)>,
+    /// Edge count at `restart` (an anchor needs a newer edge: CCR1 is stale
+    /// before it).
+    seen: Option<u32>,
+    /// Last result (Hz; NaN: none) and when it was taken (ms).
+    f: f32,
+    at_ms: u64,
+}
+
+/// Gate: 50 M ticks = 250 ms.
+const GATE: u32 = TIM_CLK / 4;
+/// Longest wait for a second edge: 10 s (TIM2 wraps after 21.5 s).
+const MAX_TICKS: u32 = 10 * TIM_CLK;
+
+impl FreqCounter {
+    pub const fn new() -> Self {
+        FreqCounter { anchor: None, seen: None, f: f32::NAN, at_ms: 0 }
+    }
+
+    /// Forget the gate and the result (new polarity, range, coupling, a
+    /// front end coming up).
+    pub fn restart(&mut self) {
+        self.anchor = None;
+        self.seen = None;
+        self.f = f32::NAN;
+    }
+
+    /// One reading: `n` edges counted, the last one at TIM2 time `t`, TIM2
+    /// now `now`.
+    pub fn update(&mut self, n: u32, t: u32, now: u32, now_ms: u64) {
+        let Some((n0, t0)) = self.anchor else {
+            match self.seen {
+                Some(s) if s != n => self.anchor = Some((n, t)),
+                _ => self.seen = Some(n),
+            }
+            return;
+        };
+        let (dn, dt) = (n.wrapping_sub(n0), t.wrapping_sub(t0));
+        if dn >= 1 && dt >= GATE {
+            self.f = (dn as f64 * TIM_CLK as f64 / dt as f64) as f32;
+            self.at_ms = now_ms;
+            self.anchor = Some((n, t));
+        } else if now.wrapping_sub(t0) > MAX_TICKS {
+            // No second edge within 10 s: start over before TIM2 wraps.
+            self.restart();
+            self.seen = Some(n);
+        }
+    }
+
+    /// The last result while fresh: within 1.5 s or three periods of it.
+    pub fn hz(&self, now_ms: u64) -> Option<f32> {
+        if !(self.f > 0.0) {
+            return None;
+        }
+        let keep = (3000.0 / self.f).max(1500.0) as u64;
+        if now_ms.saturating_sub(self.at_ms) <= keep { Some(self.f) } else { None }
+    }
+}
+
+/// TIM4 prescaler and post count for a sample period of `period` core ticks
+/// and `post` samples: the smallest m dividing `period` with period / m <=
+/// 65536 (the 16-bit PSC); the count is post x m ticks of period / m, which
+/// must stay below the 16-bit ARR. None: does not fit (below ~2.5 kS/s with a
+/// long post part).
+pub fn tim4_div(period: u32, post: u32) -> Option<(u32, u32)> {
+    let mut m = period.div_ceil(65536).max(1);
+    while m <= period && period % m != 0 {
+        m += 1;
+    }
+    let ticks = post.checked_mul(m)?;
+    if m > period || ticks > 0xFFFE { None } else { Some((period / m, ticks)) }
 }
 
 /// A {f0, f1} pair from the settings record if plausible (finite, within the

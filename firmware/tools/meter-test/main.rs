@@ -64,6 +64,9 @@ mod scope {
         pub fn volts(&self, c: f32) -> f32 {
             c
         }
+        pub fn hw_freq(&self) -> Option<f32> {
+            None
+        }
     }
 }
 

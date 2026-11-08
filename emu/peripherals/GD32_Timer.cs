@@ -8,9 +8,13 @@
 //     clock(7); TS = ITR0..3 (GPIO inputs 16..19, wired in the .repl per the
 //     GD32F4 interconnect table), TI1F_ED(4) and TI1FP1(5) (GPIO input 0 =
 //     CH1 pin, CCER polarity, filter ignored); CC1 input capture;
-//   * output compare PWM1/PWM2/force on CH1..4 (OCxREF), master mode TRGO:
-//     reset / enable (level = counter enable) / update / compare pulse /
-//     OCxREF level; TRGO and TRGO2 are the same signal (two fan-out points);
+//   * output compare PWM1/PWM2/force/set/clear/toggle on match on CH1..4
+//     (OCxREF), master mode TRGO: reset / enable (level = counter enable) /
+//     update / CC1 pulse (compare or capture) / OCxREF level; TRGO, TRGO2
+//     and TRGO3 are the same signal (three fan-out points);
+//   * `wide`: 32-bit CNT / ARR / CCRx (TIM2, TIM5); else 16 bit;
+//   * external clock mode 1 (SMS = 7): the counter counts trigger edges
+//     only, not the internal clock;
 //   * interrupts UIE/CCxIE/TIE on IRQ (general timers) and on the split
 //     Update/CaptureCompare/Trigger/Break lines (advanced timers).
 // DMA requests are not signalled: the scope feeder asks this model how many
@@ -29,11 +33,12 @@ namespace Antmicro.Renode.Peripherals.Timers
 {
     public class GD32_Timer : IDoubleWordPeripheral, IWordPeripheral, IKnownSize, IGPIOReceiver
     {
-        public GD32_Timer(IMachine machine, ulong frequency = 200000000, bool advanced = false)
+        public GD32_Timer(IMachine machine, ulong frequency = 200000000, bool advanced = false, bool wide = false)
         {
             this.machine = machine;
             this.frequency = frequency;
             this.advanced = advanced;
+            this.mask = wide ? 0xFFFFFFFFu : 0xFFFFu;
             Reset();
         }
 
@@ -50,7 +55,7 @@ namespace Antmicro.Renode.Peripherals.Timers
             for(var i = 0; i < 4; i++) itr[i] = false;
             generation++;
             IRQ.Set(false); UpdateInterrupt.Set(false); CaptureCompareInterrupt.Set(false); TriggerInterrupt.Set(false);
-            TRGO.Set(false); TRGO2.Set(false);
+            TRGO.Set(false); TRGO2.Set(false); TRGO3.Set(false);
         }
 
         public long Size => 0x400;
@@ -61,6 +66,7 @@ namespace Antmicro.Renode.Peripherals.Timers
         public GPIO BreakInterrupt { get; } = new GPIO();
         public GPIO TRGO { get; } = new GPIO();
         public GPIO TRGO2 { get; } = new GPIO();
+        public GPIO TRGO3 { get; } = new GPIO();
 
         // ---- bus ----
         public ushort ReadWord(long offset) => (ushort)ReadDoubleWord(offset);
@@ -141,15 +147,15 @@ namespace Antmicro.Renode.Peripherals.Timers
                 UpdateTrgo(now);
                 Schedule(now);
                 break;
-            case 0x18: ccmr1 = value; UpdateTrgo(now); Schedule(now); break;
-            case 0x1C: ccmr2 = value; UpdateTrgo(now); Schedule(now); break;
+            case 0x18: Evaluate(now); ccmr1 = value; ForcedRef(0); ForcedRef(1); UpdateTrgo(now); Schedule(now); break;
+            case 0x1C: Evaluate(now); ccmr2 = value; ForcedRef(2); ForcedRef(3); UpdateTrgo(now); Schedule(now); break;
             case 0x20: ccer = value; UpdateTrgo(now); break;
-            case 0x24: Evaluate(now); SetCounter(value & 0xFFFF, now); break;
+            case 0x24: Evaluate(now); SetCounter(value & mask, now); break;
             case 0x28: Evaluate(now); Recount(now, () => psc = value & 0xFFFF); break;
-            case 0x2C: Evaluate(now); Recount(now, () => arr = value & 0xFFFF); break;
+            case 0x2C: Evaluate(now); Recount(now, () => arr = value & mask); break;
             case 0x34: case 0x38: case 0x3C: case 0x40:
                 Evaluate(now);
-                ccr[(offset - 0x34) / 4] = value & 0xFFFF;
+                ccr[(offset - 0x34) / 4] = value & mask;
                 UpdateTrgo(now);
                 Schedule(now);
                 break;
@@ -190,6 +196,7 @@ namespace Antmicro.Renode.Peripherals.Timers
                         ccr[0] = (uint)Counter(now);
                         sr |= 2; // CC1IF capture
                         UpdateIrq(now);
+                        if(((cr2 >> 4) & 7) == 3) Pulse(); // MMS = CC1 pulse (capture)
                     }
                     if(ts == 5 && active)
                     {
@@ -308,7 +315,7 @@ namespace Antmicro.Renode.Peripherals.Timers
             var edge = wasCounting ? segStart + (Abs(now) - absAtSegStart) * SecondsPerCount : now;
             CloseSegment(now);
             change?.Invoke();
-            counting = cen && gate;
+            counting = cen && gate && InternalClock;
             var start = wasCounting && counting ? edge : now;
             segStart = start;
             absAtSegStart = cnt;
@@ -337,7 +344,7 @@ namespace Antmicro.Renode.Peripherals.Timers
         private void SetCounter(ulong value, double now, bool countsAsAbsolute = false)
         {
             CloseSegment(now);
-            counting = cen && gate;
+            counting = cen && gate && InternalClock;
             segStart = now;
             absAtSegStart = value;
             evalAbs = value;
@@ -373,9 +380,21 @@ namespace Antmicro.Renode.Peripherals.Timers
             evalAbs = a1;
             var updates = EventsBetween(a0, a1, 0);
             if(updates > 0 && (cr1 & 2) == 0) sr |= 1; // UIF unless UDIS
+            var cc1Pulse = false;
             for(var i = 0; i < 4; i++)
             {
-                if(EventsBetween(a0, a1, ccr[i]) > 0 && IsOutputOrCompare(i)) sr |= 2u << i;
+                if(!IsOutputOrCompare(i)) continue;
+                var ev = EventsBetween(a0, a1, ccr[i]);
+                if(ev == 0) continue;
+                sr |= 2u << i;
+                if(i == 0) cc1Pulse = true;
+                // Set / clear / toggle on match latch OCxREF.
+                switch(OcMode(i))
+                {
+                case 1: ocref[i] = true; break;
+                case 2: ocref[i] = false; break;
+                case 3: if((ev & 1) != 0) ocref[i] = !ocref[i]; break;
+                }
             }
             if(updates > 0)
             {
@@ -392,9 +411,27 @@ namespace Antmicro.Renode.Peripherals.Timers
                 }
                 if(((cr2 >> 4) & 7) == 2) Pulse(); // MMS = update
             }
-            if(((cr2 >> 4) & 7) == 3 && (sr & 2) != 0) Pulse(); // compare pulse (CC1IF)
+            if(((cr2 >> 4) & 7) == 3 && cc1Pulse) Pulse(); // MMS = CC1 pulse (compare)
             UpdateIrq(now);
             UpdateTrgo(now);
+        }
+
+        /// Counts the internal clock (not external clock mode 1).
+        private bool InternalClock => (smcr & 7) != 7;
+
+        private uint OcMode(int ch)
+        {
+            var ccmr = ch < 2 ? ccmr1 : ccmr2;
+            return (ccmr >> ((ch & 1) * 8 + 4)) & 7;
+        }
+
+        /// Forced modes set the latched OCxREF the match modes start from.
+        private void ForcedRef(int ch)
+        {
+            if(!IsOutputOrCompare(ch)) return;
+            var m = OcMode(ch);
+            if(m == 4) ocref[ch] = false;
+            else if(m == 5) ocref[ch] = true;
         }
 
         private bool IsOutputOrCompare(int ch)
@@ -435,13 +472,14 @@ namespace Antmicro.Renode.Peripherals.Timers
             {
                 TRGO.Set(level);
                 TRGO2.Set(level);
+                TRGO3.Set(level);
             }
         }
 
         private void Pulse()
         {
-            TRGO.Set(true); TRGO2.Set(true);
-            TRGO.Set(false); TRGO2.Set(false);
+            TRGO.Set(true); TRGO2.Set(true); TRGO3.Set(true);
+            TRGO.Set(false); TRGO2.Set(false); TRGO3.Set(false);
         }
 
         private void UpdateIrq(double now)
@@ -464,7 +502,7 @@ namespace Antmicro.Renode.Peripherals.Timers
         {
             if(!counting) return;
             var mms = (cr2 >> 4) & 7;
-            var trgoUsed = TRGO.IsConnected || TRGO2.IsConnected;
+            var trgoUsed = TRGO.IsConnected || TRGO2.IsConnected || TRGO3.IsConnected;
             var a = Abs(now);
             var p = Period;
             ulong? next = null;
@@ -481,7 +519,7 @@ namespace Antmicro.Renode.Peripherals.Timers
             }
             for(var i = 0; i < 4; i++)
             {
-                if((dier & (2u << i)) != 0 || (mms == 3 && i == 0 && trgoUsed) || (mms == 4 + (uint)i && trgoUsed))
+                if((dier & (2u << i)) != 0 || (mms == 3 && i == 0 && trgoUsed && IsOutputOrCompare(0)) || (mms == 4 + (uint)i && trgoUsed))
                 {
                     Consider(ccr[i]);
                 }
@@ -544,6 +582,7 @@ namespace Antmicro.Renode.Peripherals.Timers
         private readonly IMachine machine;
         private readonly ulong frequency;
         private readonly bool advanced;
+        private readonly uint mask;
         private uint cr1, cr2, smcr, dier, sr, ccmr1, ccmr2, ccer, psc, arr, bdtr;
         private readonly uint[] ccr = new uint[4];
         private readonly bool[] ti = new bool[4];

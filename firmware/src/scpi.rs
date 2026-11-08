@@ -648,7 +648,7 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           released; runs synchronously; jitter px: a
 ///                           sideways sawtooth on the path (+j, +j/2, 0 per 3
 ///                           points: a jump out, a slow drift back)
-///   DBG:HWTRIG?             comparator trigger (hwtrig.rs): TIM2 SR,CNT,CCR1,
+///   DBG:HWTRIG?             comparator trigger (hwtrig.rs): TIM4 SR,CNT, TIM2 CCR1,
 ///                           PA15<<16|DOR2,enabled,available,map rising lo,hi,
 ///                           map falling lo,hi,post_ticks (available = enabled,
 ///                           not suspended by 3 misses, map present; a suspension
@@ -663,6 +663,8 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:HWTRIG:STAT?        hits,misses,delta_last,delta_min,delta_max,mean
 ///                           (samples, refined crossing - hardware estimate)
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
+///   DBG:HWTRIG:FREQ?        comparator frequency counter: Hz (NaN: no
+///                           result), TIM5 CNT (edges), TIM2 CNT, TIM2 CCR1
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:TE?                 panel TE probe (lcd.rs te_probe, ~0.3 s)
 ///   DBG:SCANLINE?           panel Get Scanline + press sync state (scanline.rs)
@@ -1098,7 +1100,7 @@ pub enum Cmd {
     /// (Dmm::precond_ms, RAM only, 0 = off).
     #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgSentPrec(Option<u16>),
-    /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
+    /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET, 5 FREQ?.
     #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgHwTrig(u8, bool),
     /// Power meter (dmm::pw): CONF:POW, FETC:POW:ALL?, [SENS:]POW:..., DBG:POW:...
@@ -2494,6 +2496,7 @@ impl Scpi {
                         (Some(b"CAL"), None, true) => Some(Cmd::DbgHwTrig(2, false)),
                         (Some(b"STAT"), None, true) => Some(Cmd::DbgHwTrig(3, false)),
                         (Some(b"STAT"), Some(b"RESET"), false) => Some(Cmd::DbgHwTrig(4, false)),
+                        (Some(b"FREQ"), None, true) => Some(Cmd::DbgHwTrig(5, false)),
                         _ => None,
                     };
                     match c {

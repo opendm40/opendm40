@@ -470,6 +470,8 @@ pub struct Scope {
     deadline: u64,
     seq: u32,
     relay_until: u64,
+    /// Time of the last frequency-counter poll (ms; `hw_freq`).
+    freq_now: u64,
     last_pc13: u8,
     powered: bool,
     screen: usize,
@@ -906,6 +908,7 @@ impl Scope {
             deadline: 0,
             seq: 0,
             relay_until: 0,
+            freq_now: 0,
             last_pc13: 2,
             // The levels board::init left (PE2 = 1, PC4 = 0). This used to
             // claim "scope on" while PC4 was low: rails() then never raised
@@ -1354,6 +1357,11 @@ impl Scope {
         let o = &self.s;
         if s.range != o.range || s.vzoom != o.vzoom || s.tb != o.tb || s.ac != o.ac || s.rising != o.rising || s.mode != o.mode || s.ttype != o.ttype {
             self.hw.resume();
+        }
+        // The comparator node moves with the range and the coupling: the
+        // frequency gate in progress counted the old signal.
+        if s.range != o.range || s.vzoom != o.vzoom || s.ac != o.ac {
+            self.hw.freq.restart();
         }
         if self.wave {
             // No MCX hardware: the record's scale and coupling are the DMM
@@ -1810,7 +1818,10 @@ impl Scope {
             // every record's phase, which a comparator stop does not give.
             let gen = self.gen_src() || self.gen_trace;
             let soft = self.s.ttype != 0 && !self.gen_src() && !self.ch2_src();
-            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on;
+            // TIM4 holds the post count in 16 bits (hwtrig::tim4_div): at the
+            // slowest non-roll rates a long post part does not fit.
+            let fits = hwtrig::tim4_div((psc + 1) * (arr + 1), self.hw_post() as u32).is_some();
+            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on && fits;
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
@@ -1840,7 +1851,8 @@ impl Scope {
             w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | circ | 1);
             if hw {
                 let code = self.trig_code() as f32;
-                self.hw.prepare(psc, arr, self.hw_post() as u32, code, self.s.rising);
+                // Cannot fail: `fits` above.
+                let _ = self.hw.prepare(psc, arr, self.hw_post() as u32, code, self.s.rising);
             }
             self.hw_mode = hw;
             self.rec_base = 0;
@@ -2203,6 +2215,30 @@ impl Scope {
         }
     }
 
+    /// Comparator frequency counter (hwtrig::FreqCounter): the comparator
+    /// follows the trigger level and edge also while the software trigger
+    /// runs; the counter advances while the MCX front end is on and settled.
+    fn freq_poll(&mut self, now: u64) {
+        if !self.powered || self.wave || now < self.relay_until {
+            self.hw.freq.restart();
+            return;
+        }
+        let code = self.trig_code() as f32;
+        self.hw.track_level(code, self.s.rising);
+        self.hw.freq_poll(now);
+        self.freq_now = now;
+    }
+
+    /// Frequency of the MCX signal from the comparator counter (Hz), when
+    /// it describes what the measurements are taken on: a live MCX record
+    /// whose trigger level is CH1's (not the generator's or CH2's).
+    pub fn hw_freq(&self) -> Option<f32> {
+        if !self.s.run || !self.powered || self.wave || self.gen_src() || self.ch2_src() {
+            return None;
+        }
+        self.hw.freq.hz(self.freq_now)
+    }
+
     /// Wire-free comparator calibration (hwtrig::calibrate) at range 6 / DC
     /// with the scope's own offset points; the current settings are restored
     /// (acquisition restarts from poll). Needs PC4 on and nothing on the MCX.
@@ -2219,6 +2255,7 @@ impl Scope {
         // Relay settle (PC13 changes when coming from r0..4) + rail.
         clk.delay_ms(250);
         let r = self.hw.calibrate(6, None);
+        self.hw.freq.restart();
         self.apply(saved, now);
         r
     }
@@ -2400,6 +2437,7 @@ impl Scope {
     /// `poll` with the wave source (source DMM: the record comes from
     /// `src`; None there = nothing new).
     pub fn poll_src(&mut self, now: u64, src: Option<&mut dyn WaveSource>) -> Option<Frame<'static>> {
+        self.freq_poll(now);
         let live = self.s.run;
         let f = self.poll_frame(now, src);
         // DIGitize: the first record frame ends the run (as Single does on

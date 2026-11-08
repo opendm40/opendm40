@@ -16,6 +16,12 @@
 // The board's comparator output is INVERTED (PA15 high while signal < level;
 // firmware/src/hwtrig.rs: a rising-edge trigger captures a falling PA15) and
 // lags the crossing by about 2 us (the stock's trig_delay); both modelled.
+// Periodic shapes (sine, square, triangle, ramp): the comparator runs all the
+// time, as on the board (the frequency counter, hwtrig.rs FreqCounter, counts
+// its edges between records too): the flip phases of one period are found
+// once per (wave, level, range) on a 4096-point grid and PA15 is driven at
+// (k + phase) / hz, scheduled in nanoseconds. Other shapes (dc, noise, bits):
+// edges from the fed samples while a record is written, as before.
 // SetWave(shape, hz, vpp, offset): sine | square | triangle | ramp | dc | noise.
 // SetBitsFile(path): a bit pattern from a watched file (serial decoder tests).
 //
@@ -189,9 +195,119 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(n > 0) LastCode = block[n - 1];
         }
 
+        private bool Periodic => shape == "sine" || shape == "square" || shape == "triangle" || shape == "ramp";
+
+        /// Continuous comparator for the periodic shapes (see the header).
+        private void PeriodicStep()
+        {
+            var now = Now();
+            var horizon = now + 2.0 * tickUs / 1e6;
+            UpdateRange();
+            var level = TriggerCode();
+            TriggerLevel = level;
+            var key = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}|{1}|{2}|{3}|{4}|{5}|{6}", shape, hz, vpp, offset, level, countsPerVolt, Hysteresis);
+            if(key != flipKey)
+            {
+                flipKey = key;
+                FindFlips(level);
+                if(compT < now) compT = now;
+            }
+            if(compT < now - 1.0) compT = now; // a stall (or the first tick)
+            if(flipPh.Length == 0 || hz <= 0)
+            {
+                // No crossing: PA15 holds the level of the side the wave is on.
+                var lvl = Inverted ? !steadyAbove : steadyAbove;
+                if(lastAbove != steadyAbove)
+                {
+                    lastAbove = steadyAbove;
+                    portA.OnGPIO(15, lvl);
+                }
+                compT = horizon;
+                return;
+            }
+            // One period of slack on both sides: the time tests below decide
+            // (floor(horizon * hz) can round below an edge t <= horizon, the
+            // edge then fell between two ticks: 37.5 Hz lost 2 % of them).
+            var k0 = (long)Math.Floor(compT * hz) - 1;
+            var k1 = (long)Math.Floor(horizon * hz) + 1;
+            var emitted = 0;
+            for(var k = k0; k <= k1 && emitted < 20000; k++)
+            {
+                for(var i = 0; i < flipPh.Length; i++)
+                {
+                    var t = (k + flipPh[i]) / hz;
+                    if(t <= compT || t > horizon) continue;
+                    var above = flipUp[i];
+                    lastAbove = above;
+                    var lvl = Inverted ? !above : above;
+                    var delay = t + DelayUs * 1e-6 - now;
+                    emitted++;
+                    if(delay <= 0)
+                    {
+                        portA.OnGPIO(15, lvl);
+                    }
+                    else
+                    {
+                        machine.ScheduleAction(TimeInterval.FromNanoseconds((ulong)Math.Max(1, Math.Round(delay * 1e9))), _ => portA.OnGPIO(15, lvl));
+                    }
+                }
+            }
+            compT = horizon;
+        }
+
+        /// Flip phases of the hysteretic comparator over one period (the
+        /// second of two scanned, so the state has settled).
+        private void FindFlips(int level)
+        {
+            const int N = 4096;
+            var ph = new System.Collections.Generic.List<double>();
+            var up = new System.Collections.Generic.List<bool>();
+            var above = CodeAtPhase(0) > level;
+            for(var j = 1; j < 2 * N; j++)
+            {
+                var c = CodeAtPhase((double)j / N);
+                var a = above;
+                if(!above && c > level + Hysteresis) a = true;
+                else if(above && c < level - Hysteresis) a = false;
+                if(a != above)
+                {
+                    above = a;
+                    if(j >= N)
+                    {
+                        ph.Add((double)(j - N) / N);
+                        up.Add(a);
+                    }
+                }
+            }
+            flipPh = ph.ToArray();
+            flipUp = up.ToArray();
+            steadyAbove = above;
+            this.Log(LogLevel.Debug, "comparator: level {0}, {1} flips per period", level, flipPh.Length);
+        }
+
+        private int CodeAtPhase(double ph)
+        {
+            ph %= 1.0;
+            double x;
+            switch(shape)
+            {
+            case "square": x = ph < 0.5 ? 1 : -1; break;
+            case "triangle": x = ph < 0.5 ? 4 * ph - 1 : 3 - 4 * ph; break;
+            case "ramp": x = 2 * ph - 1; break;
+            default: x = Math.Sin(2 * Math.PI * ph); break;
+            }
+            var code = (int)Math.Round(512.0 + (offset + x * vpp / 2) * countsPerVolt);
+            return Math.Max(0, Math.Min(1023, code));
+        }
+
         private void Step()
         {
             CatchUp();
+            if(Comparator && Periodic)
+            {
+                PeriodicStep();
+                return;
+            }
             if(!dma.Enabled(stream) || !Comparator) return;
             // Look one tick ahead for comparator crossings and schedule PA15 at
             // the exact virtual time of the crossing sample.
@@ -319,6 +435,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private bool[] bits = new bool[0];
         private double bitSec = 1e-3, bitLo, bitHi = 3.3, bitRepeat, bitT0;
         private string bitPath;
+        private string flipKey;
+        private double[] flipPh = new double[0];
+        private bool[] flipUp = new bool[0];
+        private bool steadyAbove;
+        private double compT;
         private DateTime bitMtime;
         private ulong bitCheck;
     }
