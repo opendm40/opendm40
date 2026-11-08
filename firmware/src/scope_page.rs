@@ -328,6 +328,9 @@ pub(super) struct Sp {
     /// A touch that began on the panel / the wide graph's right edge: its
     /// touch-down x (the panel's own swipe, by the drag's travel).
     edge_x0: Option<u16>,
+    /// The touch that hid / brought back the panel: its other events are
+    /// eaten until it lifts (no graph drag from it).
+    edge_done: bool,
     pub press_fx: bool,
     pressed: u8,
     pressed_until: u64,
@@ -417,6 +420,7 @@ impl Sp {
             swipes: false,
             wide: false,
             edge_x0: None,
+            edge_done: false,
             press_fx: true,
             pressed: 0,
             pressed_until: 0,
@@ -781,6 +785,10 @@ impl App {
     fn sp_set_wide(&mut self, on: bool, now: u64) {
         self.beep(now, 30);
         self.sp.wide = on;
+        // At once: drawing before the full redraw (a drag's preview) is in
+        // the new layout too.
+        su::set_wide(self.sp_wide_on());
+        su::invalidate();
         self.redraw = true;
     }
 
@@ -1532,7 +1540,11 @@ impl App {
         // right edge (EDGE_X.., where no marker is grabbed: not a graph
         // touch there, so its release is a swipe).
         if self.view == View::Scope {
-            const EDGE_X: u16 = 466;
+            // The edge zone: 30 px. A touch reports its x when the debounce
+            // takes it (~40 ms in), so a swipe begun at the very edge comes
+            // in some 10 px left of it (the emulator's drags: 466 / 456 from
+            // 476).
+            const EDGE_X: u16 = 450;
             // The panel is 89 px wide: by the drag's travel (25 px right on
             // the panel, 30 px left from the edge), not gesture.rs's swipe
             // (60 px within 800 ms).
@@ -1540,6 +1552,14 @@ impl App {
             const SHOW_DX: u16 = 30;
             if let Gesture::Down(_) = g {
                 self.sp.edge_x0 = None;
+                self.sp.edge_done = false;
+            }
+            if self.sp.edge_done {
+                match g {
+                    Gesture::Up(_) | Gesture::Cancel => self.sp.edge_done = false,
+                    Gesture::Drag(..) | Gesture::Move(..) | Gesture::Tap(_) | Gesture::LongPress(_) | Gesture::SwipeLeft | Gesture::SwipeRight => return Some(true),
+                    _ => {}
+                }
             }
             match g {
                 Gesture::Down(p) if su::wide() && p.x >= EDGE_X => {
@@ -1554,12 +1574,14 @@ impl App {
                     let x0 = self.sp.edge_x0.unwrap_or(0);
                     if !su::wide() && p.x >= x0 + HIDE_DX {
                         self.sp.edge_x0 = None;
+                        self.sp.edge_done = true;
                         self.sp.pressed = 0;
                         self.sp_set_wide(true, now);
                         return Some(true);
                     }
                     if su::wide() && p.x + SHOW_DX <= x0 {
                         self.sp.edge_x0 = None;
+                        self.sp.edge_done = true;
                         self.sp_set_wide(false, now);
                         return Some(true);
                     }
