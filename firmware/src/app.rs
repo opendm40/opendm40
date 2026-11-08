@@ -4146,9 +4146,10 @@ impl App {
                 }
             }
             View::Dmm => {
-                if self.dmm_view.null_shown() && ui::null_chip_hit(x, y) {
-                    // As the range page's "Null" (its toast; the page
-                    // under the toast redraws with "NULL", the chip gone).
+                if (self.dmm_view.null_shown() && ui::null_chip_hit(x, y)) || (self.dmm.ohm_null() > 0.0 && self.dmm_view.null_mark_hit(x, y)) {
+                    // As the range page's "Null": "Set null" applies it,
+                    // the "NULL" marker turns it off (its toast; the page
+                    // under the toast redraws with / without "NULL").
                     self.ohm_null_tap(now);
                 } else if ui::value_hit(x, y) {
                     self.resolution_cycle(now);

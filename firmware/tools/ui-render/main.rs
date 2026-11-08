@@ -3943,6 +3943,40 @@ fn main() {
             ck.fail("dmm-ohm-null-chip/nulled", "chip drawn with the null on".into());
         }
         save(&out, "d06d-dmm-ohm-null-applied");
+        // The "NULL" marker's outline and tap zone, every range / variant
+        // with a test current: inside the test-current box (its repaint
+        // clears it), >= 19 px tall, clear of the main value's target.
+        for on in [false, true] {
+            for rg in 0..7i8 {
+                host::reset(0);
+                let r = Reading { range: rg, ..nulled };
+                let mut dv = ui::DmmView::new();
+                dv.label = None;
+                dv.ohm_null = true;
+                dv.draw_static(Button::Ohm, 10, false, on);
+                dv.reading(&r, 0, meter::V_NONE);
+                let n = format!("dmm-ohm-null-mark/{}/r{rg}", on as u8);
+                ck.check(&n, &dmm_page_regions);
+                let zone: Vec<(u16, u16)> = (0..480u16).flat_map(|x| (0..320u16).map(move |y| (x, y))).filter(|&(x, y)| dv.null_mark_hit(x, y)).collect();
+                if crate::dmm::test_current(10, rg, on as u8).is_none() {
+                    if !zone.is_empty() {
+                        ck.fail(&n, "NULL tap zone without the marker".into());
+                    }
+                    continue;
+                }
+                let (y0, y1) = (zone.iter().map(|p| p.1).min().unwrap_or(0), zone.iter().map(|p| p.1).max().unwrap_or(0));
+                let x1 = zone.iter().map(|p| p.0).max().unwrap_or(0);
+                if zone.is_empty() || y1 - y0 + 1 < 19 || zone.iter().any(|&(x, y)| ui::value_hit(x, y) || ui::null_chip_hit(x, y)) || x1 >= 128 + 6 {
+                    ck.fail(&n, format!("NULL tap zone {:?}..{:?} rows {y0}..{y1}", zone.first(), zone.last()));
+                }
+            }
+        }
+        // Null on -> off (a static redraw after the toast): no marker, no zone.
+        host::reset(0);
+        let dv = ohm_page(&nulled, false, false, meter::V_NONE);
+        if (0..480u16).any(|x| (0..320u16).any(|y| dv.null_mark_hit(x, y))) {
+            ck.fail("dmm-ohm-null-mark/off", "tap zone without a null".into());
+        }
         // 1 ohm on 60 ohm; 0.234 ohm on 600 ohm (a stale flag): no chip.
         for (n, r) in [("1ohm", Reading { main: val(1.0, 3, "\u{3a9}"), si: 1.0, ..short }), ("r1", Reading { range: 1, main: val(0.23, 2, "\u{3a9}"), ..short })] {
             host::reset(0);

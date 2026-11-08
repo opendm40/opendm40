@@ -363,6 +363,8 @@ pub struct DmmView {
     /// `App::null_chip_want`; drawn in Ω range 0 only), and as drawn.
     pub null_chip: bool,
     null_drawn: bool,
+    /// The "NULL" marker's x as drawn (0 = none; `test_current_label`).
+    null_mark: i16,
 }
 
 /// Bargraph geometry in the history row's place (rows 152..174 between the
@@ -690,6 +692,7 @@ impl DmmView {
             short_drawn: 0,
             null_chip: false,
             null_drawn: false,
+            null_mark: 0,
         }
     }
 
@@ -727,6 +730,7 @@ impl DmmView {
         self.aux_unit = [None; 2];
         self.last_aux = [false; 2];
         self.last_iohm = 255;
+        self.null_mark = 0;
     }
 
     /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
@@ -885,6 +889,7 @@ impl DmmView {
         self.acc_drawn = false;
         self.short_drawn = 0;
         self.null_drawn = false;
+        self.null_mark = 0;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -1068,6 +1073,7 @@ impl DmmView {
             let b = if self.last_iohm & 0xF0 == 0x20 { CAP_DIS_RECT } else { OHM_I_RECT };
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
             self.last_iohm = 255;
+            self.null_mark = 0;
         }
         let temp = r.mode == 15 && self.label.is_some();
         let load = r.power.is_some_and(|p| p.comp) && self.power;
@@ -1209,7 +1215,7 @@ impl DmmView {
             cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
             self.last_iohm = ik;
         } else if ik != 255 && self.last_iohm != ik {
-            test_current_label(r.mode, r.range, self.ohm_on, self.ohm_null);
+            self.null_mark = test_current_label(r.mode, r.range, self.ohm_on, self.ohm_null);
             self.last_iohm = ik;
         }
         // The phase is part of the key only while it alternates: no
@@ -1265,6 +1271,11 @@ impl DmmView {
             self.null_drawn = n;
             null_chip(n);
         }
+    }
+
+    /// A tap on the "NULL" marker (on the screen: it turns the null off).
+    pub fn null_mark_hit(&self, x: u16, y: u16) -> bool {
+        null_mark_hit(self.null_mark, x, y)
     }
 
     /// The "Set null" chip is on the screen (its tap applies: App::tap).
@@ -1370,15 +1381,17 @@ pub fn cap_noise_label() {
 /// measured short-circuit current of range `range` in the variant `on`
 /// (none on 60 M: the box is cleared); continuity / diode, the source current (measured, continuity negative). Two significant digits, DIM F14 (small: a
 /// property of the function, not a reading). `null`: the ohm null is on
-/// (r0..r6): "NULL" after it, in the reading's colour.
+/// (r0..r6): "NULL" after it, in the reading's colour, outlined (a tap
+/// turns the null off: App::tap, `null_mark_hit`). Returns the marker's x
+/// (0 = none drawn).
 #[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
-fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
+fn test_current_label(mode: u8, range: i8, on: bool, null: bool) -> i16 {
     let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
         // No value (60 M): clear the box, a range change from 6 M left the
         // 6 M label (device check 2f56ff9).
         let b = OHM_I_RECT;
         lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-        return;
+        return 0;
     };
     // Continuity's is negative (its source drives the other way).
     let (v, u) = if i.abs() >= 0.2e-3 {
@@ -1396,9 +1409,41 @@ fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
     t.push(u);
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
     if null && mode == 10 && !exp {
-        let w = sf::text_width(sf::F14, t.as_str(), 1);
-        sf::label(sf::F14, rect(OHM_I_RECT.x + w + 12, OHM_I_RECT.y, OHM_I_RECT.w - w - 12, OHM_I_RECT.h), "NULL", VALUE, BG, 1, 1);
+        // 1 px lines, the corners cut (a rounded look; lines, not a
+        // filled shape: the text sits inside).
+        let b = null_mark_rect(sf::text_width(sf::F14, t.as_str(), 1));
+        let (x, y, w, h) = (b.x as u16, b.y as u16, b.w as u16, b.h as u16);
+        sf::label(sf::F14, rect(b.x + 3, b.y + 3, b.w - 6, b.h - 6), "NULL", VALUE, BG, 8, 1);
+        // One shape for ui-render / touch-test (the outline's box).
+        #[cfg(test)]
+        crate::probe::begin(crate::probe::SHAPE, BG);
+        lcd::fill_rect(x + 2, y, w - 4, 1, VALUE);
+        lcd::fill_rect(x + 2, y + h - 1, w - 4, 1, VALUE);
+        lcd::fill_rect(x, y + 2, 1, h - 4, VALUE);
+        lcd::fill_rect(x + w - 1, y + 2, 1, h - 4, VALUE);
+        for (cx, cy) in [(x + 1, y + 1), (x + w - 2, y + 1), (x + 1, y + h - 2), (x + w - 2, y + h - 2)] {
+            lcd::fill_rect(cx, cy, 1, 1, VALUE);
+        }
+        #[cfg(test)]
+        crate::probe::end();
+        return b.x;
     }
+    0
+}
+
+/// The "NULL" marker's outline after a test-current text `w` px wide
+/// (inside OHM_I_RECT: its label repaint clears it).
+fn null_mark_rect(w: i16) -> sf::Rect {
+    rect(OHM_I_RECT.x + w + 8, 41, sf::text_width(sf::F14, "NULL", 1) + 12, 20)
+}
+
+/// The "NULL" marker (drawn at x `mx`, 0 = none) was hit: its outline, 6 px
+/// to each side, rows 36..63 (the main value's target starts at 64; the
+/// "Set null" chip, x >= 314, is never up with a null on).
+pub fn null_mark_hit(mx: i16, x: u16, y: u16) -> bool {
+    let w = sf::text_width(sf::F14, "NULL", 1) + 12;
+    let x = x as i16;
+    mx != 0 && (36..64).contains(&y) && x >= mx - 6 && x < mx + w + 6
 }
 
 /// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
