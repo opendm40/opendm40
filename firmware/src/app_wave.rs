@@ -2,9 +2,13 @@
 //! 10): the stock-replica scope page with the source DMM, i.e. the HY3131
 //! AD2 stream of the DMM's AC row (a slow, floating, isolated scope on the
 //! DMM jacks: V, mV, A, mA, uA). Entered from the MF range page ("Wave",
-//! V / A functions) or the scope page's source badge ("MCX | DMM"); left
-//! with the badge, MENU or any view change. Needs the stream ISR (Cargo
-//! feature `ad2-isr`, decision #3): without it the entries are hidden.
+//! V / A functions), the DMM page's Wave chip or a long press on the scope
+//! page's DMM block. It is the scope with only the DMM channel on, drawn as
+//! that channel (its colour, '2' marker, block and V/div; CH1 and GEN
+//! off): CH1 switched on or the DMM channel off leaves it
+//! (`wave_channel`), as MENU or any view change does. Needs the stream ISR
+//! (Cargo feature `ad2-isr`, decision #3): without it the entries are
+//! hidden.
 //!
 //! Ownership: the stream is a `Logger::start_wave` session run by main.rs
 //! (`take_wave_req`: start / restart / range step / stop), so the HY3131
@@ -113,7 +117,7 @@ impl App {
     pub fn wave_exit_done(&mut self, clk: &mut Clock) {
         if let Some(v) = self.wave_exit_to.take() {
             if v == self.view {
-                // The source badge (`wave_badge_close`): MCX on this page.
+                // `wave_badge_close`: the MCX input on this page.
                 self.wave_close(clk, true);
             } else {
                 self.show(v, clk);
@@ -122,7 +126,7 @@ impl App {
         }
     }
 
-    /// The source badge in the wave view (DMM -> MCX). With the stream on,
+    /// Leave the Wave view on this page (`wave_channel`). With the stream on,
     /// the close waits for its stop (as `show` does for a view change):
     /// `wave_close` switches the rails to the scope side (the DMM rail off
     /// under the stream) and the MCX page's acquisition and full repaint
@@ -134,6 +138,26 @@ impl App {
         } else {
             self.wave_close(clk, true);
         }
+    }
+
+    /// The Wave view is the scope with only the DMM channel on; a channel
+    /// switched there leaves it: `ch1` true = CH1 on (the DMM channel stays
+    /// on, as CH2 over the MCX input, where it can stream), false = the DMM
+    /// channel off (CH1 as before the Wave view).
+    // Region B: the tap comes while the stream runs.
+    pub(super) fn wave_channel(&mut self, clk: &mut Clock, ch1: bool) {
+        let on = ch1 && self.ch2_why().is_none();
+        self.ch2.on = on;
+        self.scope.ch2_on = on;
+        if ch1 {
+            self.sp.ch1_off = false;
+        }
+        // MF > Display CH2 Off: the page again without the popup.
+        if self.sp.popup != crate::scope_ui::Popup::None {
+            self.sp_popup_close();
+        }
+        self.wave_badge_close(clk);
+        self.sp_settings_changed();
     }
 
     /// Poll with the ring as the source (scope_poll).
@@ -232,7 +256,19 @@ impl App {
         }
         let Some(a) = self.dmm.ad2_scale() else { return };
         self.meter.rel_off();
-        self.scope.wave_enter(scale_of(a, full_vdiv(&a)), now);
+        // The DMM channel's V/div where this range shows it (else the
+        // range's full scale) and its position: one channel, one look.
+        let st = scope::wave_steps(a.amps);
+        let vd = scope::wave_step_of(a.amps, self.ch2.vdiv).filter(|&i| st[i].1 == a.item).map_or(full_vdiv(&a), |i| st[i].0);
+        self.scope.wave_enter(scale_of(a, vd), now);
+        let mut s = self.scope.s;
+        let d = self.ch2.pos as i32 - s.pos;
+        if d != 0 {
+            s.pos += d;
+            s.trig_row += d;
+            s.runt_row += d;
+            self.scope_set(s, now);
+        }
         crate::scope_ui::set_tb_lo(scope::WAVE_TB_MIN);
         crate::scope_ui::graph().clear();
         // The scope's restart flag asks for the start; a deferred range
@@ -260,7 +296,12 @@ impl App {
             return;
         }
         let now = clk.now_ms();
+        // The DMM channel keeps the V/div and position it had here.
+        self.ch2.vdiv = self.scope.vdiv();
+        self.ch2.pos = self.scope.s.pos as i16;
+        self.scope.ch2_pos = self.ch2.pos;
         self.scope.wave_exit(now);
+        self.sp_settings_changed();
         crate::scope_ui::set_tb_lo(scope::TB_MIN);
         crate::scope_ui::graph().clear();
         self.wave_req = Some(WaveReq::Stop);
@@ -410,7 +451,7 @@ impl App {
         }
     }
 
-    /// The coupling pill / CH1 label in the wave view: V switches DC <->
+    /// The DMM block's title held in the Wave view: V switches DC <->
     /// AC (main.rs restarts the stream in the other row at the same range
     /// item); A has one row (the AC A row, DC-coupled): a note.
     pub(super) fn wave_coupling_note(&mut self, now: u64) {
