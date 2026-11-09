@@ -709,6 +709,10 @@ impl DmmView {
         let b = Self::short_rect(if want != 0 { want } else { self.short_drawn });
         self.short_drawn = want;
         if want != 0 {
+            // The aux row's texts reach 2 rows above / below the band (an
+            // outline face): cleared with it.
+            lcd::fill_rect(b.x as u16, (b.y - 2) as u16, b.w as u16, 2, BG);
+            lcd::fill_rect(b.x as u16, (b.y + b.h) as u16, b.w as u16, 2, BG);
             sf::rbox(b, 6, SHORT_BG, BG);
             // The scope's 26 px face (the status bar's F21 lacks B / E).
             sf::glyphs(sf::ASCII26, b, "BEEP", 0xFFFF, SHORT_BG, 8, 2);
@@ -1522,7 +1526,8 @@ pub fn slot_alert(hold: u8, alert: crate::sentinel::Alert, alt: bool) -> bool {
 /// (`slot_alert`); each phase repaints the whole 119..201 box.
 fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
     use crate::sentinel::Alert;
-    let r = rect(119, 1, 71, 32);
+    // 83 px as the alert badge: "HOLD" is 72 px in an outline F21.
+    let r = rect(119, 1, 83, 32);
     if (hold == 0 && alert != Alert::None) || slot_alert(hold, alert, alt) {
         let (fg, bg) = if alert.red() { (0xFFFF, alert.color()) } else { (alert.color(), BAR) };
         lcd::fill_rect(119, 1, 83, 4, BAR);
@@ -1550,7 +1555,8 @@ fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
 /// "AUTO" (AUTO coupling) in the limit badge's slot (`DmmView::reading`).
 #[inline(never)] // .cold (link-native.x): drawn on a change only
 fn auto_cpl_label() {
-    sf::label(sf::F14, rect(403, 72, 31, 17), "AUTO", VALUE, BG, 8, 1);
+    // Spacing -1: "AUTO" is 33 px in an outline F14 (fits 31 at 1 px less per gap).
+    sf::label(sf::F14, rect(403, 72, 31, 17), "AUTO", VALUE, BG, 8, sf::fit_sp(sf::F14, "AUTO", 31, 1));
 }
 
 pub(crate) fn lim_badge(v: u8) {
@@ -2502,8 +2508,16 @@ pub struct Side {
 /// (F14 caps 2 px below: rows 178, 190, 247, 261); REL box (405,205,71,38).
 /// The power meter's side column (ui_power.rs) keeps these rows.
 const SIDE_X: i16 = 405;
+/// The statistics column's labels (F14, left of the values).
+const SIDE_LABELS: [&str; 4] = ["MAX", "AVG", "MIN", "\u{3c3}"];
+
+/// Width of the statistics labels' column: the widest label (22 px in the
+/// stock-width DM40 Term; wider in an outline face).
+fn side_lw() -> i16 {
+    SIDE_LABELS.iter().map(|t| sf::text_width(sf::F14, t, 1)).max().unwrap_or(22).max(22)
+}
 const SIDE_R: i16 = 476;
-const SIDE_Y: [i16; 4] = [176, 188, 245, 259];
+const SIDE_Y: [i16; 4] = [176, 189, 245, 259];
 /// The DMM column's line tops: MAX, AVG, MIN, SD, time (caps 2 px below,
 /// 9 rows of ink, 3 px apart); the REL box 2 px shorter (405,205,71,36) to
 /// make room for SD, the time row 3 px above the function buttons' region.
@@ -2735,8 +2749,8 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         c.time = None;
         lcd::fill_rect(402, 174, 78, 31, BG);
         lcd::fill_rect(402, 241, 78, 38, BG);
-        for (i, t) in ["MAX", "AVG", "MIN", "\u{3c3}"].iter().enumerate() {
-            sf::label(sf::F14, rect(SIDE_X, STAT_Y[i], 22, 14), t, DIM, BG, 0, 1);
+        for (i, t) in SIDE_LABELS.iter().enumerate() {
+            sf::label(sf::F14, rect(SIDE_X, STAT_Y[i], side_lw(), 14), t, DIM, BG, 0, 1);
         }
     }
     let q = |v: Option<f32>| -> i64 {
@@ -2759,13 +2773,14 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
             c.rows[i] = k;
             // One decimal less when the value is wider than its box
             // ("-444.44" is 50 px of 46: its minus was cut).
-            let bw = SIDE_R - SIDE_X - 25;
+            let vx = SIDE_X + side_lw() + 3;
+            let bw = SIDE_R - vx;
             let mut d = dec;
             while d > 0 && v.is_some_and(|v| sf::text_width(sf::F14, crate::dmm::format(&mut t, v, d), 1) > bw) {
                 d -= 1;
             }
             let s = v.map(|v| crate::dmm::format(&mut t, v, d)).unwrap_or("");
-            sf::label(sf::F14, rect(SIDE_X + 25, STAT_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
+            sf::label(sf::F14, rect(vx, STAT_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
         }
     }
     let k = q(side.rel.or(Some(0.0)));
@@ -2801,7 +2816,10 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
             txt
         };
         let fg = if side.rec { 0xFC40 } else { DIM };
-        sf::label(sf::F14, rect(SIDE_X, STAT_Y[4], SIDE_R - SIDE_X, 14), txt, fg, BG, 3, 1);
+        // 1 px higher in a grown F14 line box (subpixel F14: its lowest row
+        // of fringe is ink): >= 3 px above the buttons (280).
+        let y4 = STAT_Y[4] - (sf::F14.line_h() > 15) as i16;
+        sf::label(sf::F14, rect(SIDE_X, y4, SIDE_R - SIDE_X, 14), txt, fg, BG, 3, 1);
     }
 }
 
@@ -2873,7 +2891,7 @@ fn gen_box_value_bg(k: usize, v: &str, letters: bool, unit: &str, fg: Color, vbg
 
 /// Note at the right of box `k`'s name row ("" clears it).
 fn gen_box_note(k: usize, note: &str, fg: Color, bg: Color) {
-    sf::label(sf::F14, rect(360, GEN_BOX_Y[k] + 3, 112, 26), note, fg, bg, 4, 1);
+    sf::label(sf::F14, rect(374, GEN_BOX_Y[k] + 3, 98, 26), note, fg, bg, 4, 1);
 }
 
 /// Box `k` (0..3; 4 = the wave drop-down) normal or pressed (K_SEL, the
@@ -2897,7 +2915,7 @@ pub fn gen_press_rect(k: usize) -> sf::Rect {
 fn gen_box_frame(k: usize, bg: Color) {
     let y = GEN_BOX_Y[k];
     sf::rbox(rect(246, y, 230, GEN_BOX_H), 3, bg, G_BG);
-    sf::glyphs(sf::TEXT22, rect(257, y + 2, 100, 26), GEN_NAMES[k], STATUS_FG, bg, 1, 0);
+    sf::glyphs(sf::TEXT22, rect(257, y + 2, 116, 26), GEN_NAMES[k], STATUS_FG, bg, 1, 0);
 }
 
 /// The wave drop-down: name and the stock arrow.
@@ -3165,7 +3183,7 @@ pub fn keypad(kind: u8, title: &str, input: &str, unit: &str, sel: bool) {
         lcd::fill_rect(224, 142, 256, 178, K_PANEL);
     } else {
         lcd::fill_rect(224, 100, 256, 220, K_PANEL);
-        sf::label(sf::TEXT22, rect(228, 108, 100, 26), title, 0x0000, K_PANEL, 1, 0);
+        sf::label(sf::TEXT22, rect(228, 108, 160, 26), title, 0x0000, K_PANEL, 1, 0);
     }
     keypad_input(freq, input, unit, sel);
     for &(_, _, c) in keypad_keys(kind) {
@@ -3501,11 +3519,11 @@ const ST_Y0: i16 = 44;
 const ST_PITCH: i16 = 45;
 const ST_H: i16 = 42;
 const ST_TAB_X: i16 = 4;
-const ST_TAB_W: i16 = 120;
+const ST_TAB_W: i16 = 122;
 /// Tab label's left padding.
-const ST_TAB_PAD: i16 = 5;
+const ST_TAB_PAD: i16 = 3;
 /// Touch split between the tab column and the rows.
-const ST_SPLIT: u16 = 127;
+const ST_SPLIT: u16 = 128;
 const ST_ROW_X: i16 = 130;
 const ST_ROW_W: i16 = 346;
 /// The rows' text: label from x 138, value right-aligned to 470 (the stock
@@ -3565,8 +3583,8 @@ pub fn settings(tab: u8, vals: &[&str]) {
         let bg = if pressed { K_SEL } else if i == tab { SEL } else { M_TILE };
         let r = st_tab(i);
         sf::rbox(r, 6, bg, M_BG);
-        // Left-aligned, 5 px in: "Multimeter" (110 px in the stock
-        // TEXT22) keeps 1.5 word spaces to the row labels.
+        // Left-aligned, 3 px in (+ 2 px bearing): "Мультиметр" (114 px in the Noto
+        // TEXT22) fits the 122 px tab.
         sf::glyphs(sf::TEXT22, rect(r.x + ST_TAB_PAD, r.y, r.w - ST_TAB_PAD - 2, r.h), name, STATUS_FG, bg, 1, 0);
     }
     for (i, &id) in SET_TABS[tab].1.iter().enumerate() {

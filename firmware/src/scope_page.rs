@@ -2340,10 +2340,8 @@ impl App {
         let t = sf::Ink::new(sf::SC_F16, BUBBLE, b.as_str(), 8, 0);
         let bg = su::C_FILL;
         sf::paint(BUBBLE, &[(1, bg), (0, su::C_PURPLE)], |x, y| {
-            if let Some(g) = t.at(x, y) {
-                return (su::C_WHITE, 2 << 8 | g as u16);
-            }
-            if sf::in_rbox(BUBBLE, 8, 0x0f, x, y) { (su::C_PURPLE, 1 << 8) } else { (bg, 0) }
+            let u = if sf::in_rbox(BUBBLE, 8, 0x0f, x, y) { (su::C_PURPLE, 1 << 8) } else { (bg, 0) };
+            t.over(x, y, su::C_WHITE, u, 2)
         });
     }
 

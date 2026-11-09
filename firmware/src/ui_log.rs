@@ -170,10 +170,10 @@ pub fn panel_button(k: usize, live: bool, paused: bool, pressed: bool) {
                 return (fg, tag(3, 0));
             }
         }
-        if let Some(g) = t.at(x, y) {
-            return (fg, tag(2, g));
-        }
-        if mask == 0 || sf::in_rbox(r, radius, mask, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
+        let u = (|| {
+            if mask == 0 || sf::in_rbox(r, radius, mask, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
+        })();
+        t.over(x, y, fg, u, 2)
     });
 }
 
@@ -320,10 +320,10 @@ pub fn cell(i: usize, text: &str) {
     let r = rect(13 + 100 * i as i16, 302, 98, 17);
     let t = Ink::new(sf::SC_F12, r, text, 8, 0);
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
-        if let Some(g) = t.at(x, y) {
-            return (C_YELLOW, tag(2, g));
-        }
-        if sf::on_ring(r, 5, 0x0f, x, y) { (C_FRAME, tag(1, 0)) } else { (C_BAR, 0) }
+        let u = (|| {
+            if sf::on_ring(r, 5, 0x0f, x, y) { (C_FRAME, tag(1, 0)) } else { (C_BAR, 0) }
+        })();
+        t.over(x, y, C_YELLOW, u, 2)
     });
 }
 
@@ -391,10 +391,7 @@ pub fn setup(v: &dec::SetupVals) {
     fill_c(rect(14, 21, 399, 38), screen, C_POP_BG);
     fill_c(rect(14, 59, 399, 2), screen, C_POP_TAB);
     let t = Ink::new(sf::SC_F16, r, crate::tr!("Decode"), 8, 0);
-    paint(isect(t.bx, r), &[(K_TEXT, C_POP_BG)], |x, y| match t.at(x, y) {
-        Some(g) => (C_FILL, tag(1, g)),
-        None => (C_POP_BG, 0),
-    });
+    paint(isect(t.bx, r), &[(K_TEXT, C_POP_BG)], |x, y| t.over(x, y, C_FILL, (C_POP_BG, 0), 1));
     dec::page(v, rect(14, 61, 399, dec::PAGE_H - 1));
 }
 

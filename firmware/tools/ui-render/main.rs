@@ -136,6 +136,9 @@ pub mod probe {
     pub fn sub(g: u8) {
         crate::host::sub(g)
     }
+    pub fn fg(c: u16) {
+        crate::host::fg(c)
+    }
     pub fn end() {
         crate::host::end()
     }
@@ -185,11 +188,51 @@ impl Bx {
 
 const EMPTY: Bx = Bx { x0: i32::MAX, y0: i32::MAX, x1: i32::MIN, y1: i32::MIN };
 
+/// Two consecutive glyphs of a text whose solid ink pixels are 8-neighbours.
+fn solid_touch(i: &Item) -> Option<(u8, u8)> {
+    solid_touch_at(i).map(|t| (t.0, t.1))
+}
+
+/// `solid_touch` and the touching pixel of the second glyph.
+fn solid_touch_at(i: &Item) -> Option<(u8, u8, i32, i32)> {
+    let mut sg = i.solid.clone();
+    sg.sort_by_key(|(k, _)| *k);
+    for w in sg.windows(2) {
+        if w[1].0 != w[0].0 + 1 {
+            continue;
+        }
+        let set: std::collections::HashSet<(i32, i32)> = w[0].1.iter().copied().collect();
+        if let Some(&(x, y)) = w[1].1.iter().find(|&&(x, y)| (-1..=1).any(|dx| (-1..=1).any(|dy| set.contains(&(x + dx, y + dy))))) {
+            return Some((w[0].0, w[1].0, x, y));
+        }
+    }
+    None
+}
+
+impl Item {
+    /// The box the inner-margin rule measures: without descender rows and
+    /// without the rows above most glyphs' tops (ascenders, accents: a
+    /// 'k' above the digits), so the text's body keeps the 3 px.
+    fn inner(&self) -> Bx {
+        let mut b = if self.body.x0 > self.body.x1 { self.b } else { Bx { y1: self.body.y1, ..self.b } };
+        if self.kind == probe::TEXT && self.glyphs.len() >= 2 {
+            let mut tops: Vec<i32> = self.glyphs.iter().map(|g| g.1.y0).collect();
+            tops.sort();
+            b.y0 = b.y0.max(tops[tops.len() / 2]).min(b.y1);
+        }
+        b
+    }
+}
+
 struct Item {
     id: u32,
     kind: u8,
     b: Bx,
     glyphs: Vec<(u8, Bx)>,
+    /// Solid ink pixels per glyph (the touch rule; anti-aliased text).
+    solid: Vec<(u8, Vec<(i32, i32)>)>,
+    /// The ink box without descender rows (the inner-margin rule).
+    body: Bx,
     color: u16,
 }
 
@@ -244,8 +287,20 @@ fn items() -> Vec<Item> {
             if o == 0 {
                 continue;
             }
+            let faint = o & host::FAINT != 0;
+            let desc = o & host::DESC != 0;
+            let o = o & !(host::FAINT | host::DESC);
             let (id, g) = (o >> 8, (o & 255) as u8);
-            let it = m.entry(id).or_insert_with(|| Item { id, kind: e.kinds[id as usize - 1], b: EMPTY, glyphs: vec![], color: e.fb[y * W + x] });
+            let it = m.entry(id).or_insert_with(|| Item { id, kind: e.kinds[id as usize - 1], b: EMPTY, glyphs: vec![], solid: vec![], body: EMPTY, color: e.fb[y * W + x] });
+            if !desc {
+                it.body.add(x as i32, y as i32);
+            }
+            if !faint {
+                match it.solid.iter_mut().find(|(k, _)| *k == g) {
+                    Some((_, v)) => v.push((x as i32, y as i32)),
+                    None => it.solid.push((g, vec![(x as i32, y as i32)])),
+                }
+            }
             it.b.add(x as i32, y as i32);
             match it.glyphs.iter_mut().find(|(k, _)| *k == g) {
                 Some((_, b)) => b.add(x as i32, y as i32),
@@ -363,7 +418,7 @@ impl Checker {
             }
             match parent[a] {
                 Some(p) => {
-                    let m = its[p].b.margin(&ia.b);
+                    let m = its[p].b.margin(&ia.inner());
                     if m < 3 {
                         self.fail(scene, format!("{} only {} px inside {}", desc(ia), m, desc(&its[p])));
                     }
@@ -372,7 +427,7 @@ impl Checker {
                     let r = regions.iter().filter(|(_, r)| r.contains(&ia.b)).min_by_key(|(_, r)| r.area());
                     match r {
                         Some((name, r)) => {
-                            let m = r.margin(&ia.b);
+                            let m = r.margin(&ia.inner());
                             if m < 3 && !frame_wide {
                                 self.fail(scene, format!("{} only {} px inside region {} {:?}", desc(ia), m, name, r));
                             }
@@ -387,9 +442,23 @@ impl Checker {
                 g.sort_by_key(|(k, _)| *k);
                 // Widest gap between letters of one word.
                 let letter = g.windows(2).filter(|w| w[1].0 == w[0].0 + 1).map(|w| w[1].1.x0 - w[0].1.x1 - 1).max().unwrap_or(1);
+                // Touch: solid ink pixels side by side (solid_touch); an
+                // anti-aliased fringe may touch.
+                if glyph_rule {
+                    if let Some((g0, g1, x, y)) = solid_touch_at(ia) {
+                        self.fail(scene, format!("{}: glyphs {} / {} touch at ({x}, {y})", desc(ia), g0, g1));
+                        // UIR_TOUCH_DIR: a 1x picture of the first screen per touching text.
+                        if let Ok(d) = std::env::var("UIR_TOUCH_DIR") {
+                            let p = format!("{d}/{}-{x}-{y}.ppm", scene.replace('/', "_"));
+                            if std::fs::read_dir(&d).map_or(0, |r| r.count()) < 40 && !std::path::Path::new(&p).exists() {
+                                host::save_ppm(&p, 1);
+                            }
+                        }
+                    }
+                }
                 for w in g.windows(2) {
                     let (a, b) = (w[0].1, w[1].1);
-                    if glyph_rule && a.gap(&b) < 1 {
+                    if false && glyph_rule && a.gap(&b) < 1 {
                         self.fail(scene, format!("{}: glyphs {} / {} touch ({:?} {:?})", desc(ia), w[0].0, w[1].0, a, b));
                     }
                     // Word gap (as tools/gallery-test): an ink-less glyph (a
@@ -422,7 +491,8 @@ impl Checker {
                 if anc(a, b) || anc(b, a) {
                     continue;
                 }
-                let g = ia.b.gap(&ib.b);
+                // Ascenders / descenders may come closer (>= 1 px).
+                let g = { let f = ia.b.gap(&ib.b); if f < 1 { f } else { ia.inner().gap(&ib.inner()).max(f.min(3)) } };
                 if g < 3 {
                     self.fail(scene, format!("{} and {} {} by {} px", desc(ia), desc(ib), if g < 0 { "overlap" } else { "too close" }, g));
                 } else if let Some(m) = line_gap(ia, ib) {
@@ -488,24 +558,20 @@ impl Checker {
             }
             match parent[a] {
                 Some(p) => {
-                    let m = its[p].b.margin(&ia.b);
+                    let m = its[p].b.margin(&ia.inner());
                     if m < 3 {
                         self.fail(scene, format!("{} only {} px inside {}", desc(ia), m, desc(&its[p])));
                     }
                 }
                 None => match regions.iter().filter(|(_, r)| r.contains(&ia.b)).min_by_key(|(_, r)| r.area()) {
-                    Some((name, r)) if r.margin(&ia.b) < 3 => self.fail(scene, format!("{} only {} px inside region {} {:?}", desc(ia), r.margin(&ia.b), name, r)),
+                    Some((name, r)) if r.margin(&ia.inner()) < 3 => self.fail(scene, format!("{} only {} px inside region {} {:?}", desc(ia), r.margin(&ia.inner()), name, r)),
                     Some(_) => {}
                     None => self.fail(scene, format!("{} not inside any region", desc(ia))),
                 },
             }
             if ia.kind == probe::TEXT {
-                let mut g = ia.glyphs.clone();
-                g.sort_by_key(|(k, _)| *k);
-                for w in g.windows(2) {
-                    if w[0].1.gap(&w[1].1) < 1 {
-                        self.fail(scene, format!("{}: glyphs {} / {} touch", desc(ia), w[0].0, w[1].0));
-                    }
+                if let Some((g0, g1)) = solid_touch(ia) {
+                    self.fail(scene, format!("{}: glyphs {} / {} touch", desc(ia), g0, g1));
                 }
             }
         }
@@ -523,7 +589,7 @@ impl Checker {
                 if !(is_add[a] || is_add[b]) || anc(a, b) || anc(b, a) {
                     continue;
                 }
-                let g = its[a].b.gap(&its[b].b);
+                let g = { let f = its[a].b.gap(&its[b].b); if f < 1 { f } else { its[a].inner().gap(&its[b].inner()).max(f.min(3)) } };
                 if g < 3 {
                     self.fail(scene, format!("{} and {} {} by {} px", desc(&its[a]), desc(&its[b]), if g < 0 { "overlap" } else { "too close" }, g));
                 } else if matches!((parent[a], parent[b]), (Some(pa), Some(pb)) if pa != pb) {
@@ -543,6 +609,17 @@ impl Checker {
         let fb = &emu().fb;
         let bad: Vec<usize> = (0..fb.len()).filter(|&i| fb[i] != want[i]).collect();
         if let Some(&i) = bad.first() {
+            // UIR_STALE_DIR: both screens of the first few stale updates.
+            if let Ok(d) = std::env::var("UIR_STALE_DIR") {
+                if std::fs::read_dir(&d).map_or(0, |r| r.count()) < 20 {
+                    let n = scene.replace('/', "_");
+                    host::save_ppm(&format!("{d}/{n}-update.ppm"), 1);
+                    let keep = emu().fb.clone();
+                    emu().fb.copy_from_slice(want);
+                    host::save_ppm(&format!("{d}/{n}-fresh.ppm"), 1);
+                    emu().fb.copy_from_slice(&keep);
+                }
+            }
             self.fail(scene, format!("{} stale pixels after an update (first at {},{})", bad.len(), i % W, i / W));
         }
     }
@@ -827,7 +904,7 @@ fn owner_counts() -> std::collections::HashMap<u32, usize> {
     let mut m = std::collections::HashMap::new();
     for &o in emu().owner.iter() {
         if o != 0 {
-            *m.entry(o >> 8).or_insert(0) += 1;
+            *m.entry((o & !host::FAINT) >> 8).or_insert(0) += 1;
         }
     }
     m
@@ -2914,9 +2991,14 @@ fn main() {
         // The stock confirm draws ASCII26 at spacing 0, where its glyphs
         // touch by design (as the menu rows): gaps and margins checked.
         ck.check_opts(&format!("confirm/{k}"), &[("screen", Bx::new(0, 0, 480, 320)), ("dialog", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))], false);
-        if k == "fw-install" {
-            save(&out, "t04-confirm-fw-install");
-        }
+        save(&out, &format!("t04-confirm-{k}"));
+    }
+    // A toast on the scope page (dialog.rs over the stock replica).
+    {
+        let sc = stock::scenes();
+        stock::draw(&sc[0]);
+        dialog::toast(crate::tr!("Screenshot failed"), false);
+        save(&out, "t10-toast-scope");
     }
 
     // Deferred fills (lcd.rs): pages and popups in a batch = drawn directly.

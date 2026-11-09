@@ -198,11 +198,43 @@ def render(ch, size, f, lh, de, four, _):
 TERM = None
 
 
+import mkttf
+if mkttf.SCEN == 'term':
+    # EXPERIMENT: Terminus everywhere (tools/mkttf.py).
+    mkterm.FACE.update(mkttf.TERM_FACE)
+    mkterm.FACE['SC_F12'] = 'ter-u16b.bdf'
+
+
+def ttf_emit(nm, code, lh, de):
+    """EXPERIMENT: an extra glyph of a TTF-faced font (tools/mkttf.py), HUF
+    with the stock fonts' tables: (w, h, adv, yoff, bytes) or None."""
+    r = mkttf.lang_glyph(nm, code)
+    if r is None:
+        return None
+    g, base, fmt, flh = r
+    # The face's line box: flh, descent flh - base (tools/mkttf.py).
+    w, h, adv, yoff, (_, _, rows) = mkttf.place_glyph(g, fmt, base, flh, flh - base, None)
+    global LENS
+    LENS = LENS or huf_lens()
+    # The 2 bpp faces' own table set (contexts 4..7, entry t = 4) when the
+    # image has one (tools/mkstockfont.py).
+    o = 4 if fmt in ('HUF2', 'S3V2') and len(LENS) > 4 else 0
+    lens = LENS[o:o + 4]
+    cost = lambda cx, s: lens[cx].get(s, 10 ** 6)
+    toks = [tk for y, r in enumerate(rows) for tk in msf.huf_parse_row(r, rows[y - 1] if y else None, cost)]
+    data, _ = msf.huf_encode(toks, [msf.huf_canon(c) for c in lens])
+    return w, h, adv, yoff, data, o, msf.FW_FMT[fmt]
+
+
 def term_font(nm, f, lh, de, four):
     """`load`'s glyphs of font `nm` in DM40 Term, as tools/mkstockfont.py
     emits them."""
     global TERM
     TERM = TERM or mkterm.Face()
+    if four:
+        # EXPERIMENT (Terminus everywhere): a stock 4 bpp font made 1 bpp.
+        f = {c: (g[0], g[1], g[2], g[3], [[15 if v >= 8 else 0 for v in r] for r in g[4]]) for c, g in f.items()}
+        four = False
     gl = [(c, g[0], g[1], g[2], g[3], mkterm.pack(g[4], g[0], g[1], four)) for c, g in sorted(f.items())]
     cls = 'B' if all(g[1] == lh for g in f.values()) else 'A'
     out = TERM.restyle(nm, lh, de, four, gl, cls)
@@ -283,6 +315,16 @@ def build(lang, rows, check, rs_bytes):
             if a in need:
                 # Omega: the stock fonts' own (stockfont_w.rs).
                 need[a] |= {c for c in z if ord(c) >= 0x80 and c != 'Ω'}
+    # A font drawn with another's glyphs (tools/mkstockfont.py share-*.json)
+    # takes its language glyphs from that font too (stockfont.rs fd_extra).
+    sp = os.path.join(FW, 'target', 'share-%s.json' % mkttf.SCEN)
+    if mkttf.SCEN and os.path.exists(sp):
+        import json
+        names = {v[1]: k for k, v in FONTS.items()}
+        for n, b in json.load(open(sp)).items():
+            if n in names and b in names:
+                need[names[b]] |= need[names[n]]
+                need[names[n]] = set()
     s, total, sizes = '', 0, []
     extra = []
     for a in sorted(need):
@@ -291,11 +333,22 @@ def build(lang, rows, check, rs_bytes):
         src, nm = FONTS[a]
         f, lh, de, four = load(img, src)
         faced = nm in mkterm.FACE
+        ttf = mkttf.lang_glyph(nm, ord('A')) is not None
+        if faced and ttf:
+            faced = False
         if faced:
             f = term_font(nm, f, lh, de, four)
-        size = fit_size(f, lh, de, four) if lang == 'ru' and not faced else 0
+            four = False
+        if ttf:
+            four = True
+        size = fit_size(f, lh, de, four) if lang == 'ru' and not faced and not ttf else 0
         es, blob = [], bytearray()
         for ch in sorted(need[a], key=lambda c: code.get(c, ord(c))):
+            if ttf:
+                gw, gh, gadv, yoff, data, t0, xfmt = ttf_emit(nm, ord(ch), lh, de)
+                es.append('E(%d,%d,%d,%d,%d,%d,%d,%d)' % (code.get(ch, ord(ch)), len(blob), gw, gh, gadv, yoff, t0, gh))
+                blob += data
+                continue
             if ch in COMPOSE:
                 m, w, adv = compose(ch, f, lh, de)
             else:
@@ -308,7 +361,8 @@ def build(lang, rows, check, rs_bytes):
         sizes.append('%s %d glyphs %d B%s' % (nm, len(es), len(blob), ' (%d px)' % size if size else ''))
         s += '#[link_section = ".rodata.fonts.LANG_%s_E"]\nstatic X_%s_E: [Entry; %d] = [%s];\n' % (nm, nm, len(es), ', '.join(es))
         s += '#[link_section = ".rodata.fonts.LANG_%s_B"]\nstatic X_%s_B: [u8; %d] = *b"\\\n%s\n";\n' % (nm, nm, len(blob), rs_bytes(bytes(blob)))
-        extra.append('(0x%08X, FontData { line_h: %d, descent: %d, fmt: %s, entries: &X_%s_E, blob: &X_%s_B })' % (a, lh, de, 'HUF' if four else 'BIT1', nm, nm))
+        xf = xfmt if ttf else 'HUF' if four else 'BIT1'
+        extra.append('(0x%08X, FontData { line_h: %d, descent: %d, fmt: %s, entries: &X_%s_E, blob: &X_%s_B })' % (a, lh, de, xf, nm, nm))
     s += 'pub const N: usize = 0;\npub const SIZE: u8 = 0;\npub const GB: usize = 1;\npub static G: [u8; 0] = [];\n'
     s += 'pub static EXTRA: [(u32, FontData); %d] = [%s];\n' % (len(extra), ', '.join(extra))
     ntxt = sum(len(z.encode()) for z in out_rows.values())

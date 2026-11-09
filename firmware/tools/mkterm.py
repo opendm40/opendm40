@@ -46,6 +46,14 @@ FILES = {
     'ter-u16b.bdf': '8f825f6666970196e7c8da3ff2dcb10b44cf5b8f094e867ec9b6f5f2429b909b',
     'ter-u20b.bdf': 'c3ee3c76111ebdc473679b85eef6677642986d3b1be0ca145c70a9e3f212bd90',
     'ter-u22b.bdf': 'fe4de45b798e7c068ac078ee42780dfc66fd03c90d5a4a490b2b1ae455d2b4f7',
+    # EXPERIMENT (tools/mkttf.py, Terminus everywhere)
+    'ter-u14b.bdf': '971ddc3f5cc114727d9e7cff3a3fddb32134ac94032ba67c5e3aa6b28a9ac8bc',
+    'ter-u18b.bdf': '748c0eccdea4b73d2431dc9447479ec6bf90b3968bdca76d7897c61c40936948',
+    'ter-u24b.bdf': 'f8fd753704ba02a526098e5839ce4dd059cbe8a59540feb9a01ca82b0d97054e',
+    'ter-u32b.bdf': 'e82a3fedf6e1d294cfbd8720a39ed4638c9fb142be161a12fb43b9e56f99fab2',
+    # EXPERIMENT: X11 misc-fixed 6x13 (public domain), F14 in scenario v14;
+    # BDF made from /usr/share/fonts/X11/misc/6x13.pcf.gz (DM40_X11_BDF).
+    'x11-6x13.bdf': '1bc94ff7a799ba13e42305b20e759ef3140b0f896177f90bcbf7ef939a2ec52d',
 }
 # Font -> BDF file. TEXT22: 24 px has the stock cap height (15) but its 12 px
 # cells overflow the menus; 22 px (cap 14, 11 px cells) fits.
@@ -93,7 +101,7 @@ class Bdf:
     """A BDF bitmap font (one size), with ZERO applied (12 px)."""
 
     def __init__(self, name):
-        path = os.path.join(DIR, name)
+        path = os.environ.get('DM40_X11_BDF', '') if name == 'x11-6x13.bdf' else os.path.join(DIR, name)
         if not os.path.exists(path):
             raise SystemExit('%s missing: tools/fetch-terminus.sh (or DM40_TERM_DIR)' % path)
         raw = open(path, 'rb').read()
@@ -128,6 +136,13 @@ class Bdf:
                 if cur.get('enc', -1) >= 0 and 'rows' in cur:
                     self.g[cur['enc']] = cur
                 cur = None
+        if name == 'x11-6x13.bdf':
+            # The 3 x 3 cross of the period one row up, on the baseline (its
+            # lowest row below it touched the power page's sub-line box).
+            p = self.g[ord('.')]
+            w, h, xo, yo = p['bbx']
+            r = p['rows']
+            p['rows'] = r[1:] + [[0] * w]
         if name in ZERO:
             z = self.g[ord('0')]
             rows = [[15 if c == '#' else 0 for c in r] for r in ZERO[name].split()]
@@ -206,7 +221,7 @@ def stock_base(gl, four, line_h, descent):
     code, w, h, adv, yoff, data = by.get(ord('H')) or by.get(ord('0'))
     r = [y for y, row in enumerate(unpack(data, w, h, four)) if any(row)]
     top = line_h - descent - h - yoff
-    return top + r[-1] + 1, r[-1] - r[0] + 1, by[ord('0')][3]
+    return top + r[-1] + 1, r[-1] - r[0] + 1, by.get(ord('0'), (0, 0, 0, adv))[3]
 
 
 def bdf_base(r, sbase, cap, line_h, codes):

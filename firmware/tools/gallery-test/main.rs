@@ -22,6 +22,10 @@ pub use host::mmio;
 /// Probe hooks called by the drawing code under cfg(test); `begin_key`
 /// continues one item over many draw calls (gallery.rs thumbnails, traces).
 pub mod probe {
+    #[allow(dead_code)]
+    pub fn fg(c: u16) {
+        crate::host::fg(c)
+    }
     /// ui-render's clip rule (stockfont probe_fit): not checked here.
     pub fn fit(_r: (i32, i32, i32, i32), _ink: (i32, i32, i32, i32), _text: &str) {}
     pub fn open(kind: u8, bg: u16) -> u32 {
@@ -401,6 +405,8 @@ struct Item {
     kind: u8,
     b: Bx,
     glyphs: Vec<(u8, Bx)>,
+    /// Solid ink pixels per glyph (the touch rule, as ui-render).
+    solid: Vec<(u8, Vec<(i32, i32)>)>,
 }
 
 fn kind_name(k: u8) -> &'static str {
@@ -412,12 +418,19 @@ fn items() -> Vec<Item> {
     let mut m: std::collections::BTreeMap<u32, Item> = Default::default();
     for y in 0..H {
         for x in 0..W {
-            let o = e.owner[y * W + x];
+            let faint = e.owner[y * W + x] & host::FAINT != 0;
+            let o = e.owner[y * W + x] & 0x3FFF_FFFF;
             if o == 0 {
                 continue;
             }
             let (id, g) = (o >> 8, (o & 255) as u8);
-            let it = m.entry(id).or_insert_with(|| Item { id, kind: e.kinds[id as usize - 1], b: EMPTY, glyphs: vec![] });
+            let it = m.entry(id).or_insert_with(|| Item { id, kind: e.kinds[id as usize - 1], b: EMPTY, glyphs: vec![], solid: vec![] });
+            if !faint {
+                match it.solid.iter_mut().find(|(k, _)| *k == g) {
+                    Some((_, v)) => v.push((x as i32, y as i32)),
+                    None => it.solid.push((g, vec![(x as i32, y as i32)])),
+                }
+            }
             it.b.add(x as i32, y as i32);
             match it.glyphs.iter_mut().find(|(k, _)| *k == g) {
                 Some((_, b)) => b.add(x as i32, y as i32),
@@ -490,11 +503,21 @@ impl Checker {
                 g.sort_by_key(|(k, _)| *k);
                 // Widest gap between letters of one word.
                 let letter = g.windows(2).filter(|w| w[1].0 == w[0].0 + 1).map(|w| w[1].1.x0 - w[0].1.x1 - 1).max().unwrap_or(1);
+                // Touch: solid ink pixels of consecutive glyphs 8-adjacent
+                // (ui-render's rule; an anti-aliased fringe may touch).
+                let mut sg = ia.solid.clone();
+                sg.sort_by_key(|(k, _)| *k);
+                for w in sg.windows(2) {
+                    if w[1].0 != w[0].0 + 1 {
+                        continue;
+                    }
+                    let set: std::collections::HashSet<(i32, i32)> = w[0].1.iter().copied().collect();
+                    if w[1].1.iter().any(|&(x, y)| (-1..=1).any(|dx| (-1..=1).any(|dy| set.contains(&(x + dx, y + dy))))) {
+                        self.fail(scene, format!("{}: glyphs {} / {} touch", desc(ia), w[0].0, w[1].0));
+                    }
+                }
                 for w in g.windows(2) {
                     let (a, b) = (w[0].1, w[1].1);
-                    if a.gap(&b) < 1 {
-                        self.fail(scene, format!("{}: glyphs {} / {} touch ({:?} {:?})", desc(ia), w[0].0, w[1].0, a, b));
-                    }
                     // An ink-less glyph between them (a space): a word gap
                     // clearly wider than the letter gaps (coordinator: the
                     // 3 px F14 spaces read as "Nodata", "40rows").

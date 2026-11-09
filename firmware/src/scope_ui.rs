@@ -784,17 +784,15 @@ fn tag(layer: u16, g: u8) -> u16 {
 fn badge(r: Rect, fill: Color, outside: Color, inner: Option<(Rect, Color)>, inks: &[(&Ink, Color)]) {
     let layers = [(K_SHAPE, outside), (K_SHAPE, fill), (K_TEXT, fill), (K_TEXT, fill), (K_TEXT, fill)];
     paint(r, &layers[..2 + inks.len()], |x, y| {
-        for (k, (ink, c)) in inks.iter().enumerate() {
-            if let Some(g) = ink.at(x, y) {
-                return (*c, tag(3 + k as u16, g));
+        let u = (|| {
+            if let Some((ir, ic)) = inner {
+                if in_rbox(ir, 5, 0x0f, x, y) {
+                    return (ic, tag(2, 0));
+                }
             }
-        }
-        if let Some((ir, ic)) = inner {
-            if in_rbox(ir, 5, 0x0f, x, y) {
-                return (ic, tag(2, 0));
-            }
-        }
-        if in_rbox(r, 5, 0x0f, x, y) { (fill, tag(1, 0)) } else { (outside, 0) }
+            if in_rbox(r, 5, 0x0f, x, y) { (fill, tag(1, 0)) } else { (outside, 0) }
+        })();
+        inks.iter().enumerate().rev().fold(u, |u, (k, (ink, c))| ink.over(x, y, *c, u, 3 + k as u16))
     });
 }
 
@@ -856,27 +854,21 @@ pub fn record_bar(m: &Model) {
     }
     let layers = [(K_SHAPE, C_BAR), (K_SHAPE, C_FRAME), (K_TEXT, C_FILL), (K_SHAPE, C_FILL), (K_ICON, C_FILL), (K_ICON, C_FILL)];
     paint(r, &layers, |x, y| {
-        if let Some(g) = txt.at(x, y) {
-            return (C_FRAME, tag(3, g));
-        }
-        if let Some(g) = lb.at(x, y) {
-            return (C_FRAME, tag(5, g));
-        }
-        if let Some(g) = rb.at(x, y) {
-            return (C_FRAME, tag(6, g));
-        }
-        if let Some((lx, ln)) = line {
-            if y == 9 && x >= lx && x < lx + ln {
-                return (C_YELLOW, tag(4, 0));
+        let u = (|| {
+            if let Some((lx, ln)) = line {
+                if y == 9 && x >= lx && x < lx + ln {
+                    return (C_YELLOW, tag(4, 0));
+                }
             }
-        }
-        if in_rbox(inner, 5, 0x0f, x, y) {
-            (C_FILL, tag(2, 0))
-        } else if in_rbox(r, 5, 0x0f, x, y) {
-            (C_FRAME, tag(1, 0))
-        } else {
-            (C_BAR, 0)
-        }
+            if in_rbox(inner, 5, 0x0f, x, y) {
+                (C_FILL, tag(2, 0))
+            } else if in_rbox(r, 5, 0x0f, x, y) {
+                (C_FRAME, tag(1, 0))
+            } else {
+                (C_BAR, 0)
+            }
+        })();
+        txt.over(x, y, C_FRAME, lb.over(x, y, C_FRAME, rb.over(x, y, C_FRAME, u, 6), 5), 3)
     });
 }
 
@@ -946,16 +938,25 @@ fn rec_layout(r: Rect, unit: &'static str) -> (Rect, [Ink; 2]) {
         RecStyle::RecFunc => ["REC", unit],
         RecStyle::DmmRec => ["DMM", "REC"],
     };
-    let w = |t: &str| if t.is_empty() { 0 } else { sf::text_width(sf::SC_F12, t, 0) };
-    let (w0, w1) = (w(words[0]), w(words[1]));
-    let len = |l: (i16, i16, i16)| l.0 + l.1 + w0 + if w1 > 0 { l.2 + w1 } else { 0 };
-    let lay = [(REC_DOT, 4, 4), (7, 3, 4), (7, 2, 3), (5, 2, 3)].into_iter().find(|&l| len(l) <= r.w - 6).unwrap_or((5, 2, 3));
+    // Letter spacing 0, else -1 (an outline face wider than the stock one).
+    let fits = |sp: i8| {
+        let w = |t: &str| if t.is_empty() { 0 } else { sf::text_width(sf::SC_F12, t, sp) };
+        let (w0, w1) = (w(words[0]), w(words[1]));
+        let len = move |l: (i16, i16, i16)| l.0 + l.1 + w0 + if w1 > 0 { l.2 + w1 } else { 0 };
+        [(REC_DOT, 4, 4), (7, 3, 4), (7, 2, 3), (5, 2, 3)].into_iter().find(|&l| len(l) <= r.w - 6).map(|l| (sp, w0, w1, l, len(l)))
+    };
+    let (sp, w0, w1, lay, total) = fits(0).or_else(|| fits(-1)).unwrap_or_else(|| {
+        // Still too wide: no dot; then the first word only.
+        let w = |t: &str| if t.is_empty() { 0 } else { sf::text_width(sf::SC_F12, t, -1) };
+        let (a, b) = (w(words[0]), w(words[1]));
+        if a + if b > 0 { 3 + b } else { 0 } <= r.w - 6 { (-1, a, b, (0, 0, 3), a + if b > 0 { 3 + b } else { 0 }) } else { (-1, a, 0, (0, 0, 3), a) }
+    });
     let (d, g, wg) = lay;
-    let x0 = r.x + (r.w - len(lay) + 1) / 2;
+    let x0 = r.x + (r.w - total + 1) / 2;
     let dot = rect(x0, r.y + 4 + (REC_DOT - d) / 2, d, d);
     let tx = x0 + d + g;
-    let t0 = Ink::new(sf::SC_F12, rect(tx, r.y, w0, r.h), words[0], 8, 0);
-    let t1 = if w1 > 0 { Ink::new(sf::SC_F12, rect(tx + w0 + wg, r.y, w1, r.h), words[1], 8, 0) } else { Ink::none() };
+    let t0 = Ink::new(sf::SC_F12, rect(tx, r.y, w0, r.h), words[0], 8, sp);
+    let t1 = if w1 > 0 { Ink::new(sf::SC_F12, rect(tx + w0 + wg, r.y, w1, r.h), words[1], 8, sp) } else { Ink::none() };
     (dot, [t0, t1])
 }
 
@@ -984,24 +985,21 @@ fn rec_paint(r: Rect, outside: Color, on: bool, dot_only: bool, unit: &'static s
     let (dot, [t0, t1]) = rec_layout(r, unit);
     let win = if dot_only { dot } else { r };
     paint(win, &[(K_SHAPE, outside), (K_SHAPE, C_FILL), (K_ICON, C_FILL), (K_TEXT, C_FILL), (K_TEXT, C_FILL)], |x, y| {
-        if let Some(g) = t0.at(x, y) {
-            return (C_WHITE, tag(4, g));
-        }
-        if let Some(g) = t1.at(x, y) {
-            return (C_WHITE, tag(5, g));
-        }
-        if on && in_rbox(dot, dot.w / 2, 0x0f, x, y) {
-            return (red, tag(3, 0));
-        }
-        if in_rbox(r, 5, 0x0f, x, y) {
-            if on_ring(r, 5, 0x0f, x, y) {
-                (C_FRAME, tag(1, 0))
-            } else {
-                (C_FILL, tag(2, 0))
+        let u = (|| {
+            if on && in_rbox(dot, dot.w / 2, 0x0f, x, y) {
+                return (red, tag(3, 0));
             }
-        } else {
-            (outside, 0)
-        }
+            if in_rbox(r, 5, 0x0f, x, y) {
+                if on_ring(r, 5, 0x0f, x, y) {
+                    (C_FRAME, tag(1, 0))
+                } else {
+                    (C_FILL, tag(2, 0))
+                }
+            } else {
+                (outside, 0)
+            }
+        })();
+        t0.over(x, y, C_WHITE, t1.over(x, y, C_WHITE, u, 5), 4)
     });
 }
 
@@ -1052,7 +1050,7 @@ pub fn trig_badge(m: &Model) {
         fmt_v_cut(&mut b, m.trig_v, unit, 1);
     }
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
-    let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
+    let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, sf::fit_sp(sf::SC_F12, b.as_str(), 49, 0));
     let c = trig_colour(m);
     badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, c), (&t, c)]);
 }
@@ -1120,10 +1118,7 @@ pub fn usb_icon(m: &Model) {
         (false, true) => Ink::icon(sf::SC_BATT, r, 0x31, 6),
         (false, false) => Ink::none(),
     };
-    paint(r, &[(K_ICON, C_BAR)], |x, y| match u.at(x, y) {
-        Some(g) => (C_WHITE, tag(1, g)),
-        None => (C_BAR, 0),
-    });
+    paint(r, &[(K_ICON, C_BAR)], |x, y| u.over(x, y, C_WHITE, (C_BAR, 0), 1));
 }
 
 /// What a block shows: name, scale, colour and ink, on (else dimmed), its
@@ -1248,10 +1243,18 @@ fn panel_part_in(m: &Model, k: usize, clip: Rect) {
         let wn = if c.0.is_empty() { 0 } else { sf::text_width(c.1, c.0, 0) };
         let ws = sf::text_width(c.2, c.3, 0);
         let parts = (wn > 0) as i16 + (wg > 0) as i16 + (ws > 0) as i16;
-        // 3 px around the glyph (the layout minimum), 4 between texts.
+        // 3 px around the glyph (the layout minimum), 4 between texts;
+        // name and scale in one face are one text (its own word space).
+        if wg == 0 && wn > 0 && ws > 0 && c.1.0 == c.2.0 {
+            let mut b = Buf::new();
+            b.push(c.0).push(" ").push(c.3);
+            return (wn, ws, sf::text_width(c.1, b.as_str(), 0).max(wn + ws + 4));
+        }
         (wn, ws, wn + wg + ws + if wg > 0 { 3 } else { 4 } * (parts - 1).max(0))
     };
-    let c = *cands.iter().find(|c| (gl != 0 || !c.0.is_empty()) && w(c).2 <= room).unwrap_or(&cands[if gl != 0 { 6 } else { 4 }]);
+    // Nothing with the name fits (an outline face, where the 12 px face is
+    // the 16 px one): the scale alone.
+    let c = *cands.iter().find(|c| (gl != 0 || !c.0.is_empty()) && w(c).2 <= room).unwrap_or(&cands[if gl != 0 || w(&cands[4]).2 > room { 6 } else { 4 }]);
     let (wn, ws, total) = w(&c);
     let mut x = r.x + (r.w - total) / 2;
     let t1 = if wn > 0 { Ink::new(c.1, rect(x, r.y + (c.1.0 == f12.0) as i16, wn, r.h), c.0, 8, 0) } else { Ink::none() };
@@ -1266,20 +1269,14 @@ fn panel_part_in(m: &Model, k: usize, clip: Rect) {
         // Name and scale in one face, side by side: one text (one word gap).
         let mut b = Buf::new();
         b.push(c.0).push(" ").push(c.3);
-        t1 = Ink::new(c.1, rect(r.x, r.y + small as i16, r.w, r.h), b.as_str(), 8, 0);
+        t1 = Ink::new(c.1, rect(r.x, r.y + small as i16, r.w, r.h), b.as_str(), 8, sf::fit_sp(c.1, b.as_str(), room, 0));
         t3 = Ink::none();
     }
     paint(pr, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill), (K_ICON, fill)], |x, y| {
-        if let Some(g) = t1.at(x, y) {
-            return (fg, tag(2, g));
-        }
-        if let Some(g) = t2.at(x, y) {
-            return (fg, tag(4, g));
-        }
-        if let Some(g) = t3.at(x, y) {
-            return (fg, tag(3, g));
-        }
-        if in_rbox(r, 8, 0x3, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
+        let u = (|| {
+            if in_rbox(r, 8, 0x3, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
+        })();
+        t1.over(x, y, fg, t2.over(x, y, fg, t3.over(x, y, fg, u, 3), 4), 2)
     });
 }
 
@@ -1319,14 +1316,14 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
     // The Wave view: the DMM channel's measurements, in its colour.
     let pal = if m.wave { c_ch2() } else { m.pal_text() };
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
-        if let Some(g) = t.at(x, y) {
-            return (pal, tag(2, g));
-        }
-        if on_ring(r, 5, 0x0f, x, y) {
-            (C_FRAME, tag(1, 0))
-        } else {
-            (C_BAR, 0)
-        }
+        let u = (|| {
+            if on_ring(r, 5, 0x0f, x, y) {
+                (C_FRAME, tag(1, 0))
+            } else {
+                (C_BAR, 0)
+            }
+        })();
+        t.over(x, y, pal, u, 2)
     });
 }
 
@@ -2980,10 +2977,10 @@ pub fn fft_label(m: &Model) {
     let t = Ink::new(sf::SC_F12, r, m.fft_hz.as_str(), 8, 0);
     let g = graph_ref();
     paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, C_FILL)], |x, y| {
-        if let Some(gl) = t.at(x, y) {
-            return (mc, tag(2, gl));
-        }
-        if on_ring(r, 5, 0x0e, x, y) { (mc, tag(1, 0)) } else { (g.bg_at(x, y), 0) }
+        let u = (|| {
+            if on_ring(r, 5, 0x0e, x, y) { (mc, tag(1, 0)) } else { (g.bg_at(x, y), 0) }
+        })();
+        t.over(x, y, mc, u, 2)
     });
 }
 
@@ -2993,16 +2990,16 @@ fn fft_box(r: Rect, text: &str, col: Color) {
     let t = Ink::new(sf::SC_F12, r, text, 8, 1);
     let g = graph_ref();
     paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, C_FILL)], |x, y| {
-        if let Some(gl) = t.at(x, y) {
-            return (col, tag(2, gl));
-        }
-        if !in_rbox(r, 5, 0x0f, x, y) {
-            (g.bg_at(x, y), 0)
-        } else if on_ring(r, 5, 0x0f, x, y) {
-            (col, tag(1, 0))
-        } else {
-            (C_FILL, tag(1, 0))
-        }
+        let u = (|| {
+            if !in_rbox(r, 5, 0x0f, x, y) {
+                (g.bg_at(x, y), 0)
+            } else if on_ring(r, 5, 0x0f, x, y) {
+                (col, tag(1, 0))
+            } else {
+                (C_FILL, tag(1, 0))
+            }
+        })();
+        t.over(x, y, col, u, 2)
     });
 }
 
@@ -3068,20 +3065,20 @@ pub fn tb_tab(m: &Model, left: bool) {
     } else {
         b.push(TB_LABELS[tb.saturating_sub(1)]).push(">");
     }
-    let t = Ink::new(sf::SC_F12, r, b.as_str(), 8, 0);
+    let t = Ink::new(sf::SC_F12, r, b.as_str(), 8, sf::fit_sp(sf::SC_F12, b.as_str(), r.w - 6, 0));
     let pressed = m.tabs & press != 0;
     let fill = if pressed { C_MAGENTA } else { C_BAR };
     paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, fill)], |x, y| {
-        if let Some(g) = t.at(x, y) {
-            return (C_WHITE, tag(2, g));
-        }
-        if !in_rbox(r, 5, 0x0f, x, y) {
-            (C_FILL, 0)
-        } else if on_ring(r, 5, 0x0f, x, y) {
-            (C_MAGENTA, tag(1, 0))
-        } else {
-            (fill, tag(1, 0))
-        }
+        let u = (|| {
+            if !in_rbox(r, 5, 0x0f, x, y) {
+                (C_FILL, 0)
+            } else if on_ring(r, 5, 0x0f, x, y) {
+                (C_MAGENTA, tag(1, 0))
+            } else {
+                (fill, tag(1, 0))
+            }
+        })();
+        t.over(x, y, C_WHITE, u, 2)
     });
 }
 
@@ -3096,19 +3093,19 @@ pub fn cur_tab(state: u8) {
         _ => "CUR",
     };
     let on = state == CUR_X || state == CUR_Y;
-    let t = Ink::new(sf::SC_F12, r, txt, 8, 1);
+    let t = Ink::new(sf::SC_F12, r, txt, 8, sf::fit_sp(sf::SC_F12, txt, r.w - 6, 1));
     let (fill, fg) = if on { (C_FRAME, C_FILL) } else { (C_BAR, C_WHITE) };
     paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, fill)], |x, y| {
-        if let Some(g) = t.at(x, y) {
-            return (fg, tag(2, g));
-        }
-        if !in_rbox(r, 5, 0x0f, x, y) {
-            (C_FILL, 0)
-        } else if on_ring(r, 5, 0x0f, x, y) {
-            (C_FRAME, tag(1, 0))
-        } else {
-            (fill, tag(1, 0))
-        }
+        let u = (|| {
+            if !in_rbox(r, 5, 0x0f, x, y) {
+                (C_FILL, 0)
+            } else if on_ring(r, 5, 0x0f, x, y) {
+                (C_FRAME, tag(1, 0))
+            } else {
+                (fill, tag(1, 0))
+            }
+        })();
+        t.over(x, y, fg, u, 2)
     });
 }
 
@@ -3407,21 +3404,20 @@ fn fill_text(r: Rect, clip: Rect, bg: Color, font: Font, tr: Rect, text: &str, f
 /// `fill_text` of a button-like fill on a `parent` colour (the fill is a
 /// probed shape for the host hit-map checks when it differs from it).
 fn fill_text_on(r: Rect, clip: Rect, bg: Color, parent: Color, font: Font, tr: Rect, text: &str, fg: Color, align: u8, sp: i8) {
-    let t = Ink::new(font, tr, text, align, sp);
-    paint(isect(r, clip), &[(K_TEXT, bg), (K_SHAPE, parent)], |x, y| match t.at(x, y) {
-        Some(g) => (fg, tag(1, g)),
-        None => (bg, if bg != parent { tag(2, 0) } else { 0 }),
-    });
+    // A text 1-2 px too wide for its box (an outline face; a translation):
+    // one pixel less letter spacing.
+    let t = Ink::new(font, tr, text, align, sf::fit_sp(font, text, tr.w - 2, sp));
+    paint(isect(r, clip), &[(K_TEXT, bg), (K_SHAPE, parent)], |x, y| t.over(x, y, fg, (bg, if bg != parent { tag(2, 0) } else { 0 }), 1));
 }
 
 /// A rounded box (on `outside`) with a centred text.
 fn rbox_text(r: Rect, clip: Rect, radius: i16, fill: Color, outside: Color, font: Font, text: &str, fg: Color) {
     let t = Ink::new(font, r, text, 8, 0);
     paint(isect(r, clip), &[(K_SHAPE, outside), (K_TEXT, fill)], |x, y| {
-        if let Some(g) = t.at(x, y) {
-            return (fg, tag(2, g));
-        }
-        if in_rbox(r, radius, 0x0f, x, y) { (fill, tag(1, 0)) } else { (outside, 0) }
+        let u = (|| {
+            if in_rbox(r, radius, 0x0f, x, y) { (fill, tag(1, 0)) } else { (outside, 0) }
+        })();
+        t.over(x, y, fg, u, 2)
     });
 }
 
@@ -3461,22 +3457,18 @@ fn spinner(r: Rect, clip: Rect, items: &[&str], cur: usize, colours: bool) {
         let y = r.y + k * 30;
         let in_band = y == band.y;
         col[k as usize] = if colours { PALETTE[idx as usize % NPAL] } else if in_band { C_WHITE } else { C_POP_BG };
-        let tr = if colours { rect(r.x + (r.w - 56) / 2, y + (30 - 13) / 2, 56, 13) } else { rect(r.x, y, r.w, 30) };
+        let tr = if colours { rect(r.x + (r.w - 56) / 2, y + (30 - 17) / 2, 56, 17) } else { rect(r.x, y, r.w, 30) };
         ink[k as usize] = Ink::new(sf::SC_F16, tr, items[idx as usize], 8, 0);
     }
     paint(isect(r, clip), &[(K_SHAPE, C_POP_BG), (K_TEXT, C_BAR)], |x, y| {
-        for k in 0..5 {
-            if let Some(g) = ink[k].at(x, y) {
-                return (col[k], tag(2, g));
-            }
-        }
-        if band.has(x, y) {
+        let u = if band.has(x, y) {
             (C_SEL, tag(1, 0))
         } else if in_rbox(r, 8, 0x0f, x, y) {
             (C_BAR, tag(1, 0))
         } else {
             (C_POP_BG, 0)
-        }
+        };
+        (0..5).rev().fold(u, |u, k| ink[k].over(x, y, col[k], u, 2))
     });
 }
 
@@ -3554,10 +3546,10 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
 
         let (bg, fg) = if sel { (C_POP_BG, C_FILL) } else { (C_POP_TAB, C_WHITE) };
         paint(isect(r, tclip), &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
-            if let Some(g) = t.at(x, y) {
-                return (fg, tag(1, g));
-            }
-            (if sel && ul.has(x, y) { C_POP_TAB } else { bg }, tag(2, 0))
+            let u = (|| {
+                (if sel && ul.has(x, y) { C_POP_TAB } else { bg }, tag(2, 0))
+            })();
+            t.over(x, y, fg, u, 1)
         });
     }
     let pc = rect(MF_IX, 61, MF_IW, page_h - 1);
@@ -3869,10 +3861,10 @@ fn side_popup(title: &str, tabs: &[&str], tab: u8) {
         let (bg, fg) = if sel { (C_POP_BG, C_BAR) } else { (C_BAR, C_WHITE) };
         let ind = rect(SX + 77, y, 2, 40);
         paint(r, &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
-            if let Some(g) = ink.at(x, y) {
-                return (fg, tag(1, g));
-            }
-            (if sel && ind.has(x, y) { C_BAR } else { bg }, tag(2, 0))
+            let u = (|| {
+                (if sel && ind.has(x, y) { C_BAR } else { bg }, tag(2, 0))
+            })();
+            ink.over(x, y, fg, u, 1)
         });
     }
     fill_c(rect(SX + 79, 50, 120, 250), screen, C_POP_BG);
@@ -4025,10 +4017,7 @@ pub fn draw_tb(cur: u8) {
     let screen = rect(0, 0, 480, 320);
     paint(TB_BOX, &[(K_SHAPE, C_BAR)], |x, y| if TB_HEAD.has(x, y) { (C_POP_TAB, tag(1, 0)) } else { (C_FRAME, tag(1, 0)) });
     let t = Ink::new(sf::SC_F16, TB_HEAD, "Time/div", 8, 0);
-    paint(TB_HEAD, &[(K_TEXT, C_POP_TAB)], |x, y| match t.at(x, y) {
-        Some(g) => (C_YELLOW, tag(1, g)),
-        None => (C_POP_TAB, 0),
-    });
+    paint(TB_HEAD, &[(K_TEXT, C_POP_TAB)], |x, y| t.over(x, y, C_YELLOW, (C_POP_TAB, 0), 1));
     // The stock spinner (FUN_080274b2), one probe layer per row.
     let r = TB_SPIN;
     let band = rect(r.x, r.y + (r.h - 30) / 2, r.w, 30);
@@ -4047,22 +4036,19 @@ pub fn draw_tb(cur: u8) {
         } else {
             C_POP_BG
         };
-        ink[k as usize] = Ink::new(sf::SC_F16, rect(r.x, y, TB_TIME_W, 30), TB_LABELS[idx as usize], 4, 0);
+        let tl = TB_LABELS[idx as usize];
+        ink[k as usize] = Ink::new(sf::SC_F16, rect(r.x, y, TB_TIME_W, 30), tl, 4, sf::fit_sp(sf::SC_F16, tl, TB_TIME_W - 3, 0));
     }
     let layers = [(K_SHAPE, C_FRAME), (K_TEXT, C_BAR), (K_TEXT, C_BAR), (K_TEXT, C_SEL), (K_TEXT, C_BAR), (K_TEXT, C_BAR)];
     paint(isect(r, screen), &layers, |x, y| {
-        for k in 0..5 {
-            if let Some(g) = ink[k].at(x, y) {
-                return (col[k], tag(2 + k as u16, g));
-            }
-        }
-        if band.has(x, y) {
+        let u = if band.has(x, y) {
             (C_SEL, tag(1, 0))
         } else if in_rbox(r, 8, 0x0f, x, y) {
             (C_BAR, tag(1, 0))
         } else {
             (C_FRAME, 0)
-        }
+        };
+        (0..5).rev().fold(u, |u, k| ink[k].over(x, y, col[k], u, 2 + k as u16))
     });
     tb_rates(cur, lo, hi);
 }
@@ -4305,10 +4291,7 @@ fn st_text(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8) {
 #[inline(never)]
 fn st_text_grey(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8, grey: u8) {
     let t = Ink::new(font, r, text, align, sp);
-    paint(r, &[(K_TEXT, C_FILL)], |x, y| match t.at(x, y) {
-        Some(g) => (if g >= grey { C_LOW } else { fg }, tag(1, g)),
-        None => (C_FILL, 0),
-    });
+    paint(r, &[(K_TEXT, C_FILL)], |x, y| t.over_g(x, y, |g| if g >= grey { C_LOW } else { fg }, (C_FILL, 0), 1));
 }
 
 /// A badge (r5) on the strip's dark box; empty text = no badge.
@@ -4317,7 +4300,7 @@ fn st_badge(r: Rect, text: &str, fill: Color) {
         lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, C_FILL);
         return;
     }
-    let t = Ink::new(sf::SC_F12, r, text, 8, 1);
+    let t = Ink::new(sf::SC_F12, r, text, 8, sf::fit_sp(sf::SC_F12, text, r.w - 6, 1));
     badge(r, fill, C_FILL, None, &[(&t, C_WHITE)]);
 }
 

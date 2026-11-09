@@ -2401,7 +2401,9 @@ impl Gallery {
                     let v = c.max - (c.max - c.min) * k as f32 / 2.0;
                     let mut s = Tb::new();
                     val_txt(&mut s, v, unit, false);
-                    small(rect(14, gy - 7, 64, 14), s.str(), DIM, PANEL, 4);
+                    // The top line's label >= 3 px inside the chart box (an
+                    // outline F14 has ink in its box's first row).
+                    small(rect(14, (gy - 7).max(CHART.1 + 2), 64, 14), s.str(), DIM, PANEL, 4);
                 }
                 small(rect(px, py + ph + 6, 120, 14), "0 s", DIM, PANEL, 0);
                 small(rect(px + pw - 120, py + ph + 6, 120, 14), dur.str(), DIM, PANEL, 3);
