@@ -11,7 +11,7 @@ fn save1(out: &str, name: &str) {
 
 /// An ordinary status bar: 00:12:34 since power-on, no REC, no BT host.
 fn status_real() -> ui::Status {
-    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, rec_dim: false, page: 0 }
+    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, bat_low: false, locked: false, rec: false, csv: false, rec_dim: false, page: 0 }
 }
 
 const DMM_REGIONS: [(&str, Bx); 7] = [
@@ -41,7 +41,7 @@ struct Dp {
     ohm_on: bool,
     /// The rate applies (DC V / A / ohm), else the chip reads n/a.
     rate: bool,
-    /// The beeper indicator (DmmView::short): 1 SHORT, 2 BEEP.
+    /// The beeper indicator (DmmView::short): 1 continuity or a short, 2 a pattern.
     short: u8,
 }
 
@@ -346,10 +346,12 @@ pub fn run(out: &str) -> usize {
         ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.2, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.21, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
-        // Continuity: a short, the beeper indicator on.
+        // The hint after the ranges hunted (layout / translation check only).
+        ("dmm-cap-noise", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.0, 0, dmm::CAP_NOISE_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
+        // Continuity: below the threshold, the beeper indicator on.
         ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.
-        ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
+        ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, Some(val(767.7, 1, "\u{3a9}")), false)) }),
         // Capacitance: 100 nF.
         ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.7, 1, "nF"), None, None, false)) }),
         // Frequency: 1 kHz, 50 %, with the small digit (`freq_ext`).
@@ -463,7 +465,8 @@ pub fn run(out: &str) -> usize {
         let mut m = scope_base().m;
         m.wave = true;
         m.wvdiv = 150.0;
-        m.ch1_txt = "AC V";
+        m.ch1_scale = scope_ui::Txt::new("1V");
+        m.tsrc = scope::TSRC_CH2;
         m.ac = true;
         m.trig_v = 10.0;
         m.trig_row = 138;
@@ -471,6 +474,7 @@ pub fn run(out: &str) -> usize {
             let mut m = m;
             m.tb = tb;
             m.tabs = scope_ui::tabs_of(scope_ui::TAP_CORNERS, tb, scope_ui::tb_top(true, false), false, None);
+            // The Wave view: the cells measure the DMM channel (its colour).
             let cells = vec!["Freq:50.0Hz", "Vp-p:651V", "Cycl:20.0ms", "Vrms:230V"];
             let s2 = stock::Scene { name: "manual-wave", m, popup: scope_ui::Popup::None, trace: Some(trig_sine(&m, 325.0 / 150.0, periods)), persist: None, cols: 399, cells };
             scope_shot(&mut ck, out, name, &s2, &popvals(&m));
@@ -482,7 +486,6 @@ pub fn run(out: &str) -> usize {
         m.amps = true;
         m.ac = false;
         m.wvdiv = 1.5;
-        m.ch1_txt = "AC A";
         m.trig_v = 0.1;
         m.trig_row = 140;
         let cells = vec!["Freq:50.0Hz", "Ip-p:4.24A", "Cycl:20.0ms", "Irms:1.50A"];

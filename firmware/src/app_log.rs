@@ -976,6 +976,7 @@ impl App {
             inv: s.cfg.inverted,
             battery: self.power.bars.min(5),
             charging: self.power.charging(),
+            bat_low: self.power.low.low(),
         };
         let l = lg();
         for k in 0..ul::TOP_ITEMS {

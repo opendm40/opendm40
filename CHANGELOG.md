@@ -9,6 +9,28 @@ section named after the tag as the release notes; how to cut a release:
 
 - **Text font:** menus, settings, labels, the history row and the scope texts in DM40 Term (based on Terminus Font), the scope menus and popups at the stock letter width, a plain narrow 0 in the small texts and the stock Ω; the big readings, units and dialogs stay stock.
 
+- **Scope: wide graph.** A swipe right on the right panel hides it; the graph and the measurement row take the whole width, with a 5th measurement (MF > Measure takes five). A swipe left from the right edge brings the panel back ([manual](docs/manual/README.md#the-scope-page)).
+
+- Continuity and diode: the green band says **BEEP**, not **SHORT**: in continuity it comes on below about 67 Ω, which is not always a short. Ω has no beep and no band.
+
+- **Multimeter:** Null on the Resistor Settings page takes the test leads' resistance off the ohm reading.
+- **Settings:** Alerts > Continuity beep: Always lets the continuity / diode beeper sound at volume 0 %.
+- **Scope:** cyan in the channel colours; MF > Display has a Color button for CH2 and for GEN.
+- **Scope:** MF > Display: V / A puts the multimeter's CH2 into volts or amps without leaving the scope.
+- **Scope:** CH1 popup > Probe > Type Cur shows CH1 in amperes, for a current probe or shunt.
+- **Scope:** a second tap on the CH1 title with its popup open hides CH1.
+- **Scope:** MF > Trigger > Source DMM triggers on the multimeter channel; the T markers take the source's colour; DMM turns CH2 on; GEN cannot be picked while the generator is off.
+- **Scope:** drag the DMM channel's 2 marker to move its trace.
+- **Combined view:** the meter strip's reading is orange, as on the multimeter page.
+- **Scope:** channels keep their block, colour and marker; the Wave view is the scope with only the DMM channel on (DMM colour and 2 marker, CH1 and GEN off; tap CH1 or DMM to leave).
+- DMM: 2 px more between the big digits and the bargraph.
+
+- Scope: the CUR tab turns the cursors off again when they were chosen in the Measure tab or kept over a restart (the tap did nothing).
+
+- Settings > Power > Shutdown: more choices, 1 min to 10 hours and Never; the default stays 30 min.
+
+- Overflow names the range: **>60V**, **>600MΩ** beside the big 0L, in manual ranges and at the top of AUTO.
+
 - **Localized images:** Chinese, Russian, Italian and French (`dm40_opendm40_v<version>-<lang>.bin`), each with its screens in that language only.
 
 - **Gallery: select several files and delete them together**
@@ -17,7 +39,7 @@ section named after the tag as the release notes; how to cut a release:
 - Settings > Other > Reset settings: back to the defaults after a confirm; calibration, files and Bluetooth pairing stay.
 
 - **Multimeter:** a double tap on the trend chart's plot switches the row between the bargraph and the history.
-- **Scope:** the MF menu spans the screen to the right edge, over the right panel, with wider columns; the panel is drawn again when it closes.
+- **Scope:** the MF menu runs over the right panel, the same 13 px from both screen edges, with wider columns; the panel is drawn again when it closes.
 ### New
 
 - **Chinese README and user manual** (machine translation, not yet reviewed
@@ -42,6 +64,33 @@ section named after the tag as the release notes; how to cut a release:
 - `firmware/build.sh --dev` builds the developer image with them;
   [`firmware/tools/reload.sh`](firmware/tools/reload.sh) and the emulator
   build it by default (`reload.sh --release` for the release image).
+
+## v0.4.1 (unreleased)
+
+- **Scope:** the MF menu leaves nothing on the right panel, and the panel is no longer drawn over it after a tab change.
+### Fixed
+
+- **Capacitance with a laptop charger on the USB cable:** mains ripple no
+  longer sends a large capacitor (about 50–600 µF) back and forth between
+  ranges with "Discharging..." and a wrong value. Moderate ripple now
+  measures. When the ripple is too strong to measure, the meter shows
+  dashes and "Unstable: unplug USB?". The ripple case is checked in the
+  emulator only.
+- A firmware update or a restart from the scope or generator page could
+  turn the meter off; it now restarts as from the multimeter page.
+
+- **Multimeter:** the reading with the extra digit sits 4 px further right.
+- **Scope:** the trigger badge takes the new source's colour at once.
+- **Scope:** the probe factor is kept after a power-off also with Mode Remember OFF.
+- Function buttons: V and A show the remembered AC / DC / AC+DC / AUTO; continuity / diode and Hz / °C put the remembered sub-mode first.
+
+- Diode: the resistance stays on screen while the SHORT / BEEP band is on (0.4.0 hid it below 22 mV).
+
+- Battery level: no longer jumps up on the charger; it rises slowly with the real charge.
+
+- Low-battery warning: a 3 s message and a beep at about 17 % and 8 %, and a red battery symbol; not on USB power, and it waits for a recording to end. Below about 1 % a 30 s countdown, then a clean power-off.
+
+- Power meter from the combined view: the wiring notice returns to the combined view, not the multimeter page.
 
 ## v0.4.0 (2026-11-02)
 

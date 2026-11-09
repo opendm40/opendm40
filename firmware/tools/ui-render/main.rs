@@ -68,6 +68,10 @@ mod hy3131_tables;
 mod lcd;
 #[path = "../../src/meter.rs"]
 mod meter;
+// The DMM CH2 store (scope.rs: the CH2 trigger source).
+#[allow(dead_code, static_mut_refs)]
+#[path = "../../src/scope_ch2.rs"]
+mod scope_ch2;
 #[path = "../../src/scope.rs"]
 mod scope;
 #[path = "../../src/scope_meas.rs"]
@@ -77,6 +81,7 @@ mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 mod scope_add;
+mod wide_ui;
 #[path = "../../src/decode.rs"]
 mod decode;
 mod decode_ui;
@@ -774,7 +779,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, rec_dim: false, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, bat_low: false, locked: false, rec: true, csv: true, rec_dim: false, page }
 }
 
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
@@ -1128,7 +1133,7 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
         (ui::S_SMOOTH, crate::tr!("OFF")), (ui::S_DMM_ROW, crate::tr!("Bargraph")), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, crate::tr!("Off (stock)")),
         (ui::S_PRESS, crate::tr!("ON")), (ui::S_TAP_STEP, crate::tr!("Corners")), (ui::S_JACK, crate::tr!("ON")), (ui::S_ALARM, crate::tr!("Loud")),
         (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, crate::tr!("OFF (stock)")), (ui::S_ACC, crate::tr!("ON")), (ui::S_OHM_NEG, crate::tr!("OFF (stock)")),
-        (ui::S_REMEMBER, crate::tr!("OFF")),
+        (ui::S_REMEMBER, crate::tr!("OFF")), (ui::S_CONT, crate::tr!("With volume")),
     ] {
         v[id as usize] = t;
     }
@@ -1141,11 +1146,12 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
 /// The widest value of every setting (the fit checks).
 fn set_vals_worst() -> Vec<&'static str> {
     set_vals(&[
-        (ui::S_DIM, crate::tr!("10 min")), (ui::S_SHUTDOWN, crate::tr!("1 hour")), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, crate::tr!("OFF")),
+        (ui::S_DIM, crate::tr!("10 min")), (ui::S_SHUTDOWN, crate::tr!("10 hours")), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, crate::tr!("OFF")),
         (ui::S_START, "DMM + Scope"), (ui::S_RATE, "SLOW (n/a here)"), (ui::S_SMOOTH, "HIGH"),
         (ui::S_DMM_ROW, crate::tr!("Bargraph")), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, crate::tr!("OFF (stock)")),
         (ui::S_TAP_STEP, crate::tr!("Halves (stock)")), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, crate::tr!("Volume")),
         (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, crate::tr!("OFF (stock)")),
+        (ui::S_CONT, crate::tr!("With volume")),
     ])
 }
 
@@ -1269,12 +1275,12 @@ fn bar_unit_check(ck: &mut Checker, scene: &str, r: &Reading) {
     let bg = ui::BG;
     let mask = |x0: i32| -> Vec<bool> {
         let e = emu();
-        (161..173).flat_map(|y| (x0..end).map(move |x| (x, y))).map(|(x, y)| e.fb[y as usize * W + x as usize] != bg).collect()
+        (163..175).flat_map(|y| (x0..end).map(move |x| (x, y))).map(|(x, y)| e.fb[y as usize * W + x as usize] != bg).collect()
     };
     let got = mask(end - w - 2);
     let snap = host::snapshot();
-    lcd::fill_rect((end - 120) as u16, 161, 120, 12, bg);
-    sf::label(sf::F14, sf::rect((end - 120) as i16, 161, 120, 12), &u, ui::DIM, bg, 4, 1);
+    lcd::fill_rect((end - 120) as u16, 163, 120, 12, bg);
+    sf::label(sf::F14, sf::rect((end - 120) as i16, 163, 120, 12), &u, ui::DIM, bg, 4, 1);
     let want = mask(end - w - 2);
     host::restore(&snap);
     ck.cases += 1;
@@ -1658,6 +1664,7 @@ fn main() {
 
     // 0c. opendm40 additions on the replica page (FFT boxes / peak, ...).
     scope_add::run(&mut ck, &out);
+    wide_ui::run(&mut ck, &out);
     // 0d. The protocol decoder view (ui_decode.rs).
     decode_ui::run(&mut ck, &out);
 
@@ -1831,6 +1838,10 @@ fn main() {
         let mut m = base;
         m.usb = true;
         v.push(("usb", m));
+        let mut low = base;
+        low.battery = 1;
+        low.bat_low = true;
+        v.push(("bat-low", low));
         m.charging = true;
         m.battery = 5;
         v.push(("usb-charged", m));
@@ -2047,7 +2058,8 @@ fn main() {
         std::fs::create_dir_all(&dir).unwrap();
         // (name, bt, usb, csv, locked, bars, charging)
         // `charging` = on a charger (green); the blink is the caller's level.
-        let states: [(&str, bool, bool, bool, bool, u8, bool); 10] = [
+        let states: [(&str, bool, bool, bool, bool, u8, bool); 11] = [
+            ("bat-low", false, false, false, false, 1, false),
             ("plain", false, false, false, false, 4, false),
             ("charged", false, true, false, false, 5, true),
             ("usb", false, true, false, false, 4, false),
@@ -2085,7 +2097,7 @@ fn main() {
                 ck.same_as(&format!("statusbar/blink/{gen}/{dim}"), &want);
             }
         }
-        let states: Vec<_> = states.into_iter().map(|s| (s, false)).chain(std::iter::once((states[4], true))).collect();
+        let states: Vec<_> = states.into_iter().map(|s| (s, false)).chain(std::iter::once((states[5], true))).collect();
         for ((name, bt, usb, csv, locked, bars, charging), dim) in states {
             for gen in [false, true] {
                 host::reset(0);
@@ -2100,6 +2112,7 @@ fn main() {
                 }
                 let mut st = status(0);
                 (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging, st.rec_dim) = (bt, usb, csv, locked, bars, charging, dim);
+                st.bat_low = name == "bat-low";
                 let name = if dim { "all-rec-off" } else { name };
                 let h = if gen { 36 } else { ui::BAR_H as usize };
                 if gen {
@@ -3008,6 +3021,81 @@ fn main() {
         println!("rate toast: widest {widest:?}, {}", all.iter().map(|(_, t)| t.as_str()).collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(" | "));
         (&*Box::leak(widest.into_boxed_str()), &*Box::leak(fast.into_boxed_str()))
     };
+    // The 0L caption's range line fits its box, every function and range
+    // (ui::ol_range_text; the units as the DMM's readings spell them).
+    {
+        // (mode, range, unit, decimals): the ranges the DMM has.
+        let mut all: Vec<(u8, i8, &str, u8)> = vec![(11, 0, "\u{3a9}", 2), (12, 0, "V", 4)];
+        for (u, d) in [("V", 1), ("V", 2), ("V", 3), ("V", 4), ("mV", 2), ("mV", 3), ("A", 3), ("A", 4), ("mA", 2), ("mA", 3), ("uA", 2), ("uA", 3)] {
+            all.push((1, 0, u, d));
+        }
+        for (u, d) in [("\u{3a9}", 2), ("\u{3a9}", 3), ("k\u{3a9}", 2), ("k\u{3a9}", 3), ("k\u{3a9}", 4), ("M\u{3a9}", 2), ("M\u{3a9}", 3), ("M\u{3a9}", 4)] {
+            all.push((10, 0, u, d));
+        }
+        for rg in 0..=7i8 {
+            all.push((13, rg, if rg <= 2 { "nF" } else { "\u{b5}F" }, 2));
+        }
+        let mut widest = (0, String::new());
+        for (mode, range, u, dec) in all {
+            let mut r = cases[0].1;
+            r.main = ol(dec, u);
+            (r.mode, r.range) = (mode, range);
+            let mut b = [0u8; 24];
+            let t = ui::ol_range_text(&mut b, &r);
+            let w = stockfont::text_width(stockfont::TEXT22, t, 1);
+            ck.cases += 1;
+            if w > ui::OL_WORD.w {
+                ck.fail("ol-range/width", format!("{t:?} {w} px > {}", ui::OL_WORD.w));
+            }
+            if w > widest.0 {
+                widest = (w, t.to_string());
+            }
+        }
+        println!("0L range line: widest {:?} {} px", widest.1, widest.0);
+    }
+    // The 0L caption on the DMM page, for the contact sheet: bargraph and
+    // history row, a limit badge, HOLD, a range change while it stays 0L.
+    for (i, (name, mode, range, u, dec, bar, hold, lim)) in [
+        ("60v", 1u8, 0i8, "V", 3u8, true, 0u8, meter::V_NONE),
+        ("1000v", 1, 3, "V", 1, true, 0, meter::V_HI),
+        ("600mv-hist", 1, 0, "mV", 2, false, 1, meter::V_NONE),
+        ("600kohm", 10, 3, "k\u{3a9}", 2, true, 0, meter::V_NONE),
+        ("600mohm", 10, 7, "M\u{3a9}", 2, true, 0, meter::V_HI),
+        ("cont", 11, 0, "\u{3a9}", 2, true, 0, meter::V_NONE),
+        ("diode", 12, 0, "V", 4, true, 0, meter::V_NONE),
+        ("cap-60mf", 13, 7, "\u{b5}F", 0, true, 0, meter::V_NONE),
+        ("600ma", 5, 0, "mA", 2, true, 0, meter::V_NONE),
+        ("temp", 15, 0, "\u{b0}C", 1, true, 0, meter::V_NONE),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        host::reset(0);
+        let r = rd(mode, ol(dec, u), None, None, false);
+        let r = Reading { range, ..r };
+        let mut dv = ui::DmmView::new();
+        dv.bar_on = bar;
+        dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
+        dv.bar_update(&r);
+        dv.reading(&r, hold, lim);
+        ui::status_right(&status(0));
+        ck.check(&format!("ol-range/{name}"), &[("screen", Bx::new(0, 0, 480, 320))]);
+        save(&out, &format!("o{:02}-ol-{name}", i + 1));
+    }
+    // A range change while it stays 0L: the line follows, nothing else moves.
+    {
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.draw_static(Button::Volt, 1, false, false);
+        dv.reading(&rd(1, ol(3, "V"), None, None, false), 0, meter::V_NONE);
+        dv.reading(&rd(1, ol(2, "V"), None, None, false), 0, meter::V_NONE);
+        let got = emu().fb.clone();
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.draw_static(Button::Volt, 1, false, false);
+        dv.reading(&rd(1, ol(2, "V"), None, None, false), 0, meter::V_NONE);
+        ck.same_as("ol-range/range-change", &got);
+    }
     let toasts = [
         ("Disk in use by PC - eject first", false),
         ("Saved LOG000.DLG", true),
@@ -3017,6 +3105,8 @@ fn main() {
         (crate::tr!("Screenshot failed"), false),
         (dialog::AUTO_DC, true),
         ("Auto power-off in 30 s", false),
+        (dialog::LOW_BATTERY, false),
+        (dialog::low_battery_off(30), false),
         // Tap on the DMM value (resolution / rate), widest variants.
         (rate_widest, true),
         (rate_fast, true),
@@ -3053,14 +3143,22 @@ fn main() {
         dialog::toast(t, *ok);
         let (x, y, w2, h2) = dialog::TOAST;
         ck.check(&format!("toast/{t}"), &[("screen", Bx::new(0, 0, 480, 320)), ("toast", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
-        if k == 0 {
-            save(&out, "t01-toast-disk-in-use");
-        }
-        if k == 11 {
-            save(&out, "t03-toast-ajack");
-        }
-        if k == 8 {
-            save(&out, "t02-toast-resolution");
+        // (By text: the indices moved when toasts were added.)
+        let name = if k == 0 {
+            "t01-toast-disk-in-use"
+        } else if *t == rate_widest {
+            "t02-toast-resolution"
+        } else if *t == sentinel::Alert::AJack.toast() {
+            "t03-toast-ajack"
+        } else if *t == dialog::LOW_BATTERY {
+            "t04-toast-low-battery"
+        } else if *t == dialog::low_battery_off(30) {
+            "t05-toast-battery-empty"
+        } else {
+            ""
+        };
+        if !name.is_empty() {
+            save(&out, name);
         }
     }
 
@@ -3447,14 +3545,14 @@ fn main() {
                     save(&out, &format!("x{:02}-{tag}-{}", i + 1, if ext { "ext" } else { "noext" }));
                     bufs.push(emu().fb.clone());
                 }
-                // Nothing but the extra digit's cell (341..398 + the box's
-                // end to 400, rows 68..147) differs.
+                // Nothing but the extra digit's cell (345..402, rows
+                // 68..147) differs.
                 ck.cases += 1;
                 let mut bx = EMPTY;
                 let mut n = 0;
                 for i in 0..W * 320 {
                     let (x, y) = (i % W, i / W);
-                    if bufs[0][i] != bufs[1][i] && !((341..400).contains(&x) && (68..148).contains(&y)) {
+                    if bufs[0][i] != bufs[1][i] && !((345..402).contains(&x) && (68..148).contains(&y)) {
                         bx.add(x as i32, y as i32);
                         n += 1;
                     }
@@ -3651,16 +3749,16 @@ fn main() {
             let kp_codes: Vec<u8> = ui::keypad_keys(ui::KP_NUM).iter().map(|k| k.2).filter(|&c| c != 0).collect();
             type Case<'a> = (String, &'a dyn Fn(), Box<dyn Fn(bool) + 'a>, Option<stockfont::Rect>);
             let cases: Vec<Case> = (0..6)
-                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Menu, pr(i as u8, 0))))
+                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Menu, pr(i as u8, 0), 0)))
                 .chain(set_t.iter().map(|&(t, r, part)| {
                     let d: &dyn Fn() = &*d_sets[t as usize];
-                    (format!("settings{t}-{r}/{part}"), d, Box::new(move |on| row(r, part, on, d)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Settings, pr(r, part)))
+                    (format!("settings{t}-{r}/{part}"), d, Box::new(move |on| row(r, part, on, d)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Settings, pr(r, part), t))
                 }))
-                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Limits, pr(r, 0)))))
+                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Limits, pr(r, 0), 0))))
                 .chain([(0u8, -1i8), (0, 1), (1, -1), (1, 1), (3, 0)].into_iter().flat_map(|(r, part)| {
                     [
-                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part))),
-                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part))),
+                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part), 0)),
+                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part), 0)),
                     ]
                 }))
                 .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>, Some(ui::gen_press_rect(k)))))
@@ -3727,7 +3825,15 @@ fn main() {
         // selected, the DMM page with the tag on the ohm button.
         host::reset(0);
         ui::range_page(Button::Ohm, Some(7), 1, None);
+        ui::ohm_null_button(0.0);
+        ck.check_opts("range/ohm-null-off", &page_regions, false);
         save(&out, "m07-range-ohm-on");
+        // Ohm null on (Resistor Settings "Null"): the button with its value.
+        host::reset(0);
+        ui::range_page(Button::Ohm, Some(7), 0, None);
+        ui::ohm_null_button(0.123);
+        ck.check_opts("range/ohm-null-on", &page_regions, false);
+        save(&out, "m07c-range-ohm-null");
         host::reset(0);
         ui::range_page(Button::Cap, Some(7), 0, None);
         save(&out, "m07b-range-cap");
@@ -3785,6 +3891,23 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
+        // Ohm null on: "NULL" after the test current (600 ohm range, the
+        // widest current text with the "ON" variant off and on).
+        for on in [false, true] {
+            host::reset(0);
+            let (r, _) = find("ohm_k");
+            let r = Reading { range: 1, ..r };
+            let mut dv = ui::DmmView::new();
+            dv.label = None;
+            dv.ohm_null = true;
+            dv.draw_static(Button::Ohm, r.mode, false, on);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            ck.check(&format!("dmm-ohm-null/{}", on as u8), &dmm_page_regions);
+            if !on {
+                save(&out, "d06b-dmm-ohm-null");
+            }
+        }
         // ui-review #13: the stock >= 30 V red value (230 V AC).
         host::reset(0);
         let (r, _) = find("acv_230");
@@ -3871,8 +3994,26 @@ fn main() {
         }
     }
 
+    // Function buttons with remembered sub-modes (dmm::submem), another
+    // function in force: the page and the combined view's band.
+    for (tag, mem) in [("ac-cont-temp", 0x35u8), ("acdc", 0x0A), ("auto", 0x0F)] {
+        let (r, l) = find("ohm_k");
+        ui::set_btn_mem(mem);
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.draw_static(Button::Ohm, r.mode, false, false);
+        dv.bar_update(&r);
+        dv.reading(&r, 0, 0);
+        ck.check(&format!("btn-mem/{tag}"), &dmm_page_regions);
+        save(&out, &format!("d30-btn-mem-{tag}"));
+        combined(&r, l, 0, 0, false, false, true, "");
+        let area = Bx::new(0, ui::FUNC_Y as i32, 480, 301 - ui::FUNC_Y as i32);
+        ck.check_area(&format!("btn-mem/{tag}/band"), &[("band", area)], true, Some(area));
+        save(&out, &format!("d31-btn-mem-band-{tag}"));
+    }
+    ui::set_btn_mem(0);
     // Beeper indicator (continuity / diode, App::beep_ind): every style
-    // (bit 0 the SHORT / BEEP band, bit 1 the digits green) x SHORT / BEEP
+    // (bit 0 the BEEP band, bit 1 the digits green) x short / pattern
     // x bargraph / history row x limit badge, layout checked; on -> off
     // and off -> on (with new readings in between) equal a fresh page.
     // Renders: b01..b11 (the PR's comparison), b12 the bargraph-row
@@ -3905,7 +4046,7 @@ fn main() {
         for style in 1..=3u8 {
             ui::set_short_style(style);
             for (name, r, b) in &short_cases {
-                let k = if *name == "diode-pn" { 2 } else { 1 };
+                let k = match *name { "diode-pn" => 2, "diode" => 3, _ => 1 };
                 for bar in [true, false] {
                     for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
                         page(r, *b, k, bar, lim);
@@ -3937,7 +4078,7 @@ fn main() {
         // Renders: off, then each style; continuity, a diode short, a
         // diode pattern (BEEP).
         let mut n = 1;
-        for (name, k) in [("cont", 1u8), ("diode", 1), ("diode-pn", 2)] {
+        for (name, k) in [("cont", 1u8), ("diode", 3), ("diode-pn", 2)] {
             let (_, r, b) = short_cases.iter().find(|c| c.0 == name).unwrap();
             for style in [0u8, 1, 2, 3] {
                 if style == 0 && name == "diode-pn" {
@@ -3958,9 +4099,9 @@ fn main() {
         page(r, *b, 0, true, meter::V_NONE);
         let br = stockfont::rect(8, 147, 464, 26);
         stockfont::rbox(br, 6, ui::SHORT_BG, ui::BG);
-        stockfont::glyphs(stockfont::TEXT22, br, "SHORT", 0xFFFF, ui::SHORT_BG, 8, 2);
+        stockfont::glyphs(stockfont::TEXT22, br, "BEEP", 0xFFFF, ui::SHORT_BG, 8, 2);
         save(&out, &format!("b{n:02}-short-cont-barrow-mockup"));
-        // Combined view: the strip's badge SHORT / BEEP and its value green
+        // Combined view: the strip's badge BEEP and its value green
         // (scope_page.rs sp_strip); off -> on -> off equals a fresh strip.
         for (i, (name, r, _)) in short_cases.iter().enumerate() {
             let k = if *name == "diode-pn" { 2u8 } else { 1 };
@@ -3968,7 +4109,7 @@ fn main() {
                 let mut d = ui::strip_data(r, 0, meter::V_NONE, false, 0, false, None);
                 ui::strip_acc(&mut d, r, Some(ui::Acc { model: 2, tc: true }));
                 if on {
-                    d.badge = if k == 1 { "SHORT" } else { "BEEP" };
+                    d.badge = "BEEP";
                     d.badge_col = ui::SHORT_BG;
                     d.short = true;
                 }

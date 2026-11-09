@@ -762,7 +762,7 @@ pub enum Dbg {
     /// (dmm.rs `fast_info`).
     #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Fast,
-    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 22 numbers.
+    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 27 numbers.
     #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Cap,
     /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
@@ -932,8 +932,9 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   effective duty, VOLT? / OFFS? the set values (OFFS? with AUTO: Vpp/2)
 ///   TIMebase[:MAIN]:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
 ///   TRIGger[:EDGE]:LEVel <V>   TRIGger[:EDGE]:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
-///   TRIGger[:EDGE]:SOURce CHANnel1|GENerator (GEN: the generator's output
-///   computed from its timers, docs/scope-gen-channel.md)
+///   TRIGger[:EDGE]:SOURce CHANnel1|GENerator|CHANnel2 (GEN: the generator's
+///   output computed from its timers; CHAN2: the DMM channel's samples, the
+///   level (TRIG:LEV) on its scale; turns CH2 on; docs/scope-gen-channel.md)
 ///   CHANnel1:OFFSet <V> (the vertical position as a voltage added to the
 ///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s; stopped:
 ///   the stored record's rate)
@@ -1706,7 +1707,7 @@ fn gen_scope_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Cmd, &'stat
         } else if kw(sub, "SWEep") {
             Ok(Cmd::TrigSweep(pick(&["AUTO", "NORMal", "SINGle"])?))
         } else if kw(sub, "SOURce") {
-            Ok(Cmd::TrigSource(pick(&["CHANnel1", "GENerator"])?.map(|i| i as u8)))
+            Ok(Cmd::TrigSource(pick(&["CHANnel1", "GENerator", "CHANnel2"])?.map(|i| i as u8)))
         } else if sub.is_empty() || kw(sub, "LEVel") {
             Ok(Cmd::TrigLevel(num(b"V", any)?))
         } else {

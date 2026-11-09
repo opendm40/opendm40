@@ -555,10 +555,10 @@ and `MEASure:POWer?` then give the real power P in W.
 | `CHANnel1:SCALe[?]` | V/div at the probe tip, 0.002 .. 10 (times the probe factor; 0.005 / 0.002 are a digital zoom of 0.01) | `+1.000000E+00` | both |
 | `CHANnel1:COUPling[?]` | `AC` or `DC` | `AC` or `DC` | both |
 | `CHANnel1:OFFSet[?]` | V added to the signal (positive moves the trace up) | `+0.000000E+00` | both |
-| `TRIGger[:EDGE]:LEVel[?]` | V at the probe tip | `+5.000000E-01` | both |
+| `TRIGger[:EDGE]:LEVel[?]` | V at the probe tip; source `CHAN2`: on CH2's scale (A when CH2 measures current), to one screen row | `+5.000000E-01` | both |
 | `TRIGger[:EDGE]:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
 | `TRIGger:SWEep[?]` | `AUTO`, `NORMal` or `SINGle` | `AUTO`, `NORM` or `SING` | both |
-| `TRIGger[:EDGE]:SOURce[?]` | `CHANnel1` or `GENerator` (the generator's output, computed from its timers: edge only, no wire needed) | `CHAN1` or `GEN` | both |
+| `TRIGger[:EDGE]:SOURce[?]` | `CHANnel1`, `GENerator` (the generator's output, computed from its timers: edge only, no wire needed) or `CHANnel2` (the multimeter channel: edge only, the level on its scale; turns CH2 on, `Settings conflict` where the DMM function has no CH2) | `CHAN1`, `GEN` or `CHAN2` | both |
 | `GENerator:DISPlay[?]` | `ON` or `OFF` (`1` / `0`): the GEN trace (the generator's output) on the scope page | `1` or `0` | both |
 | `GENerator:SCALe[?]` | V/div of the GEN trace, 0.001 .. 10000 (1-2-5 steps); CHANnel1's V/div until it is set | `+1.000000E+00` | both |
 | `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07`; stopped, the stored record's, also after a zoom (1 / the record preamble's xinc; the screen preamble's xinc follows the shown timebase) | both |
@@ -908,11 +908,11 @@ Only in the developer image (`./build.sh --dev`, [firmware/README.md](../../firm
 | `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
-| `DBG:CAP?` | | Capacitance internals, 22 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF (600 µF and up: the last half ramp's C, negative falling)>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<1 = no final value on this range yet>,<same-range restarts (another capacitor)>,<discharge experiment mode in force>,<node voltage read before the discharge, V (9.91E+37: none)>,<estimate from the discharge, uF>,<experiment fall-backs to mode 0>` | USB |
+| `DBG:CAP?` | | Capacitance internals, 27 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF (600 µF and up: the last half ramp's C, negative falling)>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<1 = no final value on this range yet>,<same-range restarts (another capacitor)>,<discharge experiment mode in force>,<node voltage read before the discharge, V (9.91E+37: none)>,<estimate from the discharge, uF>,<experiment fall-backs to mode 0>,<steps down to the oscillator: comparator counter>,<: slope under the range>,<: value under the range>,<: no ramp / open / hops>,<hunting holds>` | USB |
 | `DBG:CAP:CLASS[?]` | `0` .. `4` | The capacitance ramp comparator class (R21 swing) on 600 µF and up: `0` adaptive (class 2, the next wider class at once when one poll's ramp step is half the ramp's swing or more), `1` .. `3` fixed, `4` the stock choice from the slope. Not stored. | USB |
 | `DBG:CAP:IDIS[?]` | µA | The capacitor discharge current for the rough value during the discharge (C = I / slope; default 375, inferred from one capacitor). Not stored. | USB |
 | `DBG:CAP:JUMPN[?]` | n | Capacitance AUTO: the 600 µF ramp polls (0.25 s each) before one poll clearly over the range steps up at once (0 .. 255, default 0). Not stored. | USB |
-| `DBG:CAP:DISMS[?]` | ms | The poll period during the capacitor discharge (25 .. 1000, default 50; AD1 converts every 25 ms there). Not stored. | USB |
+| `DBG:CAP:DISMS[?]` | ms | The poll period during the capacitor discharge (10 .. 1000, default 20: every conversion read; AD1 converts every 25 ms there, the end looks at the mean of 4 samples). Not stored. | USB |
 | `DBG:CAP:DISMODE[?]` | `0` / `1` | The capacitor discharge: `0` the stock constant current (~0.38 mA), `1` (default) a larger constant current set by `DBG:CAP:DISREF` for a capacitor charged above the 1.2 V clamp whose voltage, read first on the DC V row, is 5 V or less; back to `0` if the node rises or after 60 s. Not stored. | USB |
 | `DBG:CAP:DISREF[?]` | `2` .. `6` | The OP3 reference (SFUVR) of discharge mode 1: `2` the stock row's, `3` .. `6` AGNDP9 .. AGNDP6 / AGNDN9 .. AGNDN6. Measured on one unit (~1 mF from 3.2 V): 0.38 / 0.72 / 0.88 / 0.95 / 1.05 mA (the discharge estimate takes 0.685 for `3`, from a second capacitor; inferred). Default 3. Not stored. | USB |
 | `DBG:CAP:DISEND[?]` | mV | The node voltage that ends the discharge and starts the ramp (1 .. 1300, default 30). Not stored. | USB |

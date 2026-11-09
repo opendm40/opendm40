@@ -224,7 +224,8 @@ fn scene(ck: &mut Checker, name: &str, b: &[bool], spb: f64, cfg: dc::Cfg, chars
     if wave {
         m.wave = true;
         m.wvdiv = 2.0;
-        m.ch1_txt = "DC V";
+        m.ch1_scale = scope_ui::Txt::new("1V");
+        m.tsrc = scope::TSRC_CH2;
     }
     let sc = stock::Scene { name: "decode", m, popup: scope_ui::Popup::None, trace: Some(tr), persist: None, cols: 400, cells: base.cells.clone() };
     stock::draw(&sc);
@@ -497,7 +498,7 @@ fn log_snippet(ck: &mut Checker, name: &str, modbus: bool) {
     host::reset(0);
     ul::chrome(&mut || {});
     ul::panel(false, true, &mut || {});
-    let t = ul::Top { state: 2, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 9600 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
+    let t = ul::Top { state: 2, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 9600 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false, bat_low: false };
     for k in 0..ul::TOP_ITEMS {
         ul::top_item(k, &t);
     }
@@ -540,7 +541,7 @@ fn log_screen(ck: &mut Checker, name: &str, modbus: bool) {
         host::reset(0);
         ul::chrome(&mut || {});
         ul::panel(true, false, &mut || {});
-        let t = ul::Top { state: 1, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 115200 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
+        let t = ul::Top { state: 1, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 115200 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false, bat_low: false };
         for k in 0..ul::TOP_ITEMS {
             ul::top_item(k, &t);
         }

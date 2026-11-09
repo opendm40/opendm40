@@ -137,11 +137,10 @@ SECTIONS
          * n7_arg: region B again since region C audit #3 (2026-10-29, C at
          * 7.7 KB free, B at 50 KB; docs/native-boot.md). They were in B
          * from region C audit #1 (133f81e) and in C from region B audit #4
-         * (2026-10-25, B at 15 KB). */
+         * (2026-10-25, B at 15 KB). dc_enter is `.cold` again (its own
+         * attribute; once per stream start, before the ISR): B at 7.8 KB
+         * with the scope PRs of 2026-11-08 merged. */
         *(.text.*8opendm409scope_csv*);
-        /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
-         * loop and asm are `.text.a2.*` (zero-wait region A2). */
-        *(.text.*8opendm408memprobe*);
         /* The decoder's frame log: a frame's waveform, drawn on a tap, the
          * top bar / counters, the page draw, the setup popup and the
          * view's touches (app_log.rs `.text.log_cold`; ui_log.rs's panel
@@ -154,6 +153,9 @@ SECTIONS
         *(.text.log_cold*);
         *(.text.*8opendm408scope_ui3log12panel_button*);
         *(.text.*8opendm408scope_ui3log9panel_hit*);
+        /* The scope page's press decision: once per touch-down (sp_select,
+         * the wide graph's right-edge press). */
+        *(.text.*8opendm408scope_ui11graph_press*);
         /* The keypad's digit font: read only by ui::keypad_key (above, in
          * C: the Keypad page / popup, no stream). */
         *(.rodata.fonts.K_FONT_E);
@@ -274,6 +276,9 @@ SECTIONS
          * 1000;...'), so they stay in B. */
         *(.text.*8opendm407new_app*);
         *(.text.*8opendm403app*3App11fuse_dialog*);
+        /* The low-battery messages (once per level; never during a stream). */
+        *(.text.*8opendm403app*3App11low_battery*);
+        *(.text.*8opendm403app*3App15low_battery_off*);
         *(.text.*8opendm403app*3App11limits_page*);
         *(.text.*8opendm403app*3App7kp_open*);
         *(.text.*8opendm403app9app_power*3App13pw_open_entry*);
@@ -480,10 +485,19 @@ SECTIONS
          * cold_str! (strings) and cold_set! (a constant's bytes copied at
          * run time, e.g. a job record's reset value). */
         *(.rodata.cold .rodata.cold.*);
+        /* `#[link_section = ".cold"]` functions (dmm.rs, app_ch2.rs,
+         * ad2exp.rs dc_enter): before __cold_end, so that the region C
+         * budget and its asserts count them (as orphans they were placed
+         * after __image_end). */
+        *(.cold .cold.*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
 
+    /* Feature memprobe (DBG:PEEK? etc., debug builds only) is not claimed
+     * by .cold: its ~3 KB put region C under the 4 KiB floor (2026-11-06,
+     * C 7 KB free in the default build). Its timing loop and asm are
+     * `.text.a2.*` (zero-wait region A2). */
     .text ORIGIN(FLASH_B) :
     {
         __stext = .;

@@ -28,6 +28,12 @@ pub struct Ch2 {
     /// stream): restart it at the next RUN (the samples in between were
     /// thrown away).
     pub frozen: bool,
+    /// The next `ch2_lost` starts the stream again at once (a function
+    /// change from the Display tab's V / A), not after 2 s.
+    pub quick: bool,
+    /// Vertical position: the zero row - 140 (rows of the 280-row model,
+    /// as CH1's `Settings::pos`; the '2' marker, scope_ui::CH2_LEVEL).
+    pub pos: i16,
 }
 
 /// CH2's highest stream rate (S/s): the 38 400 rung at 2 ms/div and
@@ -40,7 +46,7 @@ pub struct Ch2 {
 pub const CH2_MAX_FS: u32 = 38_400;
 
 impl Ch2 {
-    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false };
+    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, quick: false, pos: 0 };
 }
 
 /// The CH2 V/div label ("1.5V", "200mA").
@@ -52,7 +58,7 @@ fn label(vdiv: f32, amps: bool) -> crate::scope_ui::Txt {
 
 impl App {
     /// Why CH2 cannot run on the current DMM function (None: it can).
-    fn ch2_why(&self) -> Option<&'static str> {
+    pub(super) fn ch2_why(&self) -> Option<&'static str> {
         let b = self.dmm.button();
         if !app_wave::WAVE_BUILD {
             Some("CH2: not in this build")
@@ -104,6 +110,7 @@ impl App {
     /// (mHz), its stamps counting from DWT `c0`.
     pub fn ch2_started(&mut self, fs: u32, real_mhz: u32, c0: u32) {
         let Some(a) = self.dmm.ad2_scale() else { return };
+        let was = (self.ch2.vdiv, self.scope_ch2_amps());
         if self.ch2.vdiv <= 0.0 || scope::wave_step_of(a.amps, self.ch2.vdiv).is_none() || self.scope_ch2_amps() != a.amps {
             self.ch2.vdiv = scope::wave_full_step(a.amps, a.item).map_or(a.full / 4.0, |i| scope::wave_steps(a.amps)[i].0);
         }
@@ -113,6 +120,11 @@ impl App {
         self.ch2.live = true;
         self.ch2.frozen = false;
         self.ch2.fs = fs;
+        if self.sp.popup == crate::scope_ui::Popup::Mf(1) && was != (self.ch2.vdiv, a.amps) {
+            // The Display tab open (a function change over SCPI / BT): its
+            // CH2 V/div again (the page with the popup, as a colour change).
+            self.redraw = true;
+        }
     }
 
     fn scope_ch2_amps(&self) -> bool {
@@ -129,7 +141,8 @@ impl App {
     /// stopped it on a DMM change, the bus guard): again in 2 s.
     pub fn ch2_lost(&mut self, now: u64) {
         self.ch2.live = false;
-        self.ch2.retry_at = now + 2000;
+        self.ch2.retry_at = if self.ch2.quick { now } else { now + 2000 };
+        self.ch2.quick = false;
     }
 
     /// The stream into the CH2 store (every scope pass and between its
@@ -163,16 +176,46 @@ impl App {
         crate::logger::wave::drain_ts(&mut |ts, raw| st.push(ts, raw));
     }
 
-    /// MF > Display "CH2 (DMM)" On / Off.
+    /// Trigger source DMM picked with CH2 off (SCPI, the Trigger tab): CH2
+    /// on (a toast where it cannot be). True: it is on.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".cold")]
+    pub(super) fn ch2_on_for_trig(&mut self, clk: &mut Clock) -> bool {
+        self.ch2_set(clk, true);
+        self.ch2.on
+    }
+
+    /// TRIG:LEV / TRIG:LEV? with source DMM: the level on CH2's scale (the
+    /// badge's; set to a row: the level is the T marker against the CH2
+    /// trace).
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".cold")]
+    pub(super) fn ch2_trig_level(&mut self, sc: &mut scope::Settings, v: Option<f32>, out: &mut crate::scpi::Scpi) -> Option<()> {
+        match v {
+            Some(v) => {
+                sc.trig_row = self.scope.ch2_level_row(v);
+                None
+            }
+            None => {
+                out.put_f32(self.scope.ch2_level());
+                Some(())
+            }
+        }
+    }
+
+    /// MF > Display "CH2 (DMM)" On / Off. The Wave view has the DMM
+    /// channel on: Off leaves it (`wave_channel`).
     pub(super) fn ch2_set(&mut self, clk: &mut Clock, on: bool) {
         let now = clk.now_ms();
+        if self.scope.wave_on() {
+            if !on {
+                self.wave_channel(clk, false);
+            }
+            return;
+        }
         if on {
             if let Some(why) = self.ch2_why() {
                 self.toast(now, why, false);
-                return;
-            }
-            if self.scope.wave_on() {
-                self.toast(now, "CH2: not in the Wave view", false);
                 return;
             }
         }
@@ -181,15 +224,73 @@ impl App {
         if !on {
             crate::scope_ui::graph().c2 = [crate::scope_ui::EMPTY; crate::scope_ui::NCOL];
         }
-        // The comparator on / off: restart the acquisition.
-        let st = self.scope.s;
+        // The comparator on / off: restart the acquisition. CH2 off with
+        // the trigger on it: the trigger goes back to CH1 (no source on a
+        // channel that is off).
+        let mut st = self.scope.s;
+        if !on && st.tsrc == scope::TSRC_CH2 {
+            st.tsrc = scope::TSRC_CH1;
+            self.toast(now, crate::tr!("Trigger source: CH1"), false);
+        }
         self.scope_set(st, now);
         self.update_rails(clk);
     }
 
+    /// The multimeter's function as CH2's unit (MF > Display V / A): 0 V,
+    /// 1 A, 2 another function (neither shown selected).
+    pub(super) fn ch2_func_idx(&self) -> u8 {
+        match self.dmm.button() {
+            _ if self.dmm.pw.on => 2,
+            Button::Volt => 0,
+            Button::Amp => 1,
+            _ => 2,
+        }
+    }
+
+    /// MF > Display CH2 "V / A": the multimeter into the V or the A function,
+    /// in a coupling CH2 can stream (V: DC / AC, not AC+DC / AUTO; A: AC A,
+    /// DC-coupled), so that CH2's unit and the multimeter agree. The DMM
+    /// write stops a running stream (hy3131 `guard`); it starts again at
+    /// once on the new row (`ch2_lost`).
+    // Region B, not .cold: the tap comes while CH2's stream runs (the ISR).
+    #[inline(never)]
+    pub(super) fn ch2_func(&mut self, clk: &mut Clock, amps: bool) {
+        let now = clk.now_ms();
+        let why = if self.scope.wave_on() {
+            Some("CH2: not in the Wave view")
+        } else if crate::csvlog::active() {
+            Some("CH2: recording runs")
+        } else if crate::hy3131::streaming() && !self.ch2.live {
+            // The data logger or the inrush capture owns the DMM chip.
+            Some("CH2: data logger running")
+        } else {
+            None
+        };
+        if let Some(t) = why {
+            self.toast(now, t, false);
+            return;
+        }
+        let b = if amps { Button::Amp } else { Button::Volt };
+        if self.dmm.pw.on || self.dmm.button() != b {
+            self.dmm.press(clk, b);
+        }
+        let sub = self.dmm.sub();
+        if sub >= 2 || (amps && sub == 0) {
+            self.dmm.set_sub(clk, amps as u8);
+        }
+        self.ch2.quick = self.ch2.live;
+        self.func_changed();
+        self.last_raw = None;
+    }
+
     /// MF > Display CH2 V/div - / +: the next `scope::wave_steps` value
     /// (screen only: the DMM range stays).
+    /// The Wave view: its V/div steps (`wave_range_step`, the range follows).
     pub(super) fn ch2_step(&mut self, up: bool, now: u64) {
+        if self.scope.wave_on() {
+            self.wave_range_step(!up, now);
+            return;
+        }
         let amps = self.scope_ch2_amps();
         let st = scope::wave_steps(amps);
         let i = scope::wave_step_of(amps, self.ch2.vdiv).unwrap_or(0);
@@ -208,9 +309,14 @@ impl App {
     }
 
     /// The CH2 V/div ("1.5V", "200mA"; the DMM block, the Display tab):
-    /// also while off, "--" before the first start and in the Wave view.
+    /// also while off, "--" before the first start and while the
+    /// multimeter's V / A is not the last stream's unit (until the stream
+    /// starts on the new function; AC+DC: never). The Wave view: its V/div.
     pub(super) fn ch2_label(&self) -> crate::scope_ui::Txt {
-        if self.ch2.vdiv > 0.0 && !self.scope.wave_on() {
+        let f = self.ch2_func_idx();
+        if self.scope.wave_on() {
+            label(self.scope.vdiv(), self.scope.wave_scale_now().amps)
+        } else if self.ch2.vdiv > 0.0 && (f == 2 || (f == 1) == self.scope_ch2_amps()) {
             label(self.ch2.vdiv, self.scope_ch2_amps())
         } else {
             crate::scope_ui::Txt::new("--")
@@ -229,7 +335,8 @@ impl App {
         }
         let st = scope_ch2::store();
         let k = 141.0 / (4.0 * self.ch2.vdiv);
-        let row = |v: f32| (140.0 - v * k).clamp(-30000.0, 30000.0) as i16;
+        let z = 140.0 + self.ch2.pos as f32;
+        let row = |v: f32| (z - v * k).clamp(-30000.0, 30000.0) as i16;
         // Columns left to right (rising times): one anchor search per frame
         // and f32 maths per column (`Store::span_run`).
         let mut run = st.run();

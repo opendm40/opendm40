@@ -3,7 +3,7 @@
 //! stock orange. No framebuffer: every element is drawn as complete cells /
 //! columns so redraws do not flicker.
 
-use crate::dmm::{Button, Reading};
+use crate::dmm::{submem, Button, Reading};
 use crate::gen;
 use crate::lcd::{self, Color};
 use crate::meter;
@@ -53,7 +53,10 @@ pub const SHORT_FG: Color = 0x07E0;
 /// The indicator's band over the aux row (y 38..63, as the temperature
 /// chip): 4 px under the status bar and above the digits' cells (68).
 pub const SHORT_RECT: sf::Rect = rect(8, 38, 464, 26);
-/// Indicator style, bit 0: the band with SHORT / BEEP; bit 1: the main
+/// The band in diode: over the aux1 slot only, the Ω value (aux2, from x 260)
+/// stays readable: a low resistance is what the mode is used for.
+pub const SHORT_RECT_DIODE: sf::Rect = rect(8, 38, 240, 26);
+/// Indicator style, bit 0: the band with BEEP; bit 1: the main
 /// digits green. The firmware draws SHORT_STYLE; ui-render also draws the
 /// others (`set_short_style`, the PR's comparison).
 pub const SHORT_STYLE: u8 = 3;
@@ -77,10 +80,16 @@ pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
 const BAR_X: i16 = 4;
 /// Left edge of the main readout's cells in the extra-digit layout
-/// (`CELLS_X`, 8..398): 390 px do not fit in the stock 40..400, so the
+/// (`CELLS_X`, 12..402): 390 px do not fit in the stock 40..400, so the
 /// whole number starts further left, over the stock HV lightning's box
-/// (`hv_warning` draws it small in the aux row then).
-const XT_X: i16 = 8;
+/// (`hv_warning` draws it small in the aux row then). As far right as the
+/// unit and the limit badge allow (their boxes from 403 / 406; the digits'
+/// ink ends ~4 px before the cells' end): the stock-sized 5 digits end at
+/// 400, the 6 should not sit much further left.
+const XT_X: i16 = 12;
+/// Right end of the extra-digit layout's cells (and its box: it also
+/// clears the stock cells' end, 400).
+const XT_END: i16 = XT_X + 390;
 /// The aux-row box of the small HV lightning (extra-digit layout): the
 /// stock lightning at half size, its baseline just below the box.
 const HV_SMALL: sf::Rect = rect(8, 37, 20, 29);
@@ -156,7 +165,8 @@ const CELLS: [[u8; 7]; 6] = [
 /// OL): the 7 cells of the reading and the extra digit's cell, all full
 /// size. Sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78
 /// digits are <= 56 px wide): centred, every glyph keeps >= 1 px to its
-/// neighbours = 390 px: XT_X..398, >= 5 px before the limit badge (403).
+/// neighbours = 390 px: XT_X..XT_END (402), the ink >= 5 px before the
+/// limit badge (403).
 /// The layout holds whenever the extra digit can appear (`DmmView::ext_slot`),
 /// with or without it, so the digit only fills or empties the last cell.
 const CELLS_X: [[u8; 8]; 4] = [
@@ -318,13 +328,20 @@ pub struct DmmView {
     pub pwc: pw::PwCache,
     /// The "ON" ohm variant is selected (`draw_static`'s `ohm_on`).
     ohm_on: bool,
-    /// Test current label as last drawn: ohm range | variant << 3, 0x10
+    /// The ohm null is on (Dmm::ohm_null; set by the app before
+    /// `draw_static`): "NULL" after the ohm test current.
+    pub ohm_null: bool,
+    /// Test current label as last drawn: ohm range | variant << 3 | null <<
+    /// 6, 0x10
     /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
     /// The "Overflow" caption next to the main readout's "0L" is drawn
     /// (`ol_word`).
     ol_word: bool,
+    /// What the caption's range line shows (a hash of the text): a new
+    /// range while the reading stays 0L redraws it.
+    ol_range: u32,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
     /// history row (Settings > Display "DMM row": History) and the power meter
@@ -338,22 +355,23 @@ pub struct DmmView {
     acc_k: Option<(u32, u8, &'static str)>,
     acc_drawn: bool,
     /// The beeper indicator to show (set by the app, `App::beep_ind`): 0
-    /// none, 1 SHORT (continuity, a diode-mode short), 2 BEEP (a diode
-    /// pattern); and the band as drawn (`short_sync`).
+    /// none, 1 continuity, 2 a diode pattern, 3 a diode-mode short; the band
+    /// says BEEP for all (chat 675); and the band as drawn (`short_sync`).
     pub short: u8,
     short_drawn: u8,
 }
 
-/// Bargraph geometry in the history row's place (rows 150..172 between the
+/// Bargraph geometry in the history row's place (rows 152..174 between the
 /// F78 ink, which ends at 146, and the chart frame at 176):
-///   segments  12..410 x 150..158 (50 x 8 px pitch, bargraph.rs)
-///   labels    F14 row 161..172 under the scale: 0 / half / full scale
+///   segments  12..410 x 152..160 (50 x 8 px pitch, bargraph.rs), 5 px under
+///             the digits' ink
+///   labels    F14 row 163..174 under the scale: 0 / half / full scale
 ///             (bipolar: -FS / 0 / +FS), the full scale with its unit
-///   OL marker 418..472 x 147..160 (red "OL" on overload)
-pub const BAR_RECT: (u16, u16, u16, u16) = (12, 150, 400, 9);
-const BAR_LBL_Y: i16 = 161;
+///   OL marker 418..472 x 149..162 (red "OL" on overload)
+pub const BAR_RECT: (u16, u16, u16, u16) = (12, 152, 400, 9);
+const BAR_LBL_Y: i16 = 163;
 const BAR_LBL_H: i16 = 12;
-const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
+const BAR_OL: sf::Rect = rect(418, 149, 54, 14);
 /// The accuracy label (../docs/dmm-accuracy.md): F14 grey in the label row,
 /// right-aligned under the unit, 5 px after the full-scale label (which
 /// ends at the bar's end, 410); `pm` draws the "+-" sign before the text.
@@ -482,6 +500,15 @@ pub fn set_cpl_auto(on: bool) {
     CPL_AUTO.store(on, core::sync::atomic::Ordering::Relaxed);
 }
 
+/// The buttons' last sub-modes (`dmm::submem`), for the next button draw: the
+/// icons of the functions not in force show what a tap opens.
+static BTN_MEM: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+/// `Dmm::sub_mem` for the next button draw.
+pub fn set_btn_mem(mem: u8) {
+    BTN_MEM.store(mem, core::sync::atomic::Ordering::Relaxed);
+}
+
 /// The V / A button in the AUTO coupling: the letter and our "AC/DC" mark
 /// (BTN_GLYPH 0x09, stockfont_w.rs from tools/mkwglyph.py: the stock AC and
 /// DC button glyphs scaled down, side by side with a slash), distinct from
@@ -520,14 +547,22 @@ fn btn_pair(x: i16, y: i16, h: i16, c: Color, a: (sf::Font, &str, i16), b: (sf::
 fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, mode: u8, acdc: bool, ohm_on: bool) {
     let c = if selected { SEL } else { BTN };
     sf::rbox(rect(x, y, BTN_W, h), 8, c, outside);
-    let ac = matches!(mode, 0 | 2 | 4..=6);
-    let sub = if acdc { "\u{6}" } else if ac { "\u{5}" } else { "\u{4}" };
-    let auto = CPL_AUTO.load(core::sync::atomic::Ordering::Relaxed);
+    let mem = BTN_MEM.load(core::sync::atomic::Ordering::Relaxed);
+    let sub = if CPL_AUTO.load(core::sync::atomic::Ordering::Relaxed) {
+        3
+    } else if acdc {
+        2
+    } else {
+        matches!(mode, 0 | 2 | 4..=6) as u8
+    };
     match i {
-        0 if auto && mode <= 3 => auto_pair(x, y, h, c, "V"),
-        1 if auto && (4..=9).contains(&mode) => auto_pair(x, y, h, c, "A"),
-        0 => btn_pair(x, y, h, c, (sf::LETTERS, "V", 0), (sf::BTN_GLYPH, if mode <= 3 { sub } else { "\u{4}" }, 0), 3),
-        1 => btn_pair(x, y, h, c, (sf::LETTERS, "A", 0), (sf::BTN_GLYPH, if (4..=9).contains(&mode) { sub } else { "\u{4}" }, 0), 3),
+        0 | 1 => {
+            let (amp, l) = (i == 1, if i == 1 { "A" } else { "V" });
+            match submem::btn_coupling(mem, amp, mode, sub) {
+                3 => auto_pair(x, y, h, c, l),
+                k => btn_pair(x, y, h, c, (sf::LETTERS, l, 0), (sf::BTN_GLYPH, ["\u{4}", "\u{5}", "\u{6}"][k as usize], 0), 3),
+            }
+        }
         2 => {
             if ohm_on {
                 let w = sf::text_width(sf::BTN_GLYPH, "\u{3a9}", 0);
@@ -539,8 +574,17 @@ fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, 
             }
         }
         3 => sf::glyphs(sf::BTN_GLYPH, rect(x, y, BTN_W, h), "\u{11}", STATUS_FG, c, 8, 0),
-        4 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{8}", -1), (sf::BTN_GLYPH, "\u{7}", 0), 3),
-        5 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{10}", -2), (sf::BTN_GLYPH, "\u{2103}", 0), 3),
+        // The sub-mode in force or a tap's first (`submem`).
+        4 => {
+            let (d, k) = ((sf::BTN_GLYPH, "\u{8}", -1), (sf::BTN_GLYPH, "\u{7}", 0));
+            let (a, b) = if submem::btn_cont_diode(mem, mode) == 11 { (k, d) } else { (d, k) };
+            btn_pair(x, y, h, c, a, b, 3)
+        }
+        5 => {
+            let (f, t) = ((sf::BTN_GLYPH, "\u{10}", -2), (sf::BTN_GLYPH, "\u{2103}", 0));
+            let (a, b) = if submem::btn_hz_temp(mem, mode) == 15 { (t, f) } else { (f, t) };
+            btn_pair(x, y, h, c, a, b, 3)
+        }
         _ => {
             let g = pw_glyph(POWER_COUP.load(core::sync::atomic::Ordering::Relaxed));
             btn_pair(x, y, h, c, (sf::LETTERS, "W", 0), (sf::BTN_GLYPH, g, 0), 3)
@@ -630,8 +674,10 @@ impl DmmView {
             power: false,
             pwc: pw::PwCache::new(),
             ohm_on: false,
+            ohm_null: false,
             last_iohm: 254,
             ol_word: false,
+            ol_range: 0,
             acc: Some(Acc { model: 2, tc: true }),
             acc_on: true,
             acc_k: None,
@@ -641,9 +687,15 @@ impl DmmView {
         }
     }
 
-    /// The beeper indicator's band holds the aux row: `reading` leaves it.
+    /// The beeper indicator's band holds the aux row (in diode its aux1
+    /// slot: `short_rect`): `reading` leaves it.
     fn band(&self) -> bool {
         self.short_drawn != 0
+    }
+
+    /// The band's box for indicator value `k`.
+    fn short_rect(k: u8) -> sf::Rect {
+        if k == 1 { SHORT_RECT } else { SHORT_RECT_DIODE }
     }
 
     /// Draw or clear the beeper indicator's band (SHORT_RECT) after a
@@ -654,12 +706,12 @@ impl DmmView {
         if want == self.short_drawn {
             return;
         }
+        let b = Self::short_rect(if want != 0 { want } else { self.short_drawn });
         self.short_drawn = want;
-        let b = SHORT_RECT;
         if want != 0 {
             sf::rbox(b, 6, SHORT_BG, BG);
             // The scope's 26 px face (the status bar's F21 lacks B / E).
-            sf::glyphs(sf::ASCII26, b, if want == 1 { "SHORT" } else { "BEEP" }, 0xFFFF, SHORT_BG, 8, 2);
+            sf::glyphs(sf::ASCII26, b, "BEEP", 0xFFFF, SHORT_BG, 8, 2);
         } else {
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
         }
@@ -720,14 +772,7 @@ impl DmmView {
         if unit.is_empty() {
             return;
         }
-        let num = |b: &mut [u8; 16], v: f32| -> usize {
-            let mut t = [0u8; 16];
-            let s = crate::dmm::format(&mut t, v, 2);
-            let s = if s.as_bytes().contains(&b'.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
-            let n = s.len().min(16);
-            b[..n].copy_from_slice(&s.as_bytes()[..n]);
-            n
-        };
+        let num = scale_num;
         // The unit as the readout and the accuracy label beside it spell
         // it (F14 has the ohm glyph): "600 KΩ", not "600 kOhm".
         let mut ub = [0u8; 16];
@@ -893,29 +938,38 @@ impl DmmView {
             _ => 3,
         };
         let mkey = r.mode | (r.cpl_auto as u8) << 4 | (r.acdc as u8) << 7 | r.power.map_or(0, |p| pk(p.coup) << 5);
-        // Extra-digit layout: CELLS_X from XT_X (8..398), the digit in the
-        // last cell at full size; its box runs to 400 so a full draw clears
-        // the stock cells' end (40..400). Leaving it, the stock cells start
-        // at 40: the strip 8..40 is cleared (the HV lightning's box, which
-        // the app redraws with the layout change, `hv_warning`).
-        let (x0, w, cells): (i16, i16, &[u8]) = if slot { (XT_X, 400 - XT_X, &CELLS_X[f & 3]) } else { (40, 360, &CELLS[f]) };
+        // Extra-digit layout: CELLS_X from XT_X (12..402), the digit in the
+        // last cell at full size; its box runs past 400 so a full draw
+        // clears the stock cells' end (40..400). Leaving it, the stock cells
+        // start at 40 and end at 400: the strips 12..40 (the HV lightning's
+        // box, which the app redraws with the layout change, `hv_warning`)
+        // and 400..402 are cleared.
+        let (x0, w, cells): (i16, i16, &[u8]) = if slot { (XT_X, XT_END - XT_X, &CELLS_X[f & 3]) } else { (40, 360, &CELLS[f]) };
         // The power meter's parts layout: PARTS_DY lower (0 elsewhere).
         let md = main_dy();
         if last_slot && !slot {
             lcd::fill_rect(XT_X as u16, (68 + md) as u16, (40 - XT_X) as u16, 80, BG);
+            lcd::fill_rect(400, (68 + md) as u16, (XT_END - 400) as u16, 80, BG);
         }
         // The caption after the "0L" (`ol_word`): cleared before the cells
         // (a value's digits reach into its box), drawn after them.
         let ow = rect(OL_WORD.x, OL_WORD.y + md, OL_WORD.w, OL_WORD.h);
         let ok = r.main.ol;
         if !ok && self.ol_word {
-            lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
+            let top = ow.y - OL_RANGE_H;
+            lcd::fill_rect(ow.x as u16, top as u16, ow.w as u16, (ow.h + OL_RANGE_H) as u16, BG);
             self.ol_word = false;
         }
         sf::cells_diff(sf::F78, rect(x0, 68 + md, w, 80), t, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
-        if ok && (!same_layout || !self.ol_word) {
-            ol_word(ow, color);
-            self.ol_word = true;
+        if ok {
+            let mut rb = [0u8; 24];
+            let rt = if self.power { "" } else { ol_range_text(&mut rb, r) };
+            let rk = rt.bytes().fold(0x811c_9dc5u32, |a, b| (a ^ b as u32).wrapping_mul(0x0100_0193));
+            if !same_layout || !self.ol_word || rk != self.ol_range {
+                self.ol_range = rk;
+                ol_word(ow, rt, color);
+                self.ol_word = true;
+            }
         }
         if self.last_unit != r.main.unit || self.last_mode != mkey {
             self.last_unit = r.main.unit;
@@ -982,8 +1036,9 @@ impl DmmView {
         let (mut aux, lp, bd) = aux_shown(r);
         let band = self.band();
         if band {
-            // The beeper indicator's band holds the row (`short_sync`).
-            aux = [None; 2];
+            // The beeper indicator's band holds the row, in diode all but
+            // the Ω value (`short_sync`).
+            aux = [None, if self.short_drawn == 1 { None } else { aux[1] }];
         }
         // Ohm / continuity / diode: the test current, small, in the empty aux1 slot
         // (`test_current_label`). Cleared before the aux rows (an aux1 that
@@ -991,10 +1046,11 @@ impl DmmView {
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
             _ if band => 255,
-            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3 | (self.ohm_null as u8) << 6,
             12 if aux[0].is_none() && !self.power => 0x10,
             13 if !self.power => match r.aux2 {
                 Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
+                Some(v) if v.unit == crate::dmm::CAP_NOISE_UNIT => 0x22,
                 Some(_) => 0x20,
                 None => 255,
             },
@@ -1136,12 +1192,17 @@ impl DmmView {
                 None => {}
             }
         }
-        if ik & 0xF0 == 0x20 {
+        if ik == 0x22 {
+            if self.last_iohm != ik {
+                cap_noise_label();
+                self.last_iohm = ik;
+            }
+        } else if ik & 0xF0 == 0x20 {
             // Every reading: the node voltage moves.
             cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
             self.last_iohm = ik;
         } else if ik != 255 && self.last_iohm != ik {
-            test_current_label(r.mode, r.range, self.ohm_on);
+            test_current_label(r.mode, r.range, self.ohm_on, self.ohm_null);
             self.last_iohm = ik;
         }
         // The phase is part of the key only while it alternates: no
@@ -1197,14 +1258,48 @@ impl DmmView {
 /// The "0L" caption's box on the DMM page: the empty cells after the
 /// "0L" of the main readout (CELLS[4]: "0L" ends at x 304), bottom-aligned
 /// on the digits' baseline; left of the limit badge / unit box (x >= 403).
-const OL_WORD: sf::Rect = rect(312, VALUE_BASE as i16 - 22, 86, 22);
+pub const OL_WORD: sf::Rect = rect(310, VALUE_BASE as i16 - 22, 88, 22);
+/// The range line's height, directly above OL_WORD.
+const OL_RANGE_H: i16 = 24;
+
+/// A scale value as the bargraph's labels write it ("60", "0.6"), bytes in `b`.
+fn scale_num(b: &mut [u8; 16], v: f32) -> usize {
+    let mut t = [0u8; 16];
+    let s = crate::dmm::format(&mut t, v, 2);
+    let s = if s.as_bytes().contains(&b'.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
+    let n = s.len().min(16);
+    b[..n].copy_from_slice(&s.as_bytes()[..n]);
+    n
+}
+
+/// The range that overflowed, as the bargraph's full-scale label: ">60V",
+/// ">600MΩ". Empty where a reading has no such range (temperature, Hz).
+pub fn ol_range_text<'a>(b: &'a mut [u8; 24], r: &Reading) -> &'a str {
+    if matches!(r.mode, 14 | 15) || r.main.unit.is_empty() {
+        return "";
+    }
+    let fs = crate::bargraph::mode_full_scale(r.mode, r.range, r.main.dec, r.main.unit);
+    // The 6 / 60 mF ranges read in uF: ">60mF" fits the box, ">60000uF" not.
+    let mf = r.mode == 13 && fs >= 6000.0 && r.main.unit != "nF";
+    let mut v = [0u8; 16];
+    let k = scale_num(&mut v, if mf { fs / 1000.0 } else { fs });
+    let mut ub = [0u8; 16];
+    let us = sf::unit_text(if mf { "mF" } else { r.main.unit }, &mut ub).as_bytes();
+    let n = 1 + k + us.len().min(5);
+    b[0] = b'>';
+    b[1..1 + k].copy_from_slice(&v[..k]);
+    b[1 + k..n].copy_from_slice(&us[..n - 1 - k]);
+    core::str::from_utf8(&b[..n]).unwrap_or("")
+}
 
 /// What "0L" means, in the readout's colour and F14 (the old "Overload"
-/// caption's font): "Overflow" in every function (owner 2026-11-01). Region B (F14: blob in
-/// A2, index in B), not .cold: an OL can start while the fast logger's AD2
+/// caption's font): "Overflow" in every function (owner 2026-11-01), under
+/// the range that overflowed in TEXT22. Region B (F14: blob in A2, index in
+/// B; TEXT22 in B), not .cold: an OL can start while the fast logger's AD2
 /// stream runs (V / A functions).
 #[inline(never)] // drawn on entering OL only
-fn ol_word(r: sf::Rect, c: Color) {
+fn ol_word(r: sf::Rect, range: &str, c: Color) {
+    sf::label(sf::TEXT22, rect(r.x, r.y - OL_RANGE_H, r.w, OL_RANGE_H), range, c, BG, 1, 1);
     sf::label(sf::F14, r, "Overflow", c, BG, 2, 1);
 }
 
@@ -1241,12 +1336,24 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
     sf::label(sf::F14, rect(b.x + w, b.y, b.w - w, b.h), s.as_str(), DIM, BG, 1, 1);
 }
 
+/// Capacitance, the hunting hold (dmm.rs `CAP_HOLD_MS`): the ranges went
+/// back and forth without a value (a user's 470 uF with a laptop charger on
+/// the USB host, 2026-11-02). DIM, the discharge line's box.
+#[inline(never)] // during a hold only
+pub fn cap_noise_label() {
+    let b = CAP_DIS_RECT;
+    lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+    // F14: English in Chinese (too small).
+    sf::label(sf::F14, b, crate::tr!("Unstable: unplug USB?"), DIM, BG, 1, 1);
+}
+
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
 /// measured short-circuit current of range `range` in the variant `on`
 /// (none on 60 M: the box is cleared); continuity / diode, the source current (measured, continuity negative). Two significant digits, DIM F14 (small: a
-/// property of the function, not a reading).
+/// property of the function, not a reading). `null`: the ohm null is on
+/// (r0..r6): "NULL" after it, in the reading's colour.
 #[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
-fn test_current_label(mode: u8, range: i8, on: bool) {
+fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
     let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
         // No value (60 M): clear the box, a range change from 6 M left the
         // 6 M label (device check 2f56ff9).
@@ -1269,6 +1376,10 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
     t.push(crate::dmm::format(&mut b, v, if v.abs() < 1.0 { 2 } else if v.abs() < 10.0 { 1 } else { 0 }));
     t.push(u);
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
+    if null && mode == 10 && !exp {
+        let w = sf::text_width(sf::F14, t.as_str(), 1);
+        sf::label(sf::F14, rect(OHM_I_RECT.x + w + 12, OHM_I_RECT.y, OHM_I_RECT.w - w - 12, OHM_I_RECT.h), "NULL", VALUE, BG, 1, 1);
+    }
 }
 
 /// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
@@ -1640,6 +1751,28 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     }
 }
 
+/// "Null" on the Resistor Settings page (Dmm::ohm_null): the note row's
+/// right half, beside the 600 Mohm item (`range_rect(8)`, 8..236). Selected
+/// colour while on, with the value.
+pub const NULL_BTN: sf::Rect = rect(244, 141, 228, 36);
+
+/// The Null button (`NULL_BTN`) for a null of `ohm` (0 = off).
+#[inline(never)] // the range page, drawn on a tap
+pub fn ohm_null_button(ohm: f32) {
+    let mut t = crate::scope_ui::Txt::new("Null ");
+    let c = if ohm > 0.0 {
+        let mut b = [0u8; 16];
+        t.push(crate::dmm::format(&mut b, ohm, 3));
+        t.push(" \u{3a9}");
+        SEL
+    } else {
+        t.push(crate::tr!("off"));
+        0x2966
+    };
+    sf::rbox(NULL_BTN, 6, c, BG);
+    sf::glyphs(sf::TEXT22, NULL_BTN, t.as_str(), STATUS_FG, c, 8, 0);
+}
+
 /// "Inrush" on the Current Settings page (the inrush capture, app_inrush.rs;
 /// builds with the AD2 stream ISR only): the note row, right column (the
 /// AC+DC column of the stock grid), beside Fuse check.
@@ -1825,7 +1958,7 @@ fn range_press_item(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<(sf
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
 /// Limits, 7 Record, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
-/// buttons, while `ohm_vars_shown(sel)`.
+/// buttons, while `ohm_vars_shown(sel)`, Err(8) = Null (`NULL_BTN`).
 pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
@@ -1849,6 +1982,9 @@ pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result
         Some(1) => return Some(Err(7)),
         Some(3) => return Some(Err(2)),
         _ => {}
+    }
+    if (139..180).contains(&y) && x >= 241 && b == Button::Ohm {
+        return Some(Err(8));
     }
     if (139..180).contains(&y) && (160..315).contains(&x) && b == Button::Amp {
         return Some(Err(5));
@@ -2060,6 +2196,8 @@ pub struct Status {
     /// `charging`: on a charger (charging or charged), the battery green.
     pub bars: u8,
     pub charging: bool,
+    /// Under a low-battery level (`lowbat.rs`), not on a charger.
+    pub bat_low: bool,
     pub locked: bool,
     /// MIN/MAX recording session on (the DMM statistics, FR-02).
     pub rec: bool,
@@ -2124,13 +2262,24 @@ pub fn status_rec_blink(st: &Status, gen: bool) {
     crate::scope_ui::rec_dot(rec_dot_at(y), bg, st.csv && !st.rec_dim);
 }
 
+/// The status bars' battery: green on a charger, red when low (lowbat.rs).
+fn battery_color(st: &Status) -> Color {
+    if st.charging {
+        0x04A9
+    } else if st.bat_low {
+        0xF800
+    } else {
+        STATUS_FG
+    }
+}
+
 /// Right part of the DMM page status bar (34 px, stock positions): uptime,
 /// REC (CSV recording; the MIN/MAX session has its own line in the chart
 /// column), lock, BT link, USB host, battery.
 pub fn status_right(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
-    let bc = if st.charging { 0x04A9 } else { STATUS_FG };
+    let bc = battery_color(st);
     sf::label(sf::F21, rect(205, 5, 112, 24), hms(&mut t, st.uptime_s), STATUS_FG, BAR, 1, -1);
     status_rec(st, BAR, 10);
     sf::label(sf::LOCK, rect(327, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
@@ -2271,7 +2420,7 @@ pub fn rate_chip_hit(x: u16, y: u16) -> bool {
 }
 
 /// A tap on the DMM page's main value (the F78 cells 40..400 x 68..148,
-/// in the extra-digit layout 8..398; 4 px around): resolution / rate step
+/// in the extra-digit layout 12..402; 4 px around): resolution / rate step
 /// (App). The power meter's parts layout: down to its P sub-line (..168).
 pub fn value_hit(x: u16, y: u16) -> bool {
     let y1 = if pw_parts() { 168 } else { 151 };
@@ -2781,7 +2930,7 @@ pub fn gen_run_hit(x: u16, y: u16) -> bool {
 pub fn gen_status(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
-    let bc = if st.charging { 0x04A9 } else { STATUS_FG };
+    let bc = battery_color(st);
     sf::label(sf::F21, rect(186, 6, 120, 24), hms(&mut t, st.uptime_s), STATUS_FG, G_BAR, 1, -1);
     status_rec(st, G_BAR, 11);
     sf::label(sf::LOCK, rect(327, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
@@ -3207,15 +3356,18 @@ pub const S_REMEMBER: u8 = 23;
 /// Reset settings: a confirm, then a restart with the defaults (app.rs
 /// `reset_ask`).
 pub const S_RESET: u8 = 24;
+/// The continuity / diode beeper: with the key / alert volume (the default,
+/// 0 % = silent) or Always (heard at 0 % volume too).
+pub const S_CONT: u8 = 25;
 /// Number of settings (the value array's length).
-pub const SET_N: usize = 25;
+pub const SET_N: usize = 26;
 
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
     crate::tr!("Dim screen"), crate::tr!("Shutdown"), crate::tr!("Backlight"), crate::tr!("Key/alert volume"), crate::tr!("Bluetooth"), crate::tr!("Start page"), crate::tr!("Analog power"),
     crate::tr!("DMM rate"), crate::tr!("Smoothing"), crate::tr!("DMM row"), crate::tr!("Temp unit"), crate::tr!("Swipe"), crate::tr!("Press effect"), crate::tr!("Tap step"), crate::tr!("Help"), crate::tr!("Jack alerts"),
     crate::tr!("Danger alarm"), crate::tr!("USB disk"), crate::tr!("Burden voltage"), crate::tr!("Device info"), crate::tr!("Touch test"), crate::tr!("Accuracy"), crate::tr!("Negative ohm"),
-    crate::tr!("Mode Remember"), crate::tr!("Reset settings"),
+    crate::tr!("Mode Remember"), crate::tr!("Reset settings"), crate::tr!("Continuity beep"),
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
@@ -3223,7 +3375,7 @@ pub const SET_NAMES: [&str; SET_N] = [
 /// there) with its Device section and our help / touch test pages.
 pub const SET_TABS: [(&str, &[u8]); 6] = [
     (crate::tr!("Display"), &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
-    (crate::tr!("Alerts"), &[S_VOLUME, S_ALARM, S_JACK]),
+    (crate::tr!("Alerts"), &[S_VOLUME, S_CONT, S_ALARM, S_JACK]),
     (crate::tr!("Power"), &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     (crate::tr!("Multimeter"), &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     (crate::tr!("Scope"), &[S_SWIPE, S_PRESS, S_TAP_STEP]),
@@ -3240,7 +3392,7 @@ pub fn set_opens(id: u8) -> bool {
 
 /// Rows with a -/+ stepper.
 pub fn set_is_stepper(id: u8) -> bool {
-    matches!(id, S_BACKLIGHT | S_VOLUME)
+    matches!(id, S_BACKLIGHT | S_VOLUME | S_SHUTDOWN)
 }
 
 /// The "USB disk" setting's value: the mode asked for, "(replug)" while the
@@ -3282,14 +3434,14 @@ fn row_only() -> Option<RowPress> {
 /// The box pressed item `t` of `view` covers (app_press.rs draws it pressed
 /// / released in one strip pass, nothing outside it); None: the view's
 /// items are drawn directly.
-pub fn press_rect(view: View, t: RowPress) -> Option<sf::Rect> {
+pub fn press_rect(view: View, t: RowPress, tab: u8) -> Option<sf::Rect> {
     let row = t.row as usize;
     let key = |r: sf::Rect, minus: i16, plus: i16, w: i16, m: i16| rect(if t.part < 0 { minus } else { plus }, r.y + m, w, r.h - 2 * m);
     Some(match view {
         View::Menu => menu_item_rect(row),
         View::Settings if t.row & 0x80 != 0 => st_tab(row & 0x7F),
         View::Settings if t.part == 0 => st_row(row),
-        View::Settings => key(st_row(row), ST_MINUS_X, ST_PLUS_X, ST_KEY_W, 4),
+        View::Settings => key(st_row(row), st_minus_x(settings_id(tab, row).unwrap_or(0)), ST_PLUS_X, ST_KEY_W, 4),
         View::Limits => set_row(row),
         View::Record if t.part == 0 => set_row(row),
         View::Record => key(set_row(row), REC_STEP_MINUS_X, STEP_PLUS_X, STEP_KEY_W, 3),
@@ -3365,6 +3517,11 @@ const ST_TXT_END: i16 = ST_ROW_X + ST_ROW_W - 6;
 const ST_KEY_W: i16 = 40;
 const ST_PLUS_X: i16 = ST_TXT_END - ST_KEY_W;
 const ST_MINUS_X: i16 = ST_PLUS_X - 4 - 56 - 4 - ST_KEY_W;
+/// The "-" key of a stepper row: Shutdown's value box is 90 px for "10 hours"
+/// (its short name leaves the room, "Key/alert volume" does not).
+const fn st_minus_x(id: u8) -> i16 {
+    if id == S_SHUTDOWN { ST_PLUS_X - 4 - 90 - 4 - ST_KEY_W } else { ST_MINUS_X }
+}
 /// Most rows a section can have (and most sections).
 pub const SET_ROWS_MAX: usize = 6;
 const _: () = {
@@ -3441,15 +3598,16 @@ fn st_stepper(i: usize, id: u8, val: &str, only: Option<RowPress>) {
     if only.is_some_and(|p| p.row as usize != i) {
         return;
     }
+    let minus = st_minus_x(id);
     let r = st_row(i);
     if only.is_none() {
         sf::rbox(r, 6, M_TILE, M_BG);
         let name = SET_NAMES[id as usize];
-        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, ST_MINUS_X - 4 - ST_TXT_X, r.h), name, STATUS_FG, M_TILE, 1, 0);
-        let vx = ST_MINUS_X + ST_KEY_W + 4;
+        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, minus - 4 - ST_TXT_X, r.h), name, STATUS_FG, M_TILE, 1, 0);
+        let vx = minus + ST_KEY_W + 4;
         sf::glyphs(sf::TEXT22, rect(vx, r.y, ST_PLUS_X - 4 - vx, r.h), val, M_ACCENT, M_TILE, 8, 0);
     }
-    for (d, x, t) in [(-1, ST_MINUS_X, "-"), (1, ST_PLUS_X, "+")] {
+    for (d, x, t) in [(-1, minus, "-"), (1, ST_PLUS_X, "+")] {
         let bg = match only {
             None => M_ACCENT,
             Some(p) if p.part == d => if p.on { KEY_PRESSED } else { M_ACCENT },
@@ -3494,7 +3652,7 @@ pub fn set_value_x(id: u8) -> i16 {
     if set_opens(id) {
         ST_SPLIT as i16
     } else if set_is_stepper(id) {
-        ST_MINUS_X - 6
+        st_minus_x(id) - 6
     } else {
         ST_TXT_X + sf::text_width(sf::TEXT22, SET_NAMES[id as usize], 0) + 6
     }
@@ -3505,10 +3663,10 @@ pub fn settings_id(tab: u8, row: usize) -> Option<u8> {
     SET_TABS.get(tab as usize)?.1.get(row).copied()
 }
 
-/// A tap at `x` on a stepper row: -1 (left of the value's centre: the
+/// A tap at `x` on the stepper row `id`: -1 (left of the value's centre: the
 /// "-" key) or +1.
-pub fn settings_step(x: u16) -> i8 {
-    if (x as i16) < (ST_MINUS_X + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
+pub fn settings_step(id: u8, x: u16) -> i8 {
+    if (x as i16) < (st_minus_x(id) + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
 }
 
 /// A settings-style page: title bar with "< Back", up to SET_ROWS rows of

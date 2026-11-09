@@ -478,7 +478,10 @@ const CAL_GAIN_TOL: f32 = 0.03;
 /// (the nominal scale) when a step timed out or AD2 clipped. Without
 /// `measure` the stored cal is kept (the fast logger measured it for its
 /// file header before the disk preparation). ~0.45 s with.
-#[inline(never)] // .cold (link-native.x): once per session, before the ISR
+// .cold: once per stream start, before the ISR runs (region B audit for
+// fix/fixed-channels, 2026-11-08: B below 8 KiB with the scope PRs merged).
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".cold")]
 pub fn dc_enter(mode: u8, r: u8, r26: u8, measure: bool) {
     if mode == 3 {
         hy::configure(&crate::hy3131_tables::CFG_F2[r.min(1) as usize]);
