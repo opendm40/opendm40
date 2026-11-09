@@ -29,7 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FW = os.path.dirname(HERE)
 X11_BDF = os.environ.get('DM40_X11_BDF') or os.path.join(FW, 'target', 'x11', '6x13.bdf')
 # SHA-256 of the 6x13 BDF.
-X11_SHA256 = '1bc94ff7a799ba13e42305b20e759ef3140b0f896177f90bcbf7ef939a2ec52d'
+X11_SHA256 = 'c68c55ca8effcdc2714fffa9c8e07df290411867b00b547eeae952f7473efc9b'
 
 # BDF face -> (path, SHA-256).
 FILES = {'x11-6x13.bdf': (X11_BDF, X11_SHA256)}

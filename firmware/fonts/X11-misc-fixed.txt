@@ -1,0 +1,8 @@
+F14 (small labels) is drawn from the X11 misc-fixed 6x13 bitmap font,
+file 6x13.bdf of xorg font-misc-misc 1.1.3
+(https://www.x.org/releases/individual/font/font-misc-misc-1.1.3.tar.xz).
+Its licence (COPYING of font-misc-misc):
+
+"Public domain font.  Share and enjoy."
+
+Our change: the period's 3 x 3 cross one row higher, on the baseline.
