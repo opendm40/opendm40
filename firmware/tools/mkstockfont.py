@@ -76,14 +76,10 @@ FONTS = [
 # audit #2 to region B audit #6 (2026-10-27: back in B, A2 above its 2 KiB
 # warning again).
 A2_FONTS = ('ASCII26', 'F14', 'LETTERS', 'UNIT', 'LOCK')
-# EXPERIMENT: the outline-face scenarios free region B with TEXT22 in A2
-# (tools/mkttf.py A2_EXTRA); DM40_A2=name,name overrides.
+# The faced fonts free region B with TEXT22 in A2 (tools/mkttf.py A2_EXTRA).
 sys.path.insert(0, HERE)
 import mkttf as _mkttf  # noqa: E402
-A2_FONTS = A2_FONTS + _mkttf.A2_EXTRA.get(_mkttf.SCEN, ())
-# EXPERIMENT: DM40_A2=name,name overrides (a bigger ASCII26 does not fit A2).
-if os.environ.get('DM40_A2') is not None:
-    A2_FONTS = tuple(n for n in os.environ['DM40_A2'].split(',') if n)
+A2_FONTS = A2_FONTS + _mkttf.A2_EXTRA
 
 # Glyphs kept of a font that is drawn with some of its codes only (the
 # others are not emitted): G_08059428's ' ' is the up arrow, its '!' (down)
@@ -95,8 +91,8 @@ ONLY = {'G_08059428': ' '}
 # same as `base` (the bitmap `rows` lower in its line box than in the
 # base's) is not emitted: stockfont.rs looks it up in the base
 # (font_base) and gives it this font's box. The rest stay its own entries.
-# SC_F12 and F14 are both DM40 Term ter-u12b; F14's narrow cells
-# (punctuation, I, j) and the space differ.
+# A faced font that shares a place's glyphs (tools/mkttf.py) leaves SHARE:
+# SC_F12 takes SC_F16's outline glyphs instead.
 SHARE = {'SC_F12': ('F14', -1, 0x80)}
 
 
@@ -334,149 +330,20 @@ def uncrop_glyph(b, w, h, t, ih):
             for x in range(w) for y in range(h)]
 
 
-# ---- EXPERIMENT (exp/font-storage): storage formats of tools/mkttf.py ----
-HUF_FMTS = ('HUF', 'HUF2', 'S3H', 'S3V', 'S3V2')
-FW_FMT = {'BIT1': 'BIT1', 'HUF': 'HUF', 'HUF2': 'HUF', 'RAW2': 'RAW2', 'S3H': 'S3H', 'S3V': 'S3V', 'S3V2': 'S3V',
-          'S3B': 'S3B'}
+# Storage formats: the faced fonts (tools/mkttf.py) are 2 bpp gray rows,
+# HUF2 = HUF with its own table set (the decoder sees HUF).
+HUF_FMTS = ('HUF', 'HUF2')
+FW_FMT = {'BIT1': 'BIT1', 'HUF': 'HUF', 'HUF2': 'HUF'}
 
 
 def grid(gw, gh, data, four):
-    """The stored grid of a glyph: (width, height, coverage column-major).
-    S3H: 3 values per pixel across; S3V / S3B: 3 subrows per pixel row."""
+    """The stored grid of a glyph: (width, height, coverage column-major)."""
     if not isinstance(data, tuple):
         return gw, gh, pixels(data, gw, gh, four is True or four in HUF_FMTS)
     _, fmt, rows = data
-    if fmt == 'S3H':
-        rows = [[v for px in r for v in px] for r in rows]
-        w = 3 * gw
-    else:
-        w = gw
-    h = len(rows)
-    if fmt in ('S3V', 'S3V2', 'S3B'):
-        assert h == 3 * gh, (h, gh)
-    else:
-        assert h == gh, (h, gh)
-    rows = [list(r) + [0] * (w - len(r)) for r in rows]
-    return w, h, [rows[y][x] for x in range(w) for y in range(h)]
-
-
-def hufb_ctx(pk, up):
-    return min(pk, 4) * 4 + (3 if up is None else 0 if up == 0 else 1 if up == 15 else 2)
-
-
-def hufb_parse_row(r, p, cost):
-    """Variant B (origin/feat/font-huffman-b 665ef472): contexts by the
-    previous token kind and the pixel above, C(n) copies n pixels of the row
-    above."""
-    w = len(r)
-    run = [0] * (w + 1)
-    for x in range(w - 1, -1, -1):
-        run[x] = 1 + (run[x + 1] if x + 1 < w and r[x + 1] == r[x] else 0)
-    cp = [0] * (w + 1)
-    if p is not None:
-        for x in range(w - 1, -1, -1):
-            cp[x] = 1 + cp[x + 1] if r[x] == p[x] else 0
-    best = [dict() for _ in range(w + 1)]
-    best[0][0] = (0, None)
-    for x in range(w):
-        up = None if p is None else p[x]
-        v = r[x]
-        for pk, (c0, _) in sorted(best[x].items()):
-            cx = hufb_ctx(pk, up)
-            cands = []
-            if 1 <= v <= 14:
-                cands.append((K_L << 4 | v, 0, 0, 1, 1 + K_L))
-            runs = []
-            if v == 0:
-                runs.append((K_F0, run[x]))
-            if v == 15:
-                runs.append((K_F15, run[x]))
-            if p is not None:
-                runs.append((K_C, cp[x]))
-            for kind, m in runs:
-                for n in range(1, min(m, 68) + 1):
-                    if kind == K_C and v in (0, 15) and run[x] >= n:
-                        continue
-                    if x + n == w:
-                        cands.append((kind << 4 | EOL, 0, 0, n, 1 + kind))
-                    c = cls_of(n)
-                    cands.append((kind << 4 | c, CLS_EB[c], n - CLS_LO[c], n, 1 + kind))
-            for s, ne, ev, n, k in cands:
-                c = c0 + cost(cx, s) + ne
-                nb = best[x + n]
-                if k not in nb or c < nb[k][0]:
-                    nb[k] = (c, (x, pk, cx, s, ne, ev, n))
-    k = min(sorted(best[w]), key=lambda kk: best[w][kk][0])
-    out = []
-    x = w
-    while x > 0:
-        _, (px, pk, cx, s, ne, ev, n) = best[x][k]
-        out.append((cx, s, ne, ev, n))
-        x, k = px, pk
-    return out[::-1]
-
-
-def hufb_build(glyphs):
-    rows = [[[px[x * h + y] for x in range(w)] for y in range(h)] for w, h, px in glyphs]
-    lens = None
-    for _ in range(HUF_ITERS):
-        if lens is None:
-            cost = lambda cx, s: 1 if (s >> 4) in (K_F0, K_C) else 4
-        else:
-            cost = lambda cx, s: lens[cx].get(s, 20)
-        toks = [[t for y, r in enumerate(g) for t in hufb_parse_row(r, g[y - 1] if y else None, cost)] for g in rows]
-        freq = [collections.Counter() for _ in range(20)]
-        for gt in toks:
-            for cx, s, _, _, _ in gt:
-                freq[cx][s] += 1
-        lens = [huf_lengths(f) if f else {} for f in freq]
-    return toks, lens
-
-
-def hufb_decode(b, w, h, cnt, syms):
-    pos = [0]
-
-    def bit():
-        v = (b[pos[0] >> 3] >> (7 - (pos[0] & 7))) & 1 if (pos[0] >> 3) < len(b) else 0
-        pos[0] += 1
-        return v
-
-    rows = []
-    for y in range(h):
-        p = rows[-1] if rows else None
-        r = []
-        pk = 0
-        while len(r) < w:
-            x = len(r)
-            cx = hufb_ctx(pk, None if p is None else p[x])
-            code = first = idx = 0
-            for l in range(len(cnt[cx])):
-                code |= bit()
-                c = cnt[cx][l]
-                if code - first < c:
-                    s = syms[cx][idx + code - first]
-                    break
-                idx += c
-                first = (first + c) << 1
-                code <<= 1
-            else:
-                raise AssertionError('bad code')
-            kind, c = s >> 4, s & 15
-            if kind == K_L:
-                r.append(c)
-            else:
-                if c == EOL:
-                    n = w - x
-                else:
-                    e = 0
-                    for _ in range(CLS_EB[c]):
-                        e = e << 1 | bit()
-                    n = CLS_LO[c] + e
-                assert x + n <= w
-                r += p[x:x + n] if kind == K_C else [0 if kind == K_F0 else 15] * n
-            pk = 1 + kind
-        rows.append(r)
-    return [rows[y][x] for x in range(w) for y in range(h)], pos[0]
+    assert len(rows) == gh, (len(rows), gh)
+    rows = [list(r) + [0] * (gw - len(r)) for r in rows]
+    return gw, gh, [rows[y][x] for x in range(gw) for y in range(gh)]
 
 
 def main():
@@ -587,44 +454,31 @@ def main():
         ('SC_F16', 0x0804F260, lambda: load(0x080534C4)),                     # 16 px popup ASCII (wrapper)
     ]]
     loaded = [(name, a, src()) for name, a, src in fonts]
-    # The text fonts in DM40 Term (tools/mkterm.py, Terminus Font bitmaps);
-    # its W / k / ℃ / ℉ of those fonts into stockfont_w.rs.
+    # The faced fonts: the outline places (tools/mkttf.py; their W / k / ℃ /
+    # ℉ / ... rows leave stockfont_w.rs) and the BDF faces (tools/mkterm.py:
+    # F14; its W / k / ℃ / ℉ into stockfont_w.rs).
     sys.path.insert(0, HERE)
     import mkterm
     import mkttf
     wrs = os.path.join(FW, 'src', 'stockfont_w.rs')
     addr = {name: a for name, a, _ in fonts}
-    xshare = {}
-    if mkttf.SCEN == 'term':
-        loaded, xshare, xown, face = mkttf.term_restyle(loaded)
-        print('stockfont_w.rs: %d rows dropped' % mkttf.drop_own(wrs, None, xown, addr))
-    else:
-        if mkttf.SCEN:
-            loaded, xshare, xown = mkttf.restyle(loaded)
-            faced = {n for n, _, v in loaded if isinstance(v[2], str)}
-            for n in faced:
-                mkterm.FACE.pop(n, None)
-            print('stockfont_w.rs: %d rows dropped' % mkttf.drop_own(wrs, None, xown, addr))
-        loaded, face = mkterm.restyle(loaded)
-        if mkttf.SCEN == 'v14t':
-            xshare.update(mkttf.term_share(loaded, face))
-            mkttf.drop_own(wrs, None, {'ASCII26': mkttf.OWN['ASCII26']}, addr)
+    loaded, xshare, xown = mkttf.restyle(loaded)
+    print('stockfont_w.rs: %d rows dropped' % mkttf.drop_own(wrs, None, xown, addr))
+    loaded, face = mkterm.restyle(loaded)
     mkterm.own_glyphs(face, wrs)
     # For tools/mklang_x.py: the fonts drawn with another's glyphs.
     import json
-    os.makedirs(os.path.join(FW, 'target'), exist_ok=True)
-    json.dump({n: b for n, (b, d) in xshare.items()}, open(os.path.join(FW, 'target', 'share-%s.json' % mkttf.SCEN), 'w'))
+    json.dump({n: b for n, (b, d) in xshare.items()}, open(mkttf.SHARE_JSON, 'w'))
     for n in xshare:
         SHARE.pop(n, None)
     # The 4 bpp glyphs of every font, in emit order: one token parse and one
-    # set of Huffman tables for all of them (S3B: its own, variant B).
+    # set of Huffman tables per table set.
     kept = lambda name, code: code < CJK_FROM and (name not in ONLY or chr(code) in ONLY[name])
     fmt_of = lambda four: four if isinstance(four, str) else ('HUF' if four else 'BIT1')
-    # Table set of a HUF format: 0 = the stock 4 bpp fonts' (HUF, S3H, S3V),
-    # 1 = the 2 bpp faces' (HUF2, S3V2) unless DM40_HUF2_SHARED=1: their own
-    # 4 contexts after set 0's, so the stock fonts keep tables trained on 4 bpp.
-    split = not os.environ.get('DM40_HUF2_SHARED')
-    tset = lambda fmt: 1 if split and fmt in ('HUF2', 'S3V2') else 0
+    # Table set of a HUF format: 0 = the stock 4 bpp fonts' (HUF), 1 = the
+    # 2 bpp faces' (HUF2): their own 4 contexts after set 0's, so the stock
+    # fonts keep tables trained on 4 bpp.
+    tset = lambda fmt: 1 if fmt == 'HUF2' else 0
     toks, lens = [], []
     set_toks = {}
     for k in (0, 1):
@@ -640,19 +494,6 @@ def main():
         toks += tk
         lens += ln
     nsets = len(lens) // NCTX
-    b_gl = [grid(gw, gh, data, four) for name, _, (_, _, four, gl, _) in loaded if fmt_of(four) == 'S3B'
-            for (code, gw, gh, adv, yoff, data) in gl if kept(name, code)]
-    if b_gl:
-        btoks, blens = hufb_build(b_gl)
-        bcodes = [huf_canon(ls) for ls in blens]
-        bmaxl = max(max(ls.values()) for ls in blens if ls)
-        assert bmaxl + max(CLS_EB) <= 25, bmaxl
-        bcnt = [[sum(1 for s in ls if ls[s] == l + 1) for l in range(bmaxl)] for ls in blens]
-        bsyms = [sorted(ls, key=lambda s: (ls[s], s)) for ls in blens]
-        b_toks = iter(btoks)
-    else:
-        bmaxl, bcnt, bsyms = 1, [], []
-    s3b_prev = max([sw for sw, sh, px in b_gl] + [0])
     codes = [huf_canon(ls) for ls in lens]
     maxl = max(max(ls.values()) for ls in lens if ls)
     # Every token (code + extra bits) fits the decoder's 25-bit window.
@@ -667,7 +508,7 @@ def main():
     full = {}
     for name, a, (line_h, descent, four, gl, cls) in loaded:
         fmt = fmt_of(four)
-        bpp = {'BIT1': 1, 'HUF2': 2, 'RAW2': 2, 'S3V2': 2}.get(fmt, 4)
+        bpp = {'BIT1': 1, 'HUF2': 2}.get(fmt, 4)
         blob = bytearray()
         entries = []
         own = {}
@@ -688,21 +529,6 @@ def main():
                 assert sw <= MAXW, (name, code, sw)
                 # HUF: t = the first context of the glyph's table set.
                 t, ih = o, gh
-            elif fmt == 'S3B':
-                enc, nbits = huf_encode(next(b_toks), bcodes)
-                assert nbits < 0x10000, (name, code)
-                dec, used = hufb_decode(enc, sw, sh, bcnt, bsyms)
-                assert dec == px and used == nbits, (name, code)
-                t, ih = 0, gh
-            elif fmt == 'RAW2':
-                bits = []
-                for v in px:
-                    bits += [(v // 5) >> 1, (v // 5) & 1]
-                enc = bytearray((len(bits) + 7) // 8)
-                for i, b in enumerate(bits):
-                    enc[i >> 3] |= b << (7 - (i & 7))
-                enc = bytes(enc)
-                t, ih = 0, gh
             else:
                 enc, t, ih = crop_glyph(px, gw, gh)
                 assert uncrop_glyph(enc, gw, gh, t, ih) == px, (name, code)
@@ -807,24 +633,6 @@ def main():
             out.append('    %s,' % ', '.join('0x%02X' % v for v in sy))
     out.append('];')
     out.append('')
-    # S3B (EXPERIMENT): variant B tables (contexts: previous token kind x the
-    # pixel above), and the widest S3B glyph (its previous subrow in Cur).
-    used = {fmt_of(v[2]) for _, _, v in loaded}
-    for f, k in (('RAW2', ('RAW2',)), ('S3H', ('S3H',)), ('S3V', ('S3V', 'S3V2')), ('S3B', ('S3B',))):
-        out.append('pub const HAS_%s: bool = %s;' % (f, 'true' if used & set(k) else 'false'))
-    out.append('pub const HUFB_MAXL: usize = %d;' % bmaxl)
-    out.append('pub const S3B_PREV: usize = %d;' % s3b_prev)
-    out.append('#[link_section = ".rodata.fonts.HUFB_CNT"]')
-    out.append('pub static HUFB_CNT: [[u8; HUFB_MAXL]; %d] = [%s];' % (len(bcnt), ', '.join('[%s]' % ', '.join(map(str, c)) for c in bcnt)))
-    bsoff = [0]
-    for sy in bsyms:
-        bsoff.append(bsoff[-1] + len(sy))
-    out.append('#[link_section = ".rodata.fonts.HUFB_SOFF"]')
-    out.append('pub static HUFB_SOFF: [u16; %d] = [%s];' % (len(bsoff), ', '.join(map(str, bsoff))))
-    out.append('#[link_section = ".rodata.fonts.HUFB_SYM"]')
-    out.append('pub static HUFB_SYM: [u8; %d] = [%s];' % (bsoff[-1], ', '.join('0x%02X' % v for sy in bsyms for v in sy)))
-    out.append('')
-
     # Address -> embedded FontData dispatch, so stockfont::Font can stay keyed
     # by the original stock flash address (no call site changes).
     out.append('/// Resolve a stock font-object address to its embedded data.')
@@ -836,7 +644,7 @@ def main():
     out.append('    }')
     out.append('}')
     out.append('')
-    # EXPERIMENT: the outline faces (tools/mkttf.py) carry their spacing in
+    # The outline faces (tools/mkttf.py) carry their spacing in
     # the advances; a call site's positive spacing (the stock cells') is
     # dropped for them.
     out.append('/// Largest letter spacing a call site may add in this font.')

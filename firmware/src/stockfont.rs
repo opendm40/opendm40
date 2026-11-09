@@ -42,18 +42,6 @@ mod data {
     pub const BIT1: u8 = 0;
     pub const RAW4: u8 = 1;
     pub const HUF: u8 = 2;
-    // EXPERIMENT (exp/font-storage, tools/mkttf.py): RAW2 = 2 bpp
-    // column-major MSB-first, ink rows (as BIT1), level v -> coverage 5 v;
-    // S3H = subpixel, HUF rows of 3 w values (R G B per pixel); S3V = HUF of
-    // the 3x subrows (3 h rows of w), channel k of row y = round((s[3y+k-1]
-    // + s[3y+k] + s[3y+k+1]) / 3); S3B = S3V's subrows in HUF variant B
-    // (HUFB_*: contexts by the pixel above, C(n) partial copies).
-    pub const RAW2: u8 = 3;
-    pub const S3H: u8 = 4;
-    pub const S3V: u8 = 5;
-    pub const S3B: u8 = 6;
-    const K_C: u8 = 3;
-    const HAS_S3: bool = HAS_S3H || HAS_S3V || HAS_S3B;
 
     /// Token kinds (symbol >> 4).
     const K_L: u8 = 0;
@@ -119,19 +107,11 @@ mod data {
     /// draws top to bottom), so no per-row index is stored. `next` = the row
     /// the next token starts, `pos` = bit index of the next token, `src` =
     /// bit index of the last literal row (a copied row is decoded from there).
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Default)]
     pub struct Cur {
         pos: u16,
         src: u16,
         next: u8,
-        /// S3B: the last decoded subrow (the contexts and copies read it).
-        prev: [u8; S3B_PREV],
-    }
-
-    impl Default for Cur {
-        fn default() -> Cur {
-            Cur { pos: 0, src: 0, next: 0, prev: [0; S3B_PREV] }
-        }
     }
 
     /// Bits of the first-level decode table: 95 % of the tokens have a
@@ -146,70 +126,18 @@ mod data {
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut LUT_OK: bool = false;
 
-    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-    static mut LUTB: [[u16; 1 << LUTKB]; HUFB_CNT.len()] = [[0; 1 << LUTKB]; HUFB_CNT.len()];
-    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-    static mut LUTB_OK: bool = false;
-
-    /// S3B first-level table bits: 20 contexts x 32 x 2 B = 1.25 KB of SRAM
-    /// (6 bits would be 2.5 KB: the SRAM-free check fails).
-    const LUTKB: u32 = 5;
-
-    fn lutb_init() {
-        let lut = unsafe { &mut *core::ptr::addr_of_mut!(LUTB) };
-        for (ctx, t) in lut.iter_mut().enumerate() {
-            let (mut code, mut idx) = (0usize, HUFB_SOFF[ctx] as usize);
-            for (l, &n) in HUFB_CNT[ctx].iter().enumerate() {
-                let l = l + 1;
-                for _ in 0..n {
-                    if l <= LUTKB as usize {
-                        let sh = LUTKB as usize - l;
-                        let e = (l as u16) << 8 | HUFB_SYM.get(idx).copied().unwrap_or(0) as u16;
-                        for v in t.iter_mut().skip(code << sh).take(1 << sh) {
-                            *v = e;
-                        }
-                    }
-                    code += 1;
-                    idx += 1;
-                }
-                code <<= 1;
-            }
-        }
-        unsafe { *core::ptr::addr_of_mut!(LUTB_OK) = true };
-    }
-
-    #[inline(never)]
-    fn slowb(mut win: u32, ctx: usize) -> (u8, u32) {
-        let (mut code, mut first, mut idx) = (0u32, 0u32, 0u32);
-        let mut l = 0u32;
-        for &c in HUFB_CNT[ctx].iter() {
-            code |= win >> 31;
-            win <<= 1;
-            l += 1;
-            let c = c as u32;
-            let d = code.wrapping_sub(first);
-            if d < c {
-                return (HUFB_SYM.get(HUFB_SOFF[ctx] as usize + (idx + d) as usize).copied().unwrap_or(0), l);
-            }
-            idx += c;
-            first = (first + c) << 1;
-            code <<= 1;
-        }
-        (0, l)
-    }
-
-    /// Row cache of `Glyph::cov3`: the last decoded row (key = glyph blob
+    /// Row cache of `Glyph::cov`: the last decoded row (key = glyph blob
     /// address ^ its box) and a cursor per glyph, direct-mapped by address.
     const RSLOTS: usize = 32;
     pub struct RowCache {
         key: usize,
         y: u16,
-        ch: [[u8; MAXW]; 3],
+        row: [u8; MAXW],
     }
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-    static mut RROW: RowCache = RowCache { key: 0, y: 0, ch: [[0; MAXW]; 3] };
+    static mut RROW: RowCache = RowCache { key: 0, y: 0, row: [0; MAXW] };
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-    static mut RCUR: [(usize, Cur); RSLOTS] = [(0, Cur { pos: 0, src: 0, next: 0, prev: [0; S3B_PREV] }); RSLOTS];
+    static mut RCUR: [(usize, Cur); RSLOTS] = [(0, Cur { pos: 0, src: 0, next: 0 }); RSLOTS];
 
     fn lut_init() {
         // Single-threaded, never from the ISR.
@@ -267,13 +195,9 @@ mod data {
         }
 
         /// Coverage 0..15 of pixel (x, y) inside the glyph box, random access
-        /// (Ink::at, the scope markers: 1 bpp fonts). A HUF glyph decodes
-        /// its rows up to y (slow; the drawing paths use `row`).
+        /// (Ink::at, the scope markers). A HUF glyph: through the row cache
+        /// (`cov`; the drawing paths use `row`).
         pub fn alpha(&self, x: u32, y: u32) -> u8 {
-            if !matches!(self.fmt, BIT1 | RAW4 | RAW2) {
-                let c = self.cov3(x, y);
-                return if self.sub() { c[1] } else { c[0] };
-            }
             match self.fmt {
                 BIT1 => {
                     let (t, ih) = (self.t as u32, self.ih as u32);
@@ -287,44 +211,19 @@ mod data {
                     }
                 }
                 RAW4 => self.nib(x * self.h as u32 + y),
-                RAW2 if HAS_RAW2 => {
-                    if y >= self.h as u32 {
-                        return 0;
-                    }
-                    self.at(x * self.h as u32 + y)
-                }
-                S3H | S3V | S3B if HAS_S3 => {
-                    if x >= self.w as u32 || y >= self.h as u32 {
-                        return 0;
-                    }
-                    let mut ch = [[0u8; MAXW]; 3];
-                    let mut c = Cur::default();
-                    self.rgb(&mut c, y, &mut ch);
-                    ch[1][x as usize % MAXW]
-                }
-                _ => {
-                    if x >= self.w as u32 || y >= self.h as u32 {
-                        return 0;
-                    }
-                    let mut buf = [0u8; MAXW];
-                    let mut c = Cur::default();
-                    self.row(&mut c, y, &mut buf);
-                    buf.get(x as usize).copied().unwrap_or(0)
-                }
+                _ => self.cov(x, y),
             }
         }
 
-        /// Channel coverages (R top, G, B bottom; gray: the same thrice) of
-        /// pixel (x, y), random access. HUF / subpixel glyphs: through the
+        /// Coverage of pixel (x, y), random access. HUF glyphs: through the
         /// row cache (one decoded row, the per-glyph cursors of RCUR), so a
         /// window painted row by row decodes each glyph row once (Ink).
-        pub fn cov3(&self, x: u32, y: u32) -> [u8; 3] {
+        pub fn cov(&self, x: u32, y: u32) -> u8 {
             if x >= self.w as u32 || y >= self.h as u32 {
-                return [0; 3];
+                return 0;
             }
-            if matches!(self.fmt, BIT1 | RAW4 | RAW2) {
-                let a = self.alpha(x, y);
-                return [a; 3];
+            if matches!(self.fmt, BIT1 | RAW4) {
+                return self.alpha(x, y);
             }
             // Single-threaded (UI), never from the ISR.
             let rc = unsafe { &mut *core::ptr::addr_of_mut!(RROW) };
@@ -334,20 +233,11 @@ mod data {
                 if slot.0 != key {
                     *slot = (key, Cur::default());
                 }
-                if self.sub() {
-                    self.rgb(&mut slot.1, y, &mut rc.ch);
-                } else {
-                    self.row(&mut slot.1, y, &mut rc.ch[0]);
-                }
+                self.row(&mut slot.1, y, &mut rc.row);
                 rc.key = key;
                 rc.y = y as u16;
             }
-            let x = x as usize % MAXW;
-            if self.sub() {
-                [rc.ch[0][x], rc.ch[1][x], rc.ch[2][x]]
-            } else {
-                [rc.ch[0][x]; 3]
-            }
+            rc.row[x as usize % MAXW]
         }
 
         /// Column walk of row `y` for the formats with random access (not
@@ -361,15 +251,8 @@ mod data {
                     Some(if y < t || y >= t + ih { None } else { Some((y - t, ih)) })
                 }
                 RAW4 => Some(Some((y, self.h as u32))),
-                RAW2 if HAS_RAW2 => Some(if y < self.h as u32 { Some((y, self.h as u32)) } else { None }),
                 _ => None,
             }
-        }
-
-        /// A subpixel glyph (S3H / S3V / S3B): draw through `rgb`.
-        #[inline(always)]
-        pub fn sub(&self) -> bool {
-            HAS_S3 && self.fmt >= S3H
         }
 
         /// Coverage at index `p` of a `col_walk`.
@@ -380,9 +263,6 @@ mod data {
                     Some(b) if b & (0x80 >> (p & 7)) != 0 => 15,
                     _ => 0,
                 }
-            } else if HAS_RAW2 && self.fmt == RAW2 {
-                let b = self.blob.get((p / 4) as usize).copied().unwrap_or(0);
-                ((b >> (6 - 2 * (p & 3))) & 3) * 5
             } else {
                 self.nib(p)
             }
@@ -423,145 +303,14 @@ mod data {
                         p += h;
                     }
                 }
-                RAW2 if HAS_RAW2 => {
-                    let h = self.h as u32;
-                    let mut p = y;
-                    for v in buf[..w].iter_mut() {
-                        *v = self.at(p);
-                        p += h;
-                    }
-                }
-                S3H | S3V | S3B if HAS_S3 => {
-                    let mut ch = [[0u8; MAXW]; 3];
-                    self.rgb(c, y, &mut ch);
-                    buf[..w].copy_from_slice(&ch[1][..w]);
-                }
-                _ => self.huf_row(c, y, w, buf),
-            }
-        }
-
-        /// HUF: stored row `y` of `w` values into buf[..w].
-        fn huf_row(&self, c: &mut Cur, y: u32, w: usize, buf: &mut [u8; MAXW]) {
-            let w = w.min(MAXW);
-            let (s, lit) = self.seek(c, y, w);
-            let e = self.runs::<true>(s, w, buf);
-            if lit {
-                c.pos = e as u16;
-            }
-        }
-
-        /// The three channel coverages (R top, G, B bottom) of pixel row `y`
-        /// into ch[k][..w]; gray formats: the same row thrice. S3V / S3B
-        /// decode subrows 3y-1 .. 3y+3 and leave the cursor before 3y+2 (the
-        /// next row's first).
-        pub fn rgb(&self, c: &mut Cur, y: u32, ch: &mut [[u8; MAXW]; 3]) {
-            let w = (self.w as usize).min(MAXW);
-            match self.fmt {
-                S3H if HAS_S3H => {
-                    let mut t = [0u8; MAXW];
-                    self.huf_row(c, y, 3 * w, &mut t);
-                    for x in 0..w.min(MAXW / 3) {
-                        ch[0][x] = t[3 * x];
-                        ch[1][x] = t[3 * x + 1];
-                        ch[2][x] = t[3 * x + 2];
-                    }
-                }
-                S3V | S3B if HAS_S3V || HAS_S3B => {
-                    let hh = 3 * self.h as i32;
-                    let mut s = [[0u8; MAXW]; 5];
-                    let mut keep = *c;
-                    for (i, r) in s.iter_mut().enumerate() {
-                        let k = 3 * y as i32 - 1 + i as i32;
-                        if k >= 0 && k < hh {
-                            if self.fmt == S3V || !HAS_S3B {
-                                self.huf_row(c, k as u32, w, r);
-                            } else {
-                                self.hufb_row(c, k as u32, w, r);
-                            }
-                        }
-                        if i == 2 {
-                            keep = *c;
-                        }
-                    }
-                    *c = keep;
-                    for x in 0..w {
-                        let v = |i: usize| s[i][x] as u32;
-                        for (k, o) in ch.iter_mut().enumerate() {
-                            o[x] = (((v(k) + v(k + 1) + v(k + 2)) * 2 + 3) / 6) as u8;
-                        }
-                    }
-                }
                 _ => {
-                    self.row(c, y, &mut ch[0]);
-                    let (a, b) = ch.split_at_mut(1);
-                    b[0][..w].copy_from_slice(&a[0][..w]);
-                    b[1][..w].copy_from_slice(&a[0][..w]);
-                }
-            }
-        }
-
-        /// S3B: subrow `k` into o[..w] (forward from the cursor, which holds
-        /// the previous subrow; an earlier subrow restarts from the top).
-        fn hufb_row(&self, c: &mut Cur, k: u32, w: usize, o: &mut [u8; MAXW]) {
-            let w = w.min(S3B_PREV);
-            if k + 1 == c.next as u32 {
-                o[..w].copy_from_slice(&c.prev[..w]);
-                return;
-            }
-            if k < c.next as u32 {
-                *c = Cur::default();
-            }
-            while c.next as u32 <= k {
-                let first = c.next == 0;
-                let mut p = c.pos as u32;
-                let (mut x, mut pk) = (0usize, 0usize);
-                while x < w {
-                    let up = if first {
-                        3
-                    } else {
-                        match c.prev[x] {
-                            0 => 0,
-                            15 => 1,
-                            _ => 2,
-                        }
-                    };
-                    let (kd, v, l) = self.tokenb(&mut p, pk * 4 + up, x, w);
-                    let e = (x + l).min(w);
-                    if kd != K_C {
-                        for d in &mut c.prev[x..e] {
-                            *d = v;
-                        }
+                    let (s, lit) = self.seek(c, y, w);
+                    let e = self.runs::<true>(s, w, buf);
+                    if lit {
+                        c.pos = e as u16;
                     }
-                    x = e;
-                    pk = (1 + kd as usize).min(4);
                 }
-                c.pos = p as u16;
-                c.next = c.next.wrapping_add(1);
             }
-            o[..w].copy_from_slice(&c.prev[..w]);
-        }
-
-        #[inline(always)]
-        fn tokenb(&self, p: &mut u32, ctx: usize, x: usize, w: usize) -> (u8, u8, usize) {
-            let ctx = ctx % HUFB_CNT.len().max(1);
-            let w0 = self.peek(*p);
-            let e = unsafe { (*core::ptr::addr_of!(LUTB)).get(ctx).map_or(0, |t| t[(w0 >> (32 - LUTKB)) as usize]) };
-            let (s, l) = if e != 0 { (e as u8, (e >> 8) as u32) } else { slowb(w0, ctx) };
-            let win = w0 << l;
-            *p += l;
-            let kind = s >> 4;
-            if kind == K_L {
-                return (kind, s & 15, 1);
-            }
-            let c = (s & 15).min(EOL) as usize;
-            let n = if c == EOL as usize {
-                w.saturating_sub(x)
-            } else {
-                let e = CLS_EB[c] as u32;
-                *p += e;
-                CLS_LO[c] as usize + if e > 0 { (win >> (32 - e)) as usize } else { 0 }
-            };
-            (kind, if kind == K_F15 { 15 } else { 0 }, n)
         }
 
         /// HUF only: hand the coverage of columns x0 .. x1 of row `y` to
@@ -708,11 +457,8 @@ mod data {
                 let (lh, d) = (fd.line_h as i16, fd.descent);
                 return Some(Glyph::own(b, false, sz, sz, sz + 1, (lh - d - sz as i16 - (lh - sz as i16) / 2) as i8));
             }
-            if matches!(fd.fmt, HUF | S3H | S3V) && !unsafe { *core::ptr::addr_of!(LUT_OK) } {
+            if fd.fmt == HUF && !unsafe { *core::ptr::addr_of!(LUT_OK) } {
                 lut_init();
-            }
-            if HAS_S3B && fd.fmt == S3B && !unsafe { *core::ptr::addr_of!(LUTB_OK) } {
-                lutb_init();
             }
             let code = u16::try_from(code).ok()?;
             // The font's own glyphs, then those of its base fonts
@@ -737,7 +483,7 @@ mod data {
                             ih: g.ih,
                         };
                         if a != self.0 && keep {
-                            // A shared glyph as it is, its yoff moved (EXPERIMENT).
+                            // A shared glyph as it is, its yoff moved.
                             r.yoff = (g.yoff as i16 + dy) as i8;
                         } else if a != self.0 {
                             // The box of this font's own entries: the whole line.
@@ -1068,26 +814,6 @@ pub fn ramp(fg: Color, bg: Color) -> [Color; 16] {
     t
 }
 
-/// One subpixel pixel from the ramp: each RGB565 field from its own
-/// channel's coverage (blend mixes the fields independently).
-#[inline(always)]
-fn sub_px(lut: &[Color; 16], r: u8, g: u8, b: u8) -> Color {
-    (lut[(r & 15) as usize] & 0xF800) | (lut[(g & 15) as usize] & 0x07E0) | (lut[(b & 15) as usize] & 0x001F)
-}
-
-/// `fg` over `bg` with a coverage per RGB565 field (R, G, B).
-#[inline]
-pub fn blend3(fg: Color, bg: Color, c: [u8; 3]) -> Color {
-    if c == [15; 3] {
-        return fg;
-    }
-    let mix = |s: u32, m: u32, a: u8| {
-        let (f, b) = (((fg as u32) >> s & m) as i32, ((bg as u32) >> s & m) as i32);
-        ((b + (f - b) * a.min(15) as i32 / 15) as u32 & m) << s
-    };
-    (mix(11, 0x1F, c[0]) | mix(5, 0x3F, c[1]) | mix(0, 0x1F, c[2])) as Color
-}
-
 fn blend(fg: Color, bg: Color, a: u8) -> Color {
     if a == 0 {
         return bg;
@@ -1139,12 +865,10 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     // One glyph row at a time (`Glyph::row`): `bi` = the glyph whose row y
     // is in `buf`.
     let mut buf = [0u8; MAXW];
-    let mut ch = [[0u8; MAXW]; 3];
     for y in y0..=y1 {
         // Runs of columns with the same covering glyph: background runs are
         // a plain fill, glyph runs read the glyph's row y.
         let mut bi = u8::MAX;
-        let mut bs = u8::MAX;
         let mut x = x0;
         let mut out = lcd::row_out(y, x0);
         while x <= x1 {
@@ -1164,19 +888,6 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
                 _ => None,
             };
             match hit {
-                // Subpixel (EXPERIMENT): three coverages per pixel, each
-                // channel blended on its own (R top, G, B bottom stripe).
-                Some(p) if p.g.sub() => {
-                    if bs != gi {
-                        p.g.rgb(&mut p.cur, (y - p.y) as u32, &mut ch);
-                        bs = gi;
-                    }
-                    let gx = (x - p.x) as usize;
-                    for k in 0..(e - x) as usize {
-                        let i = (gx + k) % MAXW;
-                        out.px(sub_px(&lut, ch[0][i], ch[1][i], ch[2][i]));
-                    }
-                }
                 // 1 bpp / raw 4 bpp: straight from the bitmap, a column step
                 // per pixel (column-major bitmap, row-major window).
                 Some(p) if p.twin == 0 && p.g.col_walk(0).is_some() => match p.g.col_walk((y - p.y) as u32).flatten() {
@@ -1391,14 +1102,6 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
         let mut cur = Cur::default();
         for gy in (ya - p.y) as u32..=(yb - p.y) as u32 {
             let mut out = if x + w <= lcd::W { lcd::row_out(p.y + gy as i16, x as i16) } else { lcd::Out::panel() };
-            if p.g.sub() {
-                let mut ch = [[0u8; MAXW]; 3];
-                p.g.rgb(&mut cur, gy, &mut ch);
-                for gx in 0..(w as usize).min(MAXW) {
-                    out.px(sub_px(&lut, ch[0][gx], ch[1][gx], ch[2][gx]));
-                }
-                continue;
-            }
             if p.twin == 0 {
                 match p.g.col_walk(gy) {
                     None => p.g.row_runs(&mut cur, gy, 0, w as usize, |a, n| out.run(lut[a as usize], n)),
@@ -1693,10 +1396,10 @@ impl Ink {
         }
     }
 
-    /// (glyph index, channel coverages R G B) of the first glyph with
-    /// coverage at (x, y), or None.
+    /// (glyph index, coverage) of the first glyph with coverage at (x, y),
+    /// or None.
     #[inline]
-    pub fn cov(&self, x: i16, y: i16) -> Option<(u8, [u8; 3])> {
+    pub fn cov(&self, x: i16, y: i16) -> Option<(u8, u8)> {
         if !self.bx.has(x, y) {
             return None;
         }
@@ -1705,14 +1408,11 @@ impl Ink {
             let (dx, dy) = (x - gx, y - gy);
             let t = self.tw[i];
             if dx >= 0 && dy >= 0 && dx < g.w as i16 + t && dy < g.h as i16 {
-                let mut c = g.cov3(dx as u32, dy as u32);
+                let mut c = g.cov(dx as u32, dy as u32);
                 if t > 0 && dx >= t {
-                    let d = g.cov3((dx - t) as u32, dy as u32);
-                    for k in 0..3 {
-                        c[k] = c[k].max(d[k]);
-                    }
+                    c = c.max(g.cov((dx - t) as u32, dy as u32));
                 }
-                if c != [0; 3] {
+                if c != 0 {
                     return Some((i as u8, c));
                 }
             }
@@ -1721,8 +1421,7 @@ impl Ink {
     }
 
     /// The text in `fg` over the pixel `under` = (colour, tag) the caller
-    /// paints there without it: blended by the coverage (each RGB565 field
-    /// by its own channel: subpixel). The tag becomes `layer << 8 | glyph`
+    /// paints there without it: blended by the coverage. The tag becomes `layer << 8 | glyph`
     /// where the coverage reaches 8 of 15 (the ink the layout checks see),
     /// else stays the under-pixel's.
     #[inline]
@@ -1734,10 +1433,7 @@ impl Ink {
     #[inline]
     pub fn over_g(&self, x: i16, y: i16, fg: impl Fn(u8) -> Color, under: (Color, u16), layer: u16) -> (Color, u16) {
         match self.cov(x, y) {
-            Some((g, c)) => {
-                // Ink for the layout checks: the mean of the channels (a
-                // subpixel colour fringe is not ink).
-                let m = ((c[0] as u16 + c[1] as u16 + c[2] as u16 + 1) / 3) as u8;
+            Some((g, m)) => {
                 // Under 15 (not solid): glyph | 0x80 (ui-render touch rule).
                 let (gl, _, gy) = &self.g[g as usize];
                 let below = y >= gy + gl.h as i16 + gl.yoff as i16;
@@ -1745,7 +1441,7 @@ impl Ink {
                 // A faint pixel (m < 8) is no one's ink: the under-pixel's
                 // tag would make it shape ink in ui-render (its colour is
                 // not the shape's).
-                (blend3(fg(g as u8 & 0x3F), under.0, c), if m >= 8 { layer << 8 | g } else { 0 })
+                (blend(fg(g as u8 & 0x3F), under.0, m), if m >= 8 { layer << 8 | g } else { 0 })
             }
             None => under,
         }

@@ -36,7 +36,7 @@ pub mod tr;
 #[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
 mod imp {
     #[allow(unused_imports)]
-    use super::super::data::{Entry, FontData, BIT1, E, HUF, S3V};
+    use super::super::data::{Entry, FontData, BIT1, E, HUF};
 
     #[cfg(feature = "zh")]
     include!("lang_zh.rs");

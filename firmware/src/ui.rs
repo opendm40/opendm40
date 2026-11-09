@@ -2511,8 +2511,8 @@ const SIDE_X: i16 = 405;
 /// The statistics column's labels (F14, left of the values).
 const SIDE_LABELS: [&str; 4] = ["MAX", "AVG", "MIN", "\u{3c3}"];
 
-/// Width of the statistics labels' column: the widest label (22 px in the
-/// stock-width DM40 Term; wider in an outline face).
+/// Width of the statistics labels' column: the widest label, at least
+/// 22 px.
 fn side_lw() -> i16 {
     SIDE_LABELS.iter().map(|t| sf::text_width(sf::F14, t, 1)).max().unwrap_or(22).max(22)
 }

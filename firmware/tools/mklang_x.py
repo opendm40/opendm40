@@ -1,15 +1,16 @@
 """Glyphs for the alphabetic languages of tools/mklang.py (ru, it, fr).
 
-Latin accents: the base letter of each font plus an accent (ACC), so the
-face stays the font's. Cyrillic: letters shaped like a Latin one are that
-glyph (the text holds the ASCII byte); the others are DM40 Term's in its fonts
-(tools/mkterm.py: TEXT22, F14, SC_F12, SC_F16), in the stock ASCII26 rendered
-from Liberation Sans (SIL OFL 1.1, i18n/OFL.txt; the font file is not in the
-repo, Debian: fonts-liberation) at the size that best matches the stock face
-(fit_size). Per font only the characters its strings use: i18n/font-use.tsv
-(from ui-render with LANG_LOG); a translation whose glyph is missing in its
-font stays English at run time. 1 bpp glyphs are BIT1, 4 bpp HUF with the stock
-fonts' shared tables (tools/mkstockfont.py).
+The outline-faced fonts (TEXT22, ASCII26, SC_F16, SC_F12: tools/mkttf.py)
+get their accented and Cyrillic letters from the same face, 2 bpp in HUF
+with the faces' table set (ttf_emit). F14 (the BDF face, tools/mkterm.py,
+1 bpp BIT1): Latin accents are the base letter plus an accent (ACC), its
+Cyrillic is the face's. Cyrillic letters shaped like a Latin one are that
+glyph (the text holds the ASCII byte). A font in neither face would take
+Liberation Sans (SIL OFL 1.1, i18n/OFL.txt; Debian: fonts-liberation) at
+the size that best matches the stock face (fit_size). Per font only the
+characters its strings use: i18n/font-use.tsv (from ui-render with
+LANG_LOG); a translation whose glyph is missing in its font stays English
+at run time.
 
 One byte per letter, in valid UTF-8: the most frequent non-ASCII letters take
 the control codes (CTRL), which no text font has, so a translation stays a &str
@@ -193,21 +194,17 @@ def render(ch, size, f, lh, de, four, _):
     return [r[:w] for r in m], w, w + 1
 
 
-# The text fonts of DM40 Term (tools/mkterm.py): the accents go on its
-# letters, its Cyrillic is used as it is.
+# The BDF faces (tools/mkterm.py: F14): the accents go on its letters, its
+# Cyrillic is used as it is.
 TERM = None
 
 
 import mkttf
-if mkttf.SCEN == 'term':
-    # EXPERIMENT: Terminus everywhere (tools/mkttf.py).
-    mkterm.FACE.update(mkttf.TERM_FACE)
-    mkterm.FACE['SC_F12'] = 'ter-u16b.bdf'
 
 
 def ttf_emit(nm, code, lh, de):
-    """EXPERIMENT: an extra glyph of a TTF-faced font (tools/mkttf.py), HUF
-    with the stock fonts' tables: (w, h, adv, yoff, bytes) or None."""
+    """An extra glyph of an outline-faced font (tools/mkttf.py), HUF with
+    the 2 bpp faces' tables: (w, h, adv, yoff, bytes, t, fmt) or None."""
     r = mkttf.lang_glyph(nm, code)
     if r is None:
         return None
@@ -218,7 +215,7 @@ def ttf_emit(nm, code, lh, de):
     LENS = LENS or huf_lens()
     # The 2 bpp faces' own table set (contexts 4..7, entry t = 4) when the
     # image has one (tools/mkstockfont.py).
-    o = 4 if fmt in ('HUF2', 'S3V2') and len(LENS) > 4 else 0
+    o = 4 if fmt == 'HUF2' and len(LENS) > 4 else 0
     lens = LENS[o:o + 4]
     cost = lambda cx, s: lens[cx].get(s, 10 ** 6)
     toks = [tk for y, r in enumerate(rows) for tk in msf.huf_parse_row(r, rows[y - 1] if y else None, cost)]
@@ -227,14 +224,10 @@ def ttf_emit(nm, code, lh, de):
 
 
 def term_font(nm, f, lh, de, four):
-    """`load`'s glyphs of font `nm` in DM40 Term, as tools/mkstockfont.py
-    emits them."""
+    """`load`'s glyphs of the 1 bpp font `nm` in its BDF face, as
+    tools/mkstockfont.py emits them."""
     global TERM
     TERM = TERM or mkterm.Face()
-    if four:
-        # EXPERIMENT (Terminus everywhere): a stock 4 bpp font made 1 bpp.
-        f = {c: (g[0], g[1], g[2], g[3], [[15 if v >= 8 else 0 for v in r] for r in g[4]]) for c, g in f.items()}
-        four = False
     gl = [(c, g[0], g[1], g[2], g[3], mkterm.pack(g[4], g[0], g[1], four)) for c, g in sorted(f.items())]
     cls = 'B' if all(g[1] == lh for g in f.values()) else 'A'
     out = TERM.restyle(nm, lh, de, four, gl, cls)
@@ -315,13 +308,13 @@ def build(lang, rows, check, rs_bytes):
             if a in need:
                 # Omega: the stock fonts' own (stockfont_w.rs).
                 need[a] |= {c for c in z if ord(c) >= 0x80 and c != 'Ω'}
-    # A font drawn with another's glyphs (tools/mkstockfont.py share-*.json)
-    # takes its language glyphs from that font too (stockfont.rs fd_extra).
-    sp = os.path.join(FW, 'target', 'share-%s.json' % mkttf.SCEN)
-    if mkttf.SCEN and os.path.exists(sp):
+    # A font drawn with another's glyphs (tools/mkstockfont.py,
+    # mkttf.SHARE_JSON) takes its language glyphs from that font too
+    # (stockfont.rs fd_extra).
+    if os.path.exists(mkttf.SHARE_JSON):
         import json
         names = {v[1]: k for k, v in FONTS.items()}
-        for n, b in json.load(open(sp)).items():
+        for n, b in json.load(open(mkttf.SHARE_JSON)).items():
             if n in names and b in names:
                 need[names[b]] |= need[names[n]]
                 need[names[n]] = set()

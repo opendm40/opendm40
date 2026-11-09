@@ -1,34 +1,24 @@
 #!/usr/bin/env python3
-"""DM40 Term: the text fonts drawn from Terminus Font bitmaps, for
-tools/mkstockfont.py (src/stockfont_data.rs, src/stockfont_w.rs) and
-tools/mklang_x.py (the accented and Cyrillic letters of src/lang_*.rs).
+"""The BDF bitmap faces of the text fonts, for tools/mkstockfont.py
+(src/stockfont_data.rs, src/stockfont_w.rs) and tools/mklang_x.py (the
+accented and Cyrillic letters of src/lang_*.rs).
 
-Based on Terminus Font 4.49.1 by Dimitar Zhekov (SIL OFL 1.1,
-../fonts/OFL-DM40Term.txt). Modified (the 12 px 0, the placement in the stock
-cells, the stock Omega), so under its own name: the OFL reserves the name
-"Terminus Font".
-
-Fonts (FACE): TEXT22 (menus, settings) ter-u22b, HIST (history values)
-ter-u20b, SC_F16 (the scope menus and popups) ter-u16b, F14 (small labels)
-and SC_F12 (the scope bars and cells) ter-u12b; each BDF at its native
-size, never scaled. Every other font stays stock (ASCII26, the big and 4 bpp
-fonts, the icons).
+Face (FACE): F14 (small labels, MAX / AVG / MIN) in X11 misc-fixed 6x13
+(public domain), at its native size, never scaled. The other text fonts are
+outline faces (tools/mkttf.py) or stay stock.
 
 * Placement: the glyph's ink box on the stock baseline, raised or lowered
   (`bdf_base`) so the ascenders and descenders fit the line box. Digits share
-  one advance. In the cell fonts (F14, HIST) a glyph wider than its stock
-  cell stays stock (listed in the log).
-* Our edits: at 12 px the 0 without Terminus's slash, one column narrower
-  than the O (ZERO; 20 / 22 px keep Terminus's 0); the Omega stays stock
-  (Terminus's is narrow: "600Ω" read "6000"), its feet on the face's
-  baseline; ℃ / ℉ are Terminus's ring and C / F, the ring's top on the
-  caps' top row (no taller than the caps).
+  one advance. In the cell fonts (CELL) a glyph wider than its stock cell
+  stays stock (listed in the log).
+* Our edits: the period one row up (its 3 x 3 cross on the baseline: its
+  lowest row below it touched the power page's sub-line box); the Omega
+  stays stock, its feet on the face's baseline; ℃ / ℉ are the face's ring
+  and C / F, the ring's top on the caps' top row.
 * A code the face lacks, or one not text (0x7F), stays stock.
 
-Input: the BDF files of terminus-font-4.49.1.tar.gz with its alternative
-Cyrillic и й д в (alt/ij1, alt/dv1: the Russian shapes), not in the repo:
-tools/fetch-terminus.sh puts them in target/terminus-font-4.49.1
-(DM40_TERM_DIR overrides); each file's SHA-256 is checked here. No time or
+Input: 6x13.bdf of X11 font-misc-misc, not in the repo: DM40_X11_BDF, default
+target/x11/6x13.bdf; its SHA-256 (X11_SHA256) is checked here. No time or
 path goes into the output.
 """
 
@@ -37,26 +27,13 @@ import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FW = os.path.dirname(HERE)
-DIR = os.environ.get('DM40_TERM_DIR') or os.path.join(FW, 'target', 'terminus-font-4.49.1')
+X11_BDF = os.environ.get('DM40_X11_BDF') or os.path.join(FW, 'target', 'x11', '6x13.bdf')
+# SHA-256 of the 6x13 BDF.
+X11_SHA256 = '1bc94ff7a799ba13e42305b20e759ef3140b0f896177f90bcbf7ef939a2ec52d'
 
-# BDF file -> SHA-256 (terminus-font-4.49.1.tar.gz with alt/ij1 and alt/dv1,
-# tools/fetch-terminus.sh).
-FILES = {
-    'ter-u12b.bdf': 'd633cae5e16c8eccaf2af9233b81c8ceb7ecbca5685fadf8e7dc5472e483308d',
-    'ter-u16b.bdf': '8f825f6666970196e7c8da3ff2dcb10b44cf5b8f094e867ec9b6f5f2429b909b',
-    'ter-u20b.bdf': 'c3ee3c76111ebdc473679b85eef6677642986d3b1be0ca145c70a9e3f212bd90',
-    'ter-u22b.bdf': 'fe4de45b798e7c068ac078ee42780dfc66fd03c90d5a4a490b2b1ae455d2b4f7',
-    # EXPERIMENT (tools/mkttf.py, Terminus everywhere)
-    'ter-u14b.bdf': '971ddc3f5cc114727d9e7cff3a3fddb32134ac94032ba67c5e3aa6b28a9ac8bc',
-    'ter-u18b.bdf': '748c0eccdea4b73d2431dc9447479ec6bf90b3968bdca76d7897c61c40936948',
-    'ter-u24b.bdf': 'f8fd753704ba02a526098e5839ce4dd059cbe8a59540feb9a01ca82b0d97054e',
-    'ter-u32b.bdf': 'e82a3fedf6e1d294cfbd8720a39ed4638c9fb142be161a12fb43b9e56f99fab2',
-    # EXPERIMENT: X11 misc-fixed 6x13 (public domain), F14 in scenario v14;
-    # BDF made from /usr/share/fonts/X11/misc/6x13.pcf.gz (DM40_X11_BDF).
-    'x11-6x13.bdf': '1bc94ff7a799ba13e42305b20e759ef3140b0f896177f90bcbf7ef939a2ec52d',
-}
-# Font -> BDF file. TEXT22: 24 px has the stock cap height (15) but its 12 px
-# cells overflow the menus; 22 px (cap 14, 11 px cells) fits.
+# BDF face -> (path, SHA-256).
+FILES = {'x11-6x13.bdf': (X11_BDF, X11_SHA256)}
+# Font -> BDF face.
 FACE = {'F14': 'x11-6x13.bdf'}
 # Fonts in the stock fixed cells (tight boxes): no glyph wider than its cell.
 CELL = ('HIST', 'F14')
@@ -64,26 +41,6 @@ OHM = 0x3A9
 # Drawn as a ring + letter.
 TEXTS = {0x2103: [0xB0, 0x43], 0x2109: [0xB0, 0x46]}
 DIGITS = [ord(c) for c in '0123456789']
-
-# Our 0 at 12 px (the full BDF cell): Terminus's has a slash, too small to
-# read there. The O is five columns wide, so the 0 is four: narrower than the
-# O. At 20 / 22 px (TEXT22, HIST) the 0 is Terminus's own.
-ZERO = {
-    'ter-u12b.bdf': """
-......
-......
-.##...
-#..#..
-#..#..
-#..#..
-#..#..
-#..#..
-#..#..
-.##...
-......
-......
-""",
-}
 
 
 class Ink:
@@ -97,16 +54,16 @@ class Ink:
 
 
 class Bdf:
-    """A BDF bitmap font (one size), with ZERO applied (12 px)."""
+    """A BDF bitmap font (one size), with our edits."""
 
     def __init__(self, name):
-        path = os.environ.get('DM40_X11_BDF', '') if name == 'x11-6x13.bdf' else os.path.join(DIR, name)
+        path, want = FILES[name]
         if not os.path.exists(path):
-            raise SystemExit('%s missing: tools/fetch-terminus.sh (or DM40_TERM_DIR)' % path)
+            raise SystemExit('%s missing: tools/fetch-fonts.sh (or DM40_X11_BDF)' % path)
         raw = open(path, 'rb').read()
         sha = hashlib.sha256(raw).hexdigest()
-        if sha != FILES[name]:
-            raise SystemExit('%s: SHA-256 %s, expected %s' % (path, sha, FILES[name]))
+        if sha != want:
+            raise SystemExit('%s: SHA-256 %s, expected %s' % (path, sha, want))
         self.name = name
         self.g = {}
         lines = iter(raw.decode('latin-1').split('\n'))
@@ -142,11 +99,6 @@ class Bdf:
             w, h, xo, yo = p['bbx']
             r = p['rows']
             p['rows'] = r[1:] + [[0] * w]
-        if name in ZERO:
-            z = self.g[ord('0')]
-            rows = [[15 if c == '#' else 0 for c in r] for r in ZERO[name].split()]
-            assert len(rows) == z['bbx'][1] and all(len(r) == z['bbx'][0] for r in rows), name
-            z['rows'] = rows
 
     def has(self, code):
         return code in self.g
@@ -322,7 +274,7 @@ class Face:
         ring, letter = (r.glyph(c) for c in TEXTS[code])
         # The ring's top on the caps' top row.
         cap = r.glyph(ord('H')).top
-        # 2 px between the ring and the letter's ink (Terminus's ° is a
+        # 2 px between the ring and the letter's ink (the face's ° may be a
         # full cell wide).
         ring = Ink(ring.rows, ring.left, min(ring.top, cap), ring.left + ring.w + 2 - letter.left)
         return join([ring, letter])
@@ -372,7 +324,7 @@ class Face:
     def log(self, fname):
         s = self.info[fname]
         H = s['r'].glyph(ord('H'))
-        msg = 'DM40 Term %-7s %s  H %d (stock %d)  base %d (stock %d)  digit adv %d' % (
+        msg = 'BDF %-7s %s  H %d (stock %d)  base %d (stock %d)  digit adv %d' % (
             fname, s['r'].name, H.h, s['cap'], s['base'], s['sbase'], s['dadv'])
         if s['stock']:
             msg += '  stock (wider than the cell): ' + ''.join(s['stock'])
@@ -389,7 +341,7 @@ class Face:
 
 
 def restyle(loaded):
-    """mkstockfont.py `loaded` with the FACE fonts in DM40 Term; and the Face."""
+    """mkstockfont.py `loaded` with the FACE fonts in their BDF face; and the Face."""
     face = Face()
     res = []
     for fname, key, (line_h, descent, four, gl, cls) in loaded:
@@ -402,7 +354,7 @@ def restyle(loaded):
 
 
 # stockfont_w.rs entries (tools/mkwglyph.py) of the faced fonts: W and k of
-# HIST, ℃ / ℉ of TEXT22 in the face; the others stay.
+# a faced font, ℃ / ℉ in the face; the others stay.
 OWN_TEXT = {'W': ord('W'), 'k': ord('k'), '℃': 0x2103, '℉': 0x2109}
 
 

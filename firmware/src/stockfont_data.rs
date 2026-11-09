@@ -990,19 +990,6 @@ pub static HUF_SYM: [u8; 227] = [
     0x0A, 0x05, 0x1B, 0x11, 0x13, 0x10, 0x12, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
 ];
 
-pub const HAS_RAW2: bool = false;
-pub const HAS_S3H: bool = false;
-pub const HAS_S3V: bool = false;
-pub const HAS_S3B: bool = false;
-pub const HUFB_MAXL: usize = 1;
-pub const S3B_PREV: usize = 0;
-#[link_section = ".rodata.fonts.HUFB_CNT"]
-pub static HUFB_CNT: [[u8; HUFB_MAXL]; 0] = [];
-#[link_section = ".rodata.fonts.HUFB_SOFF"]
-pub static HUFB_SOFF: [u16; 1] = [0];
-#[link_section = ".rodata.fonts.HUFB_SYM"]
-pub static HUFB_SYM: [u8; 0] = [];
-
 /// Resolve a stock font-object address to its embedded data.
 pub fn font_data(addr: u32) -> Option<&'static FontData> {
     match addr {

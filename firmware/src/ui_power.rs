@@ -966,8 +966,8 @@ pub fn ranging_clear() {
     lcd::fill_rect(38, 36, 216, 30, BG);
 }
 
-/// Width of the side column's labels (Vb, VAh, AVG; F14): 24 px in the
-/// stock-width DM40 Term, the widest label in a wider face.
+/// Width of the side column's labels (Vb, VAh, AVG; F14): at least 24 px,
+/// the widest label in a wider face.
 fn pw_lw() -> i16 {
     ["Vb", "VAh", "AVG"].iter().map(|t| sf::text_width(sf::F14, t, 1)).max().unwrap_or(24).max(24)
 }
