@@ -62,7 +62,7 @@ Back	Назад	M
 Next >	След >	M
 Save	Сохр.	M
 Delete	Удалить	M
-Clear	Очистить	M
+Clear	Сброс	M
 Default	Умолч.	M
 Reset	Сброс	M
 Start	Старт	M
@@ -78,12 +78,12 @@ Measure	Измерения	M
 Decode	Декодер	M
 Window	Окно	M
 Sine	Синус	M
-Square	Прямоуг.	M
+Square	Прямоугольник	O
 Triangle	Треуг.	M
 Ramp	Пила	M
 Frequency	Частота	M
 Freq	Част.	M
-Duty	Заполн.	M
+Duty	Заполнение	O
 Coupling	Связь	M
 Probe	Щуп	M
 Type:	Тип:	M

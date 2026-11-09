@@ -1,13 +1,15 @@
 # Fonts: the stock bitmap fonts, their storage and cost
 
-Every text and icon on the opendm40 screens is drawn with the stock DM40 V2.6
-bitmap fonts, copied into the image at build time and stored compressed.
+The icons and the large digits and units of the readings are drawn with the
+stock DM40 V2.6 bitmap fonts, the texts with bitmaps rendered from Noto Sans
+and X11 misc-fixed at build time (section 1a); all are stored compressed in
+the image.
 This page describes where they come from, the storage format, where they
 live in flash, and why the storage is lossless.
 
 ## 1. stockfont
 
-The stock look is the baseline of the UI, so the fonts are the stock ones.
+The stock look is the baseline of the UI, so the other fonts are the stock ones.
 They used to be read live from the stock app at 0x0805xxxx..0x0806xxxx; once
 opendm40 is flashed over 0x08004000 that app is gone, so
 [`tools/mkstockfont.py`](../tools/mkstockfont.py) copies them out of
@@ -19,6 +21,46 @@ placement rules), anti-aliased blend through a 16-step colour ramp, the stock
 threshold compositing of the scope page (`Ink`), the half-size +1 digit
 (`label_half`) and opendm40's own W / k glyphs
 ([`src/stockfont_w.rs`](../src/stockfont_w.rs)) for the power meter.
+
+## 1a. Text fonts: Noto Sans and X11 6x13
+
+The text fonts are rendered at build time from two fonts that are not in the
+repo; [`tools/fetch-fonts.sh`](../tools/fetch-fonts.sh) downloads them into
+`target/` and checks their SHA-256:
+
+* [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) 2.015, the
+  variable `NotoSans[wdth,wght].ttf` of google/fonts (SIL OFL 1.1,
+  [`fonts/OFL-NotoSans.txt`](../fonts/OFL-NotoSans.txt));
+* X11 misc-fixed `6x13.bdf` of xorg font-misc-misc 1.1.3 (public domain,
+  [`fonts/X11-misc-fixed.txt`](../fonts/X11-misc-fixed.txt)).
+
+| font | draws | from |
+|---|---|---|
+| TEXT22, ASCII26 | menus, settings, the generator page, dialogs (one set of glyphs) | Noto Sans Medium, caps 14 px |
+| HIST | the DMM history row | Noto Sans Medium, 87.5 % width, caps 13 px |
+| F14 | small labels, MAX / AVG / MIN, the scale | X11 6x13, 1 bpp, caps 9 px, 6 px cells |
+| SC_F16, SC_F12 | the scope menus, popups, bars and cells (one set) | Noto Sans SemiBold, caps 10 px |
+| SC_C | the scope status letters | Noto Sans Bold, caps 12 px |
+| F21, K_FONT, LETTERS | the units and letters of the readings | Noto Sans Medium, caps 20 / 22 px |
+
+The big digits (F78, UNIT) and the icons stay stock.
+
+[`tools/mkttf.py`](../tools/mkttf.py) renders the Noto places: FreeType light
+autohinting at the em where H is the cap height, 2 bpp gray (coverage 0 / 5 /
+10 / 15), whole-pixel advances, one advance for the digits where live
+numbers are shown; the line box grows when the face's ascenders or
+descenders do not fit the stock one. A font after the first of a place draws
+with the first one's glyphs (`font_base` in `stockfont.rs`). 2 bpp is enough
+for these sizes and halves the data of 4 bpp.
+
+[`tools/mkterm.py`](../tools/mkterm.py) places the 6x13 BDF glyphs of F14 at
+their native size (1 bpp, sharp on the grey REL box, where a 2 bpp face
+looked blurred), the ink on the stock baseline. Our change: the period's
+3 x 3 cross one row higher, on the baseline (it reached a row below the
+others). The stock Ω stays (its feet on the baseline).
+
+Both generators are called by `mkstockfont.py` and `mklang_x.py` (the
+language glyphs in the same faces).
 
 ## 2. The stock fonts
 
@@ -33,7 +75,8 @@ What can be dropped or packed without changing a pixel:
 
 * **Unused fonts.** The stock scope page's 20 px ASCII (0x08054148, the
   panel buttons) is not embedded: our panel and the strip's units too
-  wide for SC_DIGITS ("mWh") use SC_F16, the same face at 16 px.
+  wide for SC_DIGITS ("mWh") use SC_F16, the same face at 16 px. Of
+  G_08059428 only the up arrow (the generator's wave drop-down) is kept.
 * **Unused glyphs.** 232 glyphs are CJK / full-width (U+2E80 up): 216 in
   TEXT22, 16 in ASCII26, 16.2 KB of bitmaps. opendm40 is English only and
   no source string contains one. The ASCII fonts (TEXT22, F14, ASCII26,
@@ -45,15 +88,19 @@ What can be dropped or packed without changing a pixel:
 * **Run structure.** 4 bpp glyphs are mostly 0 and 15 with 1-3 AA pixels at
   each edge, and stems repeat row after row: row-major runs compress them
   2.5-5x (F78 5.1x).
-* **Duplicates** across fonts: 5 glyphs, ~0.4 KB after compression, not
-  worth an indirection per glyph.
+* **Duplicates** across the stock fonts: 5 glyphs, ~0.4 KB after
+  compression, not worth an indirection per glyph.
+* **Shared glyphs.** The fonts of one Noto place (section 1a) store one
+  set of glyphs: SC_F12 draws with SC_F16's, ASCII26 with TEXT22's,
+  K_FONT with F21's (`font_base` in `stockfont.rs`), each placed in its own
+  line box.
 
 ## 2a. Glyphs of our own
 
-The unit fonts without a lowercase k (UNIT, LETTERS, F21, K_FONT, HIST) take
-ours ([`tools/mkwglyph.py`](../tools/mkwglyph.py), `stockfont_w.rs`): "kW",
-"kΩ", "kHz" instead of the stock "KW"; ASCII26 (the dialogs) an Ω; TEXT22
-(the menu text) ℃ and ℉: its own C / F after a 4 x 4 ring, 1 bpp.
+UNIT, the stock unit font without a lowercase k, takes ours
+([`tools/mkwglyph.py`](../tools/mkwglyph.py), `stockfont_w.rs`): "kW",
+"kΩ", "kHz" instead of the stock "KW". The Noto places (section 1a) draw
+their W, k, Ω, ℃, ℉ and σ from the face.
 
 ## 3. Storage
 
@@ -140,8 +187,9 @@ image (features `zh`, `ru`, `it`, `fr`), resolved at build time (`tr!`); none in
 the default image.
 Chinese: 14 px 1 bpp glyphs in one set for every font of 15 px and up, each hanzi
 stored as U+0400 + its index. Russian: letters shaped like a Latin one use the
-stock glyph (and one byte of text); the others per font, sized by `fit_size` in
-[`mklang_x.py`](../tools/mklang_x.py). Italian, French: stock letter plus accent.
+Latin glyph (and one byte of text); the others are rendered in the font's
+face (Noto Sans, or X11 6x13 in F14) by [`mklang_x.py`](../tools/mklang_x.py).
+Italian, French: the font's letter plus an accent.
 
 ## 4. Options not taken
 

@@ -66,7 +66,7 @@ const BADGE: sf::Rect = rect(403, 72, 31, 17);
 /// (0, 80, 40, 64; V functions only); cleared by `DmmView::reading` on a
 /// mode change. The right column (403..436 between the limit badge and the
 /// unit) is 3 px too narrow for it at the F14 letter spacing.
-pub const LOAD_MARK: sf::Rect = rect(4, 66, 36, 14);
+pub const LOAD_MARK: sf::Rect = rect(4, 68, 36, 14);
 
 fn coupling(c: &mut PwCache, pv: &PowerVals, lim: u8) {
     let k = 1 + ((lim as u32) << 2) + ((pv.comp as u32) << 12);
@@ -81,6 +81,12 @@ fn coupling(c: &mut PwCache, pv: &PowerVals, lim: u8) {
         sf::label(sf::F14, rect(BADGE.x, BADGE.y + md, BADGE.w, BADGE.h), "", VALUE, BG, 8, 1);
     }
     let m = LOAD_MARK;
+    // The mark moves with main_dy (a limit badge on / off): its other place
+    // cleared too (an outline F14's "@load" reaches beyond the overlap).
+    if md != 0 {
+        let y0 = m.y.min(m.y + md);
+        lcd::fill_rect(m.x as u16, y0 as u16, m.w as u16, (m.h + md.abs()) as u16, BG);
+    }
     sf::label(sf::F14, rect(m.x, m.y + md, m.w, m.h), if pv.comp { crate::ui::LOAD_CAP } else { "" }, VALUE, BG, 4, 1);
 }
 
@@ -345,8 +351,8 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
         let k = kk.key();
         if c.side[i] != k {
             c.side[i] = k;
-            sf::label(sf::F14, rect(SIDE_X, y, 24, 14), lbl, DIM, BG, 0, 1);
-            sf::label(sf::F14, rect(SIDE_X + 26, y, SIDE_R - SIDE_X - 26, 14), t.s(), *fg, BG, 3, 1);
+            sf::label(sf::F14, rect(SIDE_X, y, pw_lw(), 14), lbl, DIM, BG, 0, 1);
+            sf::label(sf::F14, rect(SIDE_X + pw_lw() + 2, y, SIDE_R - SIDE_X - pw_lw() - 2, 14), t.s(), *fg, BG, 3, 1);
         }
     }
     // Energy box (405, 205, 71, 38): "E" + RUN / PAUSE, the time below.
@@ -367,14 +373,14 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
     let mut b3 = [0u8; 16];
     // Fewer significant digits when wider than the box ("-24.064").
     let mut sg = 5;
-    while sg > 2 && sf::text_width(sf::F14, sig_text(&mut b3, pv.p_avg, sg), 1) > SIDE_R - SIDE_X - 26 {
+    while sg > 2 && sf::text_width(sf::F14, sig_text(&mut b3, pv.p_avg, sg), 1) > SIDE_R - SIDE_X - pw_lw() - 2 {
         sg -= 1;
     }
     t3.push(sig_text(&mut b3, pv.p_avg, sg));
     if c.side[3] != t3.key() {
         c.side[3] = t3.key();
-        sf::label(sf::F14, rect(SIDE_X, g.avg, 24, 14), "AVG", DIM, BG, 0, 1);
-        sf::label(sf::F14, rect(SIDE_X + 26, g.avg, SIDE_R - SIDE_X - 26, 14), t3.s(), STATUS_FG, BG, 3, 1);
+        sf::label(sf::F14, rect(SIDE_X, g.avg, pw_lw(), 14), "AVG", DIM, BG, 0, 1);
+        sf::label(sf::F14, rect(SIDE_X + pw_lw() + 2, g.avg, SIDE_R - SIDE_X - pw_lw() - 2, 14), t3.s(), STATUS_FG, BG, 3, 1);
     }
     // Ranges, or the continuous-current countdown / alarm.
     let mut t4 = T::new();
@@ -382,6 +388,11 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
         1 => {
             let mut b4 = [0u8; 16];
             t4.push("I>LIM ").push(crate::dmm::format(&mut b4, pv.over_left as f32, 0)).push("s");
+            // Minutes when the seconds do not fit (an outline F14: "3600s").
+            if sf::text_width(sf::F14, t4.s(), 1) > SIDE_R - SIDE_X {
+                t4 = T::new();
+                t4.push("I>LIM ").push(crate::dmm::format(&mut b4, ((pv.over_left as u32 + 59) / 60) as f32, 0)).push("m");
+            }
             VALUE
         }
         2 => {
@@ -953,4 +964,10 @@ const RANGING_TXT: sf::Rect = rect(40, 92, 360, 32);
 pub fn ranging_clear() {
     lcd::fill_rect(RANGING_TXT.x as u16, RANGING_TXT.y as u16, RANGING_TXT.w as u16, RANGING_TXT.h as u16, BG);
     lcd::fill_rect(38, 36, 216, 30, BG);
+}
+
+/// Width of the side column's labels (Vb, VAh, AVG; F14): at least 24 px,
+/// the widest label in a wider face.
+fn pw_lw() -> i16 {
+    ["Vb", "VAh", "AVG"].iter().map(|t| sf::text_width(sf::F14, t, 1)).max().unwrap_or(24).max(24)
 }

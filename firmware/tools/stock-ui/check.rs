@@ -4,6 +4,10 @@
 #![allow(dead_code)]
 use crate::host::{emu, H, W};
 pub mod probe {
+    #[allow(dead_code)]
+    pub fn fg(c: u16) {
+        crate::host::fg(c)
+    }
     pub const TEXT: u8 = 0;
     pub const SHAPE: u8 = 1;
     pub const ICON: u8 = 2;
@@ -63,7 +67,7 @@ fn items() -> Vec<Item> {
     let mut m: std::collections::BTreeMap<u32, Item> = Default::default();
     for y in 0..H {
         for x in 0..W {
-            let o = e.owner[y * W + x];
+            let o = e.owner[y * W + x] & 0x3FFF_FFFF;
             if o == 0 {
                 continue;
             }

@@ -153,10 +153,7 @@ fn txt(b: &[u8]) -> &str {
 /// A text painted over its ink only, centred in `r` (on `bg`).
 fn label_in(r: Rect, t: &str, fg: Color, bg: Color) {
     let k = Ink::new(sf::SC_F12, r, t, 8, 0);
-    paint(isect(k.bx, r), &[(K_TEXT, bg)], |x, y| match k.at(x, y) {
-        Some(g) => (fg, tag(1, g)),
-        None => (bg, 0),
-    });
+    paint(isect(k.bx, r), &[(K_TEXT, bg)], |x, y| k.over(x, y, fg, (bg, 0), 1));
 }
 
 /// The first of `cands` that fits `w` px with 3 px either side ("" none).
@@ -414,10 +411,7 @@ pub fn page(v: &SetupVals, pc: Rect) {
     let dali = dc::is_dali(v.proto);
     for (r, t) in SU_LABELS.iter().zip(if dali { DL_TEXTS } else { SU_TEXTS }) {
         let k = Ink::new(sf::SC_F16, *r, t, 1, 0);
-        paint(isect(isect(k.bx, *r), pc), &[(K_TEXT, C_POP_BG)], |x, y| match k.at(x, y) {
-            Some(g) => (C_FILL, tag(1, g)),
-            None => (C_POP_BG, 0),
-        });
+        paint(isect(isect(k.bx, *r), pc), &[(K_TEXT, C_POP_BG)], |x, y| k.over(x, y, C_FILL, (C_POP_BG, 0), 1));
     }
     option_list(SU_PROTO, pc, PROTO_N, PROTO_W, if dc::DALI { PROTO_V.iter().position(|&p| p == v.proto).unwrap_or(0) } else { v.proto.min(PROTO_V.len() as u8 - 1) as usize });
     let modes: &[&str] = if LOG { &["Band", crate::tr!("Log")] } else { &["Band"] };

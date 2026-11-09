@@ -1,14 +1,16 @@
 """Glyphs for the alphabetic languages of tools/mklang.py (ru, it, fr).
 
-Latin accents: the stock base letter of each font plus an accent (ACC), so the
-face stays the stock one. Cyrillic: letters shaped like a Latin one are that
-stock glyph (the text holds the ASCII byte); the others are rendered from
-Liberation Sans (SIL OFL 1.1, i18n/OFL-Liberation.txt; the font file is not in
-the repo, Debian: fonts-liberation) at the size that best matches the stock
-face (fit_size). Per font only the characters its strings use: i18n/font-use.tsv
-(from ui-render with LANG_LOG); a translation whose glyph is missing in its
-font stays English at run time. 1 bpp glyphs are BIT1, 4 bpp HUF with the stock
-fonts' shared tables (tools/mkstockfont.py).
+The outline-faced fonts (TEXT22, ASCII26, SC_F16, SC_F12: tools/mkttf.py)
+get their accented and Cyrillic letters from the same face, 2 bpp in HUF
+with the faces' table set (ttf_emit). F14 (the BDF face, tools/mkterm.py,
+1 bpp BIT1): Latin accents are the base letter plus an accent (ACC), its
+Cyrillic is the face's. Cyrillic letters shaped like a Latin one are that
+glyph (the text holds the ASCII byte). A font in neither face would take
+Liberation Sans (SIL OFL 1.1, i18n/OFL.txt; Debian: fonts-liberation) at
+the size that best matches the stock face (fit_size). Per font only the
+characters its strings use: i18n/font-use.tsv (from ui-render with
+LANG_LOG); a translation whose glyph is missing in its font stays English
+at run time.
 
 One byte per letter, in valid UTF-8: the most frequent non-ASCII letters take
 the control codes (CTRL), which no text font has, so a translation stays a &str
@@ -20,6 +22,7 @@ import re
 import struct
 
 import mkstockfont as msf
+import mkterm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FW = os.path.dirname(HERE)
@@ -191,6 +194,46 @@ def render(ch, size, f, lh, de, four, _):
     return [r[:w] for r in m], w, w + 1
 
 
+# The BDF faces (tools/mkterm.py: F14): the accents go on its letters, its
+# Cyrillic is used as it is.
+TERM = None
+
+
+import mkttf
+
+
+def ttf_emit(nm, code, lh, de):
+    """An extra glyph of an outline-faced font (tools/mkttf.py), HUF with
+    the 2 bpp faces' tables: (w, h, adv, yoff, bytes, t, fmt) or None."""
+    r = mkttf.lang_glyph(nm, code)
+    if r is None:
+        return None
+    g, base, fmt, flh = r
+    # The face's line box: flh, descent flh - base (tools/mkttf.py).
+    w, h, adv, yoff, (_, _, rows) = mkttf.place_glyph(g, fmt, base, flh, flh - base, None)
+    global LENS
+    LENS = LENS or huf_lens()
+    # The 2 bpp faces' own table set (contexts 4..7, entry t = 4) when the
+    # image has one (tools/mkstockfont.py).
+    o = 4 if fmt == 'HUF2' and len(LENS) > 4 else 0
+    lens = LENS[o:o + 4]
+    cost = lambda cx, s: lens[cx].get(s, 10 ** 6)
+    toks = [tk for y, r in enumerate(rows) for tk in msf.huf_parse_row(r, rows[y - 1] if y else None, cost)]
+    data, _ = msf.huf_encode(toks, [msf.huf_canon(c) for c in lens])
+    return w, h, adv, yoff, data, o, msf.FW_FMT[fmt]
+
+
+def term_font(nm, f, lh, de, four):
+    """`load`'s glyphs of the 1 bpp font `nm` in its BDF face, as
+    tools/mkstockfont.py emits them."""
+    global TERM
+    TERM = TERM or mkterm.Face()
+    gl = [(c, g[0], g[1], g[2], g[3], mkterm.pack(g[4], g[0], g[1], four)) for c, g in sorted(f.items())]
+    cls = 'B' if all(g[1] == lh for g in f.values()) else 'A'
+    out = TERM.restyle(nm, lh, de, four, gl, cls)
+    return {g[0]: (g[1], g[2], g[3], g[4], mkterm.unpack(g[5], g[1], g[2], four)) for g in out}
+
+
 def huf_lens():
     t = open(os.path.join(FW, 'src', 'stockfont_data.rs'), encoding='utf-8').read()
     cnt = [[int(v) for v in r.split(',') if v.strip()] for r in re.findall(r'\[([0-9, ]+)\],', t.split('pub static HUF_CNT')[1].split(' = [')[1].split('];')[0] + ',')]
@@ -265,6 +308,16 @@ def build(lang, rows, check, rs_bytes):
             if a in need:
                 # Omega: the stock fonts' own (stockfont_w.rs).
                 need[a] |= {c for c in z if ord(c) >= 0x80 and c != 'Ω'}
+    # A font drawn with another's glyphs (tools/mkstockfont.py,
+    # mkttf.SHARE_JSON) takes its language glyphs from that font too
+    # (stockfont.rs fd_extra).
+    if os.path.exists(mkttf.SHARE_JSON):
+        import json
+        names = {v[1]: k for k, v in FONTS.items()}
+        for n, b in json.load(open(mkttf.SHARE_JSON)).items():
+            if n in names and b in names:
+                need[names[b]] |= need[names[n]]
+                need[names[n]] = set()
     s, total, sizes = '', 0, []
     extra = []
     for a in sorted(need):
@@ -272,14 +325,28 @@ def build(lang, rows, check, rs_bytes):
             continue
         src, nm = FONTS[a]
         f, lh, de, four = load(img, src)
-        size = fit_size(f, lh, de, four) if lang == 'ru' else 0
+        faced = nm in mkterm.FACE
+        ttf = mkttf.lang_glyph(nm, ord('A')) is not None
+        if faced and ttf:
+            faced = False
+        if faced:
+            f = term_font(nm, f, lh, de, four)
+            four = False
+        if ttf:
+            four = True
+        size = fit_size(f, lh, de, four) if lang == 'ru' and not faced and not ttf else 0
         es, blob = [], bytearray()
         for ch in sorted(need[a], key=lambda c: code.get(c, ord(c))):
+            if ttf:
+                gw, gh, gadv, yoff, data, t0, xfmt = ttf_emit(nm, ord(ch), lh, de)
+                es.append('E(%d,%d,%d,%d,%d,%d,%d,%d)' % (code.get(ch, ord(ch)), len(blob), gw, gh, gadv, yoff, t0, gh))
+                blob += data
+                continue
             if ch in COMPOSE:
                 m, w, adv = compose(ch, f, lh, de)
             else:
                 assert lang == 'ru', ch
-                m, w, adv = render(ch, size, f, lh, de, four, 0)
+                m, w, adv = TERM.line(nm, ord(ch)) if faced else render(ch, size, f, lh, de, four, 0)
             gw, gh, gadv, yoff, data = emit_glyph(m, w, adv, lh, de, four)
             es.append('E(%d,%d,%d,%d,%d,%d,0,%d)' % (code.get(ch, ord(ch)), len(blob), gw, gh, gadv, yoff, gh))
             blob += data
@@ -287,7 +354,8 @@ def build(lang, rows, check, rs_bytes):
         sizes.append('%s %d glyphs %d B%s' % (nm, len(es), len(blob), ' (%d px)' % size if size else ''))
         s += '#[link_section = ".rodata.fonts.LANG_%s_E"]\nstatic X_%s_E: [Entry; %d] = [%s];\n' % (nm, nm, len(es), ', '.join(es))
         s += '#[link_section = ".rodata.fonts.LANG_%s_B"]\nstatic X_%s_B: [u8; %d] = *b"\\\n%s\n";\n' % (nm, nm, len(blob), rs_bytes(bytes(blob)))
-        extra.append('(0x%08X, FontData { line_h: %d, descent: %d, fmt: %s, entries: &X_%s_E, blob: &X_%s_B })' % (a, lh, de, 'HUF' if four else 'BIT1', nm, nm))
+        xf = xfmt if ttf else 'HUF' if four else 'BIT1'
+        extra.append('(0x%08X, FontData { line_h: %d, descent: %d, fmt: %s, entries: &X_%s_E, blob: &X_%s_B })' % (a, lh, de, xf, nm, nm))
     s += 'pub const N: usize = 0;\npub const SIZE: u8 = 0;\npub const GB: usize = 1;\npub static G: [u8; 0] = [];\n'
     s += 'pub static EXTRA: [(u32, FontData); %d] = [%s];\n' % (len(extra), ', '.join(extra))
     ntxt = sum(len(z.encode()) for z in out_rows.values())

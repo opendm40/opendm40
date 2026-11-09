@@ -86,6 +86,10 @@ mod inrush;
 
 /// Probe hooks called by the drawing code under cfg(test).
 pub mod probe {
+    #[allow(dead_code)]
+    pub fn fg(c: u16) {
+        crate::host::fg(c)
+    }
     /// ui-render's clip rule (stockfont probe_fit): not checked here.
     pub fn fit(_r: (i32, i32, i32, i32), _ink: (i32, i32, i32, i32), _text: &str) {}
     pub fn open(kind: u8, bg: u16) -> u32 {
@@ -793,7 +797,7 @@ fn shapes() -> Vec<Bx> {
     let mut m: std::collections::BTreeMap<u32, Bx> = Default::default();
     for y in 0..H {
         for x in 0..W {
-            let o = e.owner[y * W + x];
+            let o = e.owner[y * W + x] & 0x3FFF_FFFF;
             if o == 0 || e.kinds[(o >> 8) as usize - 1] != probe::SHAPE {
                 continue;
             }
@@ -1469,7 +1473,7 @@ fn tap_step_tests(ck: &mut Ck) {
         let sp = su::TB_SPIN;
         for y in sp.y as usize..(sp.y + sp.h) as usize {
             for x in sp.x as usize..(sp.x + sp.w) as usize {
-                let o = e.owner[y * W + x];
+                let o = e.owner[y * W + x] & 0x3FFF_FFFF;
                 if o == 0 || e.kinds[(o >> 8) as usize - 1] != probe::TEXT {
                     continue;
                 }

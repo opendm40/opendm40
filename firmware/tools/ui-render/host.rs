@@ -21,6 +21,11 @@ pub struct Emu {
     writing: bool,
     /// Active probed call: (id, bg, glyph index).
     pub call: Option<(u32, u16, u8)>,
+    /// Text colour of the active call (anti-aliased text, `probe::fg`): a
+    /// pixel is its ink only where it is at least half way from bg to fg in
+    /// some RGB565 field (coverage >= 8 of 15); the fainter AA fringe is
+    /// background for the layout rules.
+    pub fg: Option<u16>,
     /// Kind of every probed call (index = id - 1).
     pub kinds: Vec<u8>,
     /// Calls grouped as one text (fixed cells of one number): (id, cell).
@@ -48,6 +53,7 @@ pub fn emu() -> &'static mut Emu {
                 args: Vec::new(),
                 writing: false,
                 call: None,
+                fg: None,
                 kinds: Vec::new(),
                 group: None,
                 grouping: false,
@@ -133,6 +139,7 @@ pub fn same(s: &Snap) -> bool {
 /// and the glyph it is drawing (255 = none).
 pub fn begin(kind: u8, bg: u16) {
     let e = emu();
+    e.fg = None;
     if e.grouping {
         let (id, cell) = match e.group {
             Some((id, c)) => (id, c + 1),
@@ -169,7 +176,34 @@ pub fn group(on: bool) {
 
 pub fn end() {
     emu().call = None;
+    emu().fg = None;
 }
+
+pub fn fg(c: u16) {
+    emu().fg = Some(c);
+}
+
+/// `v` at least `n` / 4 of the way from `bg` to `fg` on average over the
+/// RGB565 fields that differ (a subpixel colour fringe is not ink).
+fn strong(v: u16, bg: u16, fg: Option<u16>, n: i32) -> bool {
+    let Some(fg) = fg else { return true };
+    let (mut num, mut k) = (0f32, 0);
+    for &(s, m) in [(11, 31), (5, 63), (0, 31)].iter() {
+        let (a, b, f) = ((v >> s & m) as i32, (bg >> s & m) as i32, (fg >> s & m) as i32);
+        if f != b {
+            num += (a - b) as f32 / (f - b) as f32;
+            k += 1;
+        }
+    }
+    k == 0 || 4.0 * num >= n as f32 * k as f32
+}
+
+/// Owner bit of an ink pixel that is not solid (coverage under 15 of 15):
+/// the "glyphs do not touch" rule looks at solid pixels only.
+pub const FAINT: u32 = 1 << 31;
+/// Owner bit of a text pixel below its glyph's baseline (a descender): the
+/// 3 px inner-margin rule measures a text's box without them.
+pub const DESC: u32 = 1 << 30;
 
 /// Register one probed element (kind, background) of a composite window
 /// (stockfont::paint) and return its call id; `set` then selects, per
@@ -208,7 +242,14 @@ fn lcd_w16(addr: u32, v: u16) {
         if x < W && y < H {
             e.fb[y * W + x] = v;
             e.owner[y * W + x] = match e.call {
-                Some((id, bg, g)) if v != bg => id << 8 | g as u32,
+                // paint (Ink::over) marks a strong but not solid pixel with
+                // glyph | 0x80; label: by its colour against fg.
+                Some((id, bg, g)) if v != bg && strong(v, bg, e.fg, 2) => {
+                    // glyph | 0x80: not solid (paint), | 0x40: below the baseline.
+                    let faint = g != 255 && g & 0x80 != 0 || !strong(v, bg, e.fg, 4);
+                    let desc = g != 255 && g & 0x40 != 0;
+                    id << 8 | (if g == 255 { g } else { g & 0x3F }) as u32 | if faint { FAINT } else { 0 } | if desc { DESC } else { 0 }
+                }
                 _ => 0,
             };
         }

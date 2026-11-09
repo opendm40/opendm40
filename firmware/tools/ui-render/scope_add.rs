@@ -461,11 +461,27 @@ pub fn run(ck: &mut Checker, out: &str) {
         ("trig", stockfont::SC_F12, &["-1.23mA", "-999uA", "-99.9A", "-12.3kV"], &["-1.23kV", "-12.3kV", "-999mV"]),
         ("ch1", stockfont::SC_F16, &["AC V", "AC mV", "AC A", "AC mA", "AC uA"], &[]),
     ];
+    // The trigger badge drops a decimal from a level wider than 49 px
+    // (scope_ui::trig_badge): "-1.23mA" -> "-1.2mA".
+    let cut = |t: &str| -> String {
+        match t.find('.') {
+            Some(d) => {
+                let e = t[d..].find(|c: char| !c.is_ascii_digit() && c != '.').map_or(t.len(), |k| d + k);
+                let keep = if e - d > 2 { e - 1 } else { d };
+                format!("{}{}", &t[..keep], &t[e..])
+            }
+            None => t.to_string(),
+        }
+    };
     for (what, f, wave_t, stock_t) in pairs {
         ck.cases += 1;
-        let (ww, sw) = (wmax(f, wave_t), wmax(f, stock_t));
+        let wt: Vec<String> = wave_t.iter().map(|t| if what == "trig" && stockfont::text_width(f, t, 0) > 49 { cut(t) } else { t.to_string() }).collect();
+        let wt: Vec<&str> = wt.iter().map(|t| t.as_str()).collect();
+        let (ww, sw) = (wmax(f, &wt), wmax(f, stock_t));
         let lim = match what {
-            "vdiv" => 44 - 2,
+            // The badge text box (44 px), or what the stock texts already
+            // need there (an outline face: the block title adapts).
+            "vdiv" => (44 - 2).max(sw),
             "ch1" => 60 - 6,
             _ => sw,
         };

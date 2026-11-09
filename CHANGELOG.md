@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Text fonts:** menus, settings, dialogs, the history row, the scope texts and the units of the readings in Noto Sans (anti-aliased, one face for menus and dialogs); the small labels (MAX / AVG / MIN, the scale) in the sharp X11 6x13 bitmap font; the big digits stay stock.
+
 - **Scope: wide graph.** A swipe right on the right panel hides it; the graph and the measurement row take the whole width, with a 5th measurement (MF > Measure takes five). A swipe left from the right edge brings the panel back ([manual](docs/manual/README.md#the-scope-page)).
 
 - Continuity and diode: the green band says **BEEP**, not **SHORT**: in continuity it comes on below about 67 Ω, which is not always a short. Ω has no beep and no band.

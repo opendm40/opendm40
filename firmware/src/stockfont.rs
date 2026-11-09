@@ -126,6 +126,19 @@ mod data {
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut LUT_OK: bool = false;
 
+    /// Row cache of `Glyph::cov`: the last decoded row (key = glyph blob
+    /// address ^ its box) and a cursor per glyph, direct-mapped by address.
+    const RSLOTS: usize = 32;
+    pub struct RowCache {
+        key: usize,
+        y: u16,
+        row: [u8; MAXW],
+    }
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut RROW: RowCache = RowCache { key: 0, y: 0, row: [0; MAXW] };
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut RCUR: [(usize, Cur); RSLOTS] = [(0, Cur { pos: 0, src: 0, next: 0 }); RSLOTS];
+
     fn lut_init() {
         // Single-threaded, never from the ISR.
         let lut = unsafe { &mut *core::ptr::addr_of_mut!(LUT) };
@@ -182,8 +195,8 @@ mod data {
         }
 
         /// Coverage 0..15 of pixel (x, y) inside the glyph box, random access
-        /// (Ink::at, the scope markers: 1 bpp fonts). A HUF glyph decodes
-        /// its rows up to y (slow; the drawing paths use `row`).
+        /// (Ink::at, the scope markers). A HUF glyph: through the row cache
+        /// (`cov`; the drawing paths use `row`).
         pub fn alpha(&self, x: u32, y: u32) -> u8 {
             match self.fmt {
                 BIT1 => {
@@ -198,16 +211,33 @@ mod data {
                     }
                 }
                 RAW4 => self.nib(x * self.h as u32 + y),
-                _ => {
-                    if x >= self.w as u32 || y >= self.h as u32 {
-                        return 0;
-                    }
-                    let mut buf = [0u8; MAXW];
-                    let mut c = Cur::default();
-                    self.row(&mut c, y, &mut buf);
-                    buf.get(x as usize).copied().unwrap_or(0)
-                }
+                _ => self.cov(x, y),
             }
+        }
+
+        /// Coverage of pixel (x, y), random access. HUF glyphs: through the
+        /// row cache (one decoded row, the per-glyph cursors of RCUR), so a
+        /// window painted row by row decodes each glyph row once (Ink).
+        pub fn cov(&self, x: u32, y: u32) -> u8 {
+            if x >= self.w as u32 || y >= self.h as u32 {
+                return 0;
+            }
+            if matches!(self.fmt, BIT1 | RAW4) {
+                return self.alpha(x, y);
+            }
+            // Single-threaded (UI), never from the ISR.
+            let rc = unsafe { &mut *core::ptr::addr_of_mut!(RROW) };
+            let key = (self.blob.as_ptr() as usize) ^ ((self.h as usize) << 24) ^ ((self.w as usize) << 16);
+            if rc.key != key || rc.y != y as u16 {
+                let slot = unsafe { &mut (*core::ptr::addr_of_mut!(RCUR))[(key >> 2) % RSLOTS] };
+                if slot.0 != key {
+                    *slot = (key, Cur::default());
+                }
+                self.row(&mut slot.1, y, &mut rc.row);
+                rc.key = key;
+                rc.y = y as u16;
+            }
+            rc.row[x as usize % MAXW]
         }
 
         /// Column walk of row `y` for the formats with random access (not
@@ -333,8 +363,11 @@ mod data {
         fn begin(&self, c: &mut Cur) -> (u32, bool) {
             c.next = c.next.wrapping_add(1);
             let p = c.pos as u32;
-            if HUF_COPY_LEN > 0 && self.peek(p) >> (32 - HUF_COPY_LEN) == HUF_COPY_CODE {
-                c.pos += HUF_COPY_LEN as u16;
+            // The glyph's table set: t = its first context (0 or 4).
+            let k = (self.t as usize >> 2) & 1;
+            let (cl, cc) = (HUF_COPY_LEN[k], HUF_COPY_CODE[k]);
+            if cl > 0 && self.peek(p) >> (32 - cl) == cc {
+                c.pos += cl as u16;
                 return (c.src as u32, false);
             }
             c.src = c.pos;
@@ -363,7 +396,7 @@ mod data {
         /// is not in the table reads as one pixel of coverage 0.
         #[inline(always)]
         fn token(&self, p: &mut u32, ctx: usize, x: usize, w: usize) -> (u8, u8, usize) {
-            let ctx = ctx % HUF_CNT.len();
+            let ctx = (ctx + self.t as usize) % HUF_CNT.len();
             let w0 = self.peek(*p);
             // Codes of up to LUTK bits from the table (lut_init), longer
             // ones bit by bit from the per-length counts.
@@ -428,30 +461,63 @@ mod data {
                 lut_init();
             }
             let code = u16::try_from(code).ok()?;
-            let e = fd.entries;
-            let (mut lo, mut hi) = (0usize, e.len());
-            while lo < hi {
-                let mid = (lo + hi) / 2;
-                let c = e[mid].code;
-                if c == code {
-                    let g = &e[mid];
-                    return Some(Glyph {
-                        blob: fd.blob.get(g.off as usize..).unwrap_or(&[]),
-                        fmt: fd.fmt,
-                        w: g.w,
-                        h: g.h,
-                        adv: g.adv,
-                        yoff: g.yoff,
-                        t: g.t,
-                        ih: g.ih,
-                    });
-                } else if c < code {
-                    lo = mid + 1;
-                } else {
-                    hi = mid;
+            // The font's own glyphs, then those of its base fonts
+            // (font_base: 1 bpp, `dy` rows lower in this font's line box).
+            let (mut f, mut a, mut dy, mut keep) = (fd, self.0, 0i16, false);
+            loop {
+                let e = f.entries;
+                let (mut lo, mut hi) = (0usize, e.len());
+                while lo < hi {
+                    let mid = (lo + hi) / 2;
+                    let c = e[mid].code;
+                    if c == code {
+                        let g = &e[mid];
+                        let mut r = Glyph {
+                            blob: f.blob.get(g.off as usize..).unwrap_or(&[]),
+                            fmt: f.fmt,
+                            w: g.w,
+                            h: g.h,
+                            adv: g.adv,
+                            yoff: g.yoff,
+                            t: g.t,
+                            ih: g.ih,
+                        };
+                        if a != self.0 && keep {
+                            // A shared glyph as it is, its yoff moved.
+                            r.yoff = (g.yoff as i16 + dy) as i8;
+                        } else if a != self.0 {
+                            // The box of this font's own entries: the whole line.
+                            let top = f.line_h as i16 - f.descent - g.h as i16 - g.yoff as i16 + dy;
+                            r.t = (g.t as i16 + top) as u8;
+                            r.h = fd.line_h as u8;
+                            r.yoff = -fd.descent as i8;
+                        }
+                        return Some(r);
+                    } else if c < code {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                match font_base(a) {
+                    Some((b, d, lim, k)) if code < lim => {
+                        f = font_data(b)?;
+                        a = b;
+                        dy += d as i16;
+                        keep = k;
+                    }
+                    _ => break,
                 }
             }
-            fd_extra(self.0, code)
+            // The language's glyphs: this font's, else (a font drawn with
+            // another's glyphs) its base font's, moved as those.
+            fd_extra(self.0, code).or_else(|| match font_base(self.0) {
+                Some((b, d, _, true)) => fd_extra(b, code).map(|mut g| {
+                    g.yoff = (g.yoff as i16 + d as i16) as i8;
+                    g
+                }),
+                _ => None,
+            })
         }
     }
 
@@ -510,11 +576,19 @@ struct Placed {
     cur: Cur,
 }
 
+/// The spacing a call site asks for, capped for the font (data::sp_max:
+/// the outline faces hold their gaps in the advances).
+#[inline(always)]
+fn sp_of(font: Font, spacing: i8) -> i8 {
+    spacing.min(data::sp_max(font.0))
+}
+
 /// The text as drawn (translated at build time, src/lang.rs). ui-render with
 /// UIR_LANG checks every translation here: it fits `w` and `max` glyphs, has
 /// every glyph of `font`, and `font` is at least the language's MIN_LINE tall
 /// (tools/lang-render fails on a `wide` line).
 #[inline(always)]
+
 fn ui_text(font: Font, text: &str, w: i16, spacing: i8, max: usize) -> &str {
     #[cfg(lang_log)]
     lang_check(font, text, w, spacing, max);
@@ -756,6 +830,7 @@ fn blend(fg: Color, bg: Color, a: u8) -> Color {
 /// Draw `text` in `r` (background `bg` fills the whole rect, so a redraw
 /// replaces the old text without flicker).
 pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, spacing: i8) {
+    let spacing = sp_of(font, spacing);
     let text = ui_text(font, text, r.w, spacing, MAXG);
     if r.w <= 0 || r.h <= 0 {
         return;
@@ -784,6 +859,8 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     let lut = ramp(fg, bg);
     #[cfg(test)]
     crate::probe::begin(crate::probe::TEXT, bg);
+    #[cfg(test)]
+    crate::probe::fg(fg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     // One glyph row at a time (`Glyph::row`): `bi` = the glyph whose row y
     // is in `buf`.
@@ -800,8 +877,12 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
             while e <= x1 && cover[e as usize] == gi {
                 e += 1;
             }
+            // ui-render: a glyph's rows below its baseline are marked (0x40).
             #[cfg(test)]
-            crate::probe::sub(gi);
+            crate::probe::sub(match pl.get(gi as usize) {
+                Some(Some(p)) if y >= p.y + p.g.h as i16 + p.g.yoff as i16 => gi | 0x40,
+                _ => gi,
+            });
             let hit = match pl.get_mut(gi as usize) {
                 Some(Some(p)) if y >= p.y && y - p.y < p.g.h as i16 => Some(p),
                 _ => None,
@@ -871,6 +952,8 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
     let lut = ramp(fg, bg);
     #[cfg(test)]
     crate::probe::begin(crate::probe::TEXT, bg);
+    #[cfg(test)]
+    crate::probe::fg(fg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     let (x0, x1) = (x0 as i32, x1 as i32);
     let mut rows = [[0u8; MAXW]; 2];
@@ -989,6 +1072,7 @@ pub fn rbox(r: Rect, radius: i16, color: Color, outside: Color) {
 /// Draw only the glyph boxes of `text` placed in `r` (pixels outside the
 /// glyphs are left alone): for text over shapes such as rounded buttons.
 pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, spacing: i8) {
+    let spacing = sp_of(font, spacing);
     let text = ui_text(font, text, r.w, spacing, MAXG);
     if !lcd::rows_hit(r.y, r.y + r.h - 1) {
         return;
@@ -997,6 +1081,8 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
     let n = layout(font, r, text, align, spacing, &mut pl);
     #[cfg(test)]
     crate::probe::begin(crate::probe::TEXT, bg);
+    #[cfg(test)]
+    crate::probe::fg(fg);
     for (_i, p) in pl[..n].iter().enumerate() {
         let Some(p) = p else { continue };
         if p.g.w == 0 || p.g.h == 0 || p.x < 0 || p.y < 0 {
@@ -1043,9 +1129,17 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
     crate::probe::end();
 }
 
+/// `sp`, or one less when the text then fits `w` px and does not at `sp`
+/// (an outline face's text a pixel or two too wide for a stock box).
+pub fn fit_sp(font: Font, text: &str, w: i16, sp: i8) -> i8 {
+    let sp = sp_of(font, sp);
+    if text_width(font, text, sp) > w && text_width(font, text, sp - 1) <= w { sp - 1 } else { sp }
+}
+
 /// Width in pixels of `text` as `label` lays it out (pen advance plus the
 /// last glyph's width), e.g. to place a tag right before right-aligned text.
 pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
+    let spacing = sp_of(font, spacing);
     width_of(font, ui_text(font, text, i16::MAX, spacing, MAXG), spacing)
 }
 
@@ -1229,6 +1323,7 @@ impl Ink {
     /// advances line_h; align 0..8 as `label`; glyph top = line top + line_h
     /// - descent - h - yoff.
     pub fn new(font: Font, r: Rect, text: &str, align: u8, spacing: i8) -> Ink {
+        let spacing = sp_of(font, spacing);
         #[cfg(any(feature = "zh", feature = "ru", feature = "it", feature = "fr"))]
         let text = ui_text(font, text, r.w, spacing, INK_N);
         let mut k = Ink::none();
@@ -1298,6 +1393,57 @@ impl Ink {
         match char::from_u32(code) {
             Some(c) => Ink::new(font, r, c.encode_utf8(&mut b), align, 0),
             None => Ink::none(),
+        }
+    }
+
+    /// (glyph index, coverage) of the first glyph with coverage at (x, y),
+    /// or None.
+    #[inline]
+    pub fn cov(&self, x: i16, y: i16) -> Option<(u8, u8)> {
+        if !self.bx.has(x, y) {
+            return None;
+        }
+        for i in 0..self.n as usize {
+            let (g, gx, gy) = &self.g[i];
+            let (dx, dy) = (x - gx, y - gy);
+            let t = self.tw[i];
+            if dx >= 0 && dy >= 0 && dx < g.w as i16 + t && dy < g.h as i16 {
+                let mut c = g.cov(dx as u32, dy as u32);
+                if t > 0 && dx >= t {
+                    c = c.max(g.cov((dx - t) as u32, dy as u32));
+                }
+                if c != 0 {
+                    return Some((i as u8, c));
+                }
+            }
+        }
+        None
+    }
+
+    /// The text in `fg` over the pixel `under` = (colour, tag) the caller
+    /// paints there without it: blended by the coverage. The tag becomes `layer << 8 | glyph`
+    /// where the coverage reaches 8 of 15 (the ink the layout checks see),
+    /// else stays the under-pixel's.
+    #[inline]
+    pub fn over(&self, x: i16, y: i16, fg: Color, under: (Color, u16), layer: u16) -> (Color, u16) {
+        self.over_g(x, y, |_| fg, under, layer)
+    }
+
+    /// `over` with the text colour per glyph (`fg(glyph index)`).
+    #[inline]
+    pub fn over_g(&self, x: i16, y: i16, fg: impl Fn(u8) -> Color, under: (Color, u16), layer: u16) -> (Color, u16) {
+        match self.cov(x, y) {
+            Some((g, m)) => {
+                // Under 15 (not solid): glyph | 0x80 (ui-render touch rule).
+                let (gl, _, gy) = &self.g[g as usize];
+                let below = y >= gy + gl.h as i16 + gl.yoff as i16;
+                let g = g as u16 | if m < 15 { 0x80 } else { 0 } | if below { 0x40 } else { 0 };
+                // A faint pixel (m < 8) is no one's ink: the under-pixel's
+                // tag would make it shape ink in ui-render (its colour is
+                // not the shape's).
+                (blend(fg(g as u8 & 0x3F), under.0, m), if m >= 8 { layer << 8 | g } else { 0 })
+            }
+            None => under,
         }
     }
 
