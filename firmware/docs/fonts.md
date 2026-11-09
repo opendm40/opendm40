@@ -34,7 +34,7 @@ It has its own name because we changed glyphs: the OFL reserves the name
 | HIST | the DMM history row | `ter-u20b` |
 | F14 | small labels, MAX / AVG / MIN | `ter-u12b` |
 | SC_F16 | the scope menus, popups and right panel | `ter-u16b` (the stock 8 px pitch) |
-| SC_F12 | the scope bars, measurement cells, decode log | `ter-u12b` |
+| SC_F12 | the scope bars, measurement cells, decode log | `ter-u12b`, mostly F14's glyphs (section 2) |
 
 ASCII26 (dialogs), the big digits and units (F78, UNIT, LETTERS, F21,
 K_FONT) and the icons stay stock.
@@ -71,7 +71,8 @@ What can be dropped or packed without changing a pixel:
 
 * **Unused fonts.** The stock scope page's 20 px ASCII (0x08054148, the
   panel buttons) is not embedded: our panel and the strip's units too
-  wide for SC_DIGITS ("mWh") use SC_F16, the same face at 16 px.
+  wide for SC_DIGITS ("mWh") use SC_F16, the same face at 16 px. Of
+  G_08059428 only the up arrow (the generator's wave drop-down) is kept.
 * **Unused glyphs.** 232 glyphs are CJK / full-width (U+2E80 up): 216 in
   TEXT22, 16 in ASCII26, 16.2 KB of bitmaps. opendm40 is English only and
   no source string contains one. The ASCII fonts (TEXT22, F14, ASCII26,
@@ -83,8 +84,14 @@ What can be dropped or packed without changing a pixel:
 * **Run structure.** 4 bpp glyphs are mostly 0 and 15 with 1-3 AA pixels at
   each edge, and stems repeat row after row: row-major runs compress them
   2.5-5x (F78 5.1x).
-* **Duplicates** across fonts: 5 glyphs, ~0.4 KB after compression, not
-  worth an indirection per glyph.
+* **Duplicates** across the stock fonts: 5 glyphs, ~0.4 KB after
+  compression, not worth an indirection per glyph.
+* **Shared glyphs.** F14 and SC_F12 are both DM40 Term `ter-u12b`.
+  SC_F12 stores 19 of its 96 glyphs (the space, 0x7F and the ones F14 has
+  in narrower stock cells: punctuation, I, j) and takes the others below
+  0x80 from F14 (`SHARE` in `mkstockfont.py`, `font_base` in
+  `stockfont.rs`), placed in its own line box with the same fields as
+  before: -1.1 KB of region B.
 
 ## 2a. Glyphs of our own
 
