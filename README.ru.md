@@ -178,9 +178,10 @@ opendm40 распространяется под лицензией MIT ([LICENS
   образ ради штатного внешнего вида
   ([`firmware/src/stockfont_data.rs`](firmware/src/stockfont_data.rs),
   [как они сделаны](firmware/docs/fonts.md)).
-- Шрифт меню и подписей DM40 Term на основе Terminus Font Димитра Жекова:
-  SIL Open Font License 1.1
-  ([`firmware/fonts/OFL-DM40Term.txt`](firmware/fonts/OFL-DM40Term.txt)).
+- Текстовые шрифты, отрисованные из Noto Sans: SIL Open Font License 1.1
+  ([`firmware/fonts/OFL-NotoSans.txt`](firmware/fonts/OFL-NotoSans.txt));
+  мелкий шрифт подписей из X11 misc-fixed 6x13, общественное достояние
+  ([`firmware/fonts/X11-misc-fixed.txt`](firmware/fonts/X11-misc-fixed.txt)).
 - [`hw/photos/`](hw/photos/README.md) и [`hw/datasheets/`](hw/datasheets/README.md):
   сторонние материалы, авторские права на которые принадлежат их владельцам
   (автору обзора, производителям микросхем), хранятся для справки.

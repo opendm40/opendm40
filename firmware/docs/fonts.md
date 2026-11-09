@@ -1,8 +1,9 @@
 # Fonts: the stock bitmap fonts, their storage and cost
 
-The icons, the big readings and the dialogs are drawn with the stock DM40
-V2.6 bitmap fonts, the menu and label texts with DM40 Term (section 1a); both
-are copied into the image at build time and stored compressed.
+The icons and the large digits and units of the readings are drawn with the
+stock DM40 V2.6 bitmap fonts, the texts with bitmaps rendered from Noto Sans
+and X11 misc-fixed at build time (section 1a); all are stored compressed in
+the image.
 This page describes where they come from, the storage format, where they
 live in flash, and why the storage is lossless.
 
@@ -21,42 +22,45 @@ threshold compositing of the scope page (`Ink`), the half-size +1 digit
 (`label_half`) and opendm40's own W / k glyphs
 ([`src/stockfont_w.rs`](../src/stockfont_w.rs)) for the power meter.
 
-## 1a. DM40 Term
+## 1a. Text fonts: Noto Sans and X11 6x13
 
-The text fonts are DM40 Term, based on [Terminus Font](https://terminus-font.sourceforge.net/)
-4.49.1 by Dimitar Zhekov (SIL OFL 1.1, [`fonts/OFL-DM40Term.txt`](../fonts/OFL-DM40Term.txt)).
-It has its own name because we changed glyphs: the OFL reserves the name
-"Terminus Font" for the unmodified font.
+The text fonts are rendered at build time from two fonts that are not in the
+repo; [`tools/fetch-fonts.sh`](../tools/fetch-fonts.sh) downloads them into
+`target/` and checks their SHA-256:
 
-| font | draws | DM40 Term from |
+* [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) 2.015, the
+  variable `NotoSans[wdth,wght].ttf` of google/fonts (SIL OFL 1.1,
+  [`fonts/OFL-NotoSans.txt`](../fonts/OFL-NotoSans.txt));
+* X11 misc-fixed `6x13.bdf` of xorg font-misc-misc 1.1.3 (public domain,
+  [`fonts/X11-misc-fixed.txt`](../fonts/X11-misc-fixed.txt)).
+
+| font | draws | from |
 |---|---|---|
-| TEXT22 | menus, settings, the generator page | `ter-u22b` |
-| HIST | the DMM history row | `ter-u20b` |
-| F14 | small labels, MAX / AVG / MIN | `ter-u12b` |
-| SC_F16 | the scope menus, popups and right panel | `ter-u16b` (the stock 8 px pitch) |
-| SC_F12 | the scope bars, measurement cells, decode log | `ter-u12b`, mostly F14's glyphs (section 2) |
+| TEXT22, ASCII26 | menus, settings, the generator page, dialogs (one set of glyphs) | Noto Sans Medium, caps 14 px |
+| HIST | the DMM history row | Noto Sans Medium, 87.5 % width, caps 13 px |
+| F14 | small labels, MAX / AVG / MIN, the scale | X11 6x13, 1 bpp, caps 9 px, 6 px cells |
+| SC_F16, SC_F12 | the scope menus, popups, bars and cells (one set) | Noto Sans SemiBold, caps 10 px |
+| SC_C | the scope status letters | Noto Sans Bold, caps 12 px |
+| F21, K_FONT, LETTERS | the units and letters of the readings | Noto Sans Medium, caps 20 / 22 px |
 
-ASCII26 (dialogs), the big digits and units (F78, UNIT, LETTERS, F21,
-K_FONT) and the icons stay stock.
+The big digits (F78, UNIT) and the icons stay stock.
 
-[`tools/mkterm.py`](../tools/mkterm.py) (called by `mkstockfont.py` and
-`mklang_x.py`) places each BDF glyph at its native size, never scaled: the
-ink on the stock baseline, moved up or down until the ascenders and
-descenders fit the line box; digits share one advance; in the fixed-cell
-fonts F14 and HIST a glyph wider than its stock cell stays stock (HIST: M).
-Our changes:
+[`tools/mkttf.py`](../tools/mkttf.py) renders the Noto places: FreeType light
+autohinting at the em where H is the cap height, 2 bpp gray (coverage 0 / 5 /
+10 / 15), whole-pixel advances, one advance for the digits where live
+numbers are shown; the line box grows when the face's ascenders or
+descenders do not fit the stock one. A font after the first of a place draws
+with the first one's glyphs (`font_base` in `stockfont.rs`). 2 bpp is enough
+for these sizes and halves the data of 4 bpp.
 
-* at 12 px (F14, SC_F12) the 0 without Terminus's slash, one column
-  narrower than the O; the larger fonts keep Terminus's 0;
-* the stock Ω (Terminus's is narrow: "600Ω" read "6000"), its feet on the
-  digits' baseline;
-* ℃ / ℉: Terminus's ring and C / F, the ring on the caps' top row.
+[`tools/mkterm.py`](../tools/mkterm.py) places the 6x13 BDF glyphs of F14 at
+their native size (1 bpp, sharp on the grey REL box, where a 2 bpp face
+looked blurred), the ink on the stock baseline. Our change: the period's
+3 x 3 cross one row higher, on the baseline (it reached a row below the
+others). The stock Ω stays (its feet on the baseline).
 
-Cyrillic: Terminus's, with its alternatives alt/ij1 and alt/dv1 (и й д в in
-the Russian shapes). The BDF files are not in the repo:
-[`tools/fetch-terminus.sh`](../tools/fetch-terminus.sh) downloads the release
-tarball (SHA-256 checked), applies the two alternatives and puts the files in
-`target/terminus-font-4.49.1`; `mkterm.py` checks each file's SHA-256.
+Both generators are called by `mkstockfont.py` and `mklang_x.py` (the
+language glyphs in the same faces).
 
 ## 2. The stock fonts
 
@@ -86,20 +90,17 @@ What can be dropped or packed without changing a pixel:
   2.5-5x (F78 5.1x).
 * **Duplicates** across the stock fonts: 5 glyphs, ~0.4 KB after
   compression, not worth an indirection per glyph.
-* **Shared glyphs.** F14 and SC_F12 are both DM40 Term `ter-u12b`.
-  SC_F12 stores 19 of its 96 glyphs (the space, 0x7F and the ones F14 has
-  in narrower stock cells: punctuation, I, j) and takes the others below
-  0x80 from F14 (`SHARE` in `mkstockfont.py`, `font_base` in
-  `stockfont.rs`), placed in its own line box with the same fields as
-  before: -1.1 KB of region B.
+* **Shared glyphs.** The fonts of one Noto place (section 1a) store one
+  set of glyphs: SC_F12 draws with SC_F16's, ASCII26 with TEXT22's,
+  K_FONT with F21's (`font_base` in `stockfont.rs`), each placed in its own
+  line box.
 
 ## 2a. Glyphs of our own
 
-The unit fonts without a lowercase k (UNIT, LETTERS, F21, K_FONT, HIST) take
-ours ([`tools/mkwglyph.py`](../tools/mkwglyph.py), `stockfont_w.rs`): "kW",
-"kΩ", "kHz" instead of the stock "KW"; ASCII26 (the dialogs) an Ω; TEXT22
-(the menu text) ℃ and ℉; in the DM40 Term fonts (section 1a) mkterm.py
-replaces HIST's W / k and TEXT22's ℃ / ℉ with its own.
+UNIT, the stock unit font without a lowercase k, takes ours
+([`tools/mkwglyph.py`](../tools/mkwglyph.py), `stockfont_w.rs`): "kW",
+"kΩ", "kHz" instead of the stock "KW". The Noto places (section 1a) draw
+their W, k, Ω, ℃, ℉ and σ from the face.
 
 ## 3. Storage
 
@@ -186,10 +187,9 @@ image (features `zh`, `ru`, `it`, `fr`), resolved at build time (`tr!`); none in
 the default image.
 Chinese: 14 px 1 bpp glyphs in one set for every font of 15 px and up, each hanzi
 stored as U+0400 + its index. Russian: letters shaped like a Latin one use the
-Latin glyph (and one byte of text); the others are DM40 Term's in its fonts, in
-ASCII26 Liberation Sans sized by `fit_size` in
-[`mklang_x.py`](../tools/mklang_x.py). Italian, French: the font's letter plus
-an accent.
+Latin glyph (and one byte of text); the others are rendered in the font's
+face (Noto Sans, or X11 6x13 in F14) by [`mklang_x.py`](../tools/mklang_x.py).
+Italian, French: the font's letter plus an accent.
 
 ## 4. Options not taken
 

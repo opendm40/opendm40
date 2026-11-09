@@ -2,11 +2,12 @@ Glyphs in firmware/src/lang_zh.rs (bitmaps rendered at 14 px):
 Noto Sans CJK SC. Copyright 2014-2021 Adobe (http://www.adobe.com/), with
 Reserved Font Name 'Source'.
 
-Glyphs in firmware/src/lang_ru.rs (Cyrillic letters without a Latin look-alike)
-of the font ASCII26 (the others: DM40 Term, firmware/fonts/OFL-DM40Term.txt):
-Liberation Sans. Digitized data copyright (c) 2010 Google Corporation with
-Reserved Font Arimo, Tinos and Cousine. Copyright (c) 2012 Red Hat, Inc. with
-Reserved Font Name Liberation.
+Glyphs in firmware/src/lang_ru.rs, lang_it.rs, lang_fr.rs (Cyrillic letters
+without a Latin look-alike, accented letters) of the text fonts but F14:
+Noto Sans, Copyright 2022 The Noto Project Authors
+(https://github.com/notofonts/latin-greek-cyrillic), as the fonts themselves
+(firmware/fonts/OFL-NotoSans.txt). F14's: X11 misc-fixed 6x13, public domain
+(firmware/fonts/X11-misc-fixed.txt).
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

@@ -168,9 +168,10 @@ Not under the MIT licence:
   image for the stock look
   ([`firmware/src/stockfont_data.rs`](firmware/src/stockfont_data.rs),
   [how they are made](firmware/docs/fonts.md)).
-- The menu and label text font DM40 Term, based on Terminus Font by Dimitar
-  Zhekov: SIL Open Font License 1.1
-  ([`firmware/fonts/OFL-DM40Term.txt`](firmware/fonts/OFL-DM40Term.txt)).
+- The text fonts rendered from Noto Sans: SIL Open Font License 1.1
+  ([`firmware/fonts/OFL-NotoSans.txt`](firmware/fonts/OFL-NotoSans.txt)); the
+  small label font from X11 misc-fixed 6x13, public domain
+  ([`firmware/fonts/X11-misc-fixed.txt`](firmware/fonts/X11-misc-fixed.txt)).
 - [`hw/photos/`](hw/photos/README.md) and [`hw/datasheets/`](hw/datasheets/README.md):
   third-party material under its owners' copyright (the review author, the
   chip manufacturers), kept for reference.
