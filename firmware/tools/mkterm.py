@@ -57,8 +57,7 @@ FILES = {
 }
 # Font -> BDF file. TEXT22: 24 px has the stock cap height (15) but its 12 px
 # cells overflow the menus; 22 px (cap 14, 11 px cells) fits.
-FACE = {'TEXT22': 'ter-u22b.bdf', 'HIST': 'ter-u20b.bdf', 'F14': 'ter-u12b.bdf',
-        'SC_F12': 'ter-u12b.bdf', 'SC_F16': 'ter-u16b.bdf'}
+FACE = {'F14': 'x11-6x13.bdf'}
 # Fonts in the stock fixed cells (tight boxes): no glyph wider than its cell.
 CELL = ('HIST', 'F14')
 OHM = 0x3A9

@@ -599,8 +599,6 @@ def main():
         loaded, xshare, xown, face = mkttf.term_restyle(loaded)
         print('stockfont_w.rs: %d rows dropped' % mkttf.drop_own(wrs, None, xown, addr))
     else:
-        if mkttf.SCEN == 'v14':
-            mkterm.FACE['F14'] = 'x11-6x13.bdf'
         if mkttf.SCEN:
             loaded, xshare, xown = mkttf.restyle(loaded)
             faced = {n for n, _, v in loaded if isinstance(v[2], str)}
