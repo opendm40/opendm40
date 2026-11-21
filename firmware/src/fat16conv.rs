@@ -16,7 +16,8 @@
 //! old cluster 2 (blocks 7, 8) becomes the end of the root, so it must be
 //! free or the "System Volume Information" directory, which is dropped
 //! (Windows makes it again). The new FAT holds the root files' chains only,
-//! so the dropped directory's clusters and lost clusters come out free.
+//! each as long as its file's size needs (fsck / chkdsk clean), so the
+//! dropped directory's clusters and lost clusters come out free.
 //! Any other directory (cluster numbers inside) or anything unexpected:
 //! nothing is written. The last new cluster (block 4095, outside the old
 //! volume) is marked bad, so a byte the stock firmware may keep there is
@@ -46,7 +47,10 @@ pub fn last() -> u8 {
 /// native.rs pre_main: before fatren and calbackup (they want FAT16).
 #[cfg(target_os = "none")]
 #[inline(never)]
-pub fn boot() {
+pub fn boot(dry: bool) {
+    if dry {
+        return; // fatren-dry-run: no disk writes
+    }
     let mut disk = crate::spiflash::SpiFlash::new();
     let r = run(&mut disk, crate::diskbuf::blocks());
     LAST.store(r as u8, Ordering::Relaxed);
@@ -106,43 +110,79 @@ fn is_svi(e: &[u8]) -> bool {
     e[11] & 0x10 != 0 && le16(e, 26) == 2 && &e[..8] == b"SYSTEM~1"
 }
 
-/// Check (`fix` false) or translate (`fix` true) one root block. Check:
-/// false = refuse. Translate: clusters c -> 2c-4, the SVI entry and its
-/// long-name entries deleted.
-fn root_block(b: &mut [u8], fix: bool) -> bool {
+/// No entry index (`root_block` state).
+const NONE: u32 = u32::MAX;
+
+/// Check (`fix` false) or translate (`fix` true) one root block; `base`:
+/// its first entry's index in the root (0..511). Check: false = refuse;
+/// `svi` gets the SVI entry's index range with its long-name entries (they
+/// may start in the block before), `lfn` carries a long-name run between
+/// blocks. Translate: clusters c -> 2c-4, the `svi` range deleted.
+fn root_block(b: &mut [u8], base: u32, svi: &mut (u32, u32), lfn: &mut u32, fix: bool) -> bool {
     for i in 0..BLK / 32 {
+        let k = base + i as u32;
         let e = &mut b[i * 32..i * 32 + 32];
+        if fix {
+            if (svi.0..=svi.1).contains(&k) {
+                e[0] = 0xE5;
+                continue;
+            }
+            if e[0] == 0 {
+                break;
+            }
+            if e[0] == 0xE5 || e[11] == 0x0F || e[11] & 0x08 != 0 {
+                continue;
+            }
+            let c = le16(e, 26);
+            if c != 0 {
+                let n = 2 * c - 4;
+                e[26] = n as u8;
+                e[27] = (n >> 8) as u8;
+            }
+            continue;
+        }
         if e[0] == 0 {
             break;
         }
-        if e[0] == 0xE5 || e[11] == 0x0F || e[11] & 0x08 != 0 {
-            continue; // deleted, long name, volume label
+        if e[0] == 0xE5 {
+            *lfn = NONE;
+            continue; // deleted
+        }
+        if e[11] == 0x0F {
+            if *lfn == NONE {
+                *lfn = k;
+            }
+            continue; // long name
+        }
+        let first = core::mem::replace(lfn, NONE);
+        if e[11] & 0x08 != 0 {
+            continue; // volume label
         }
         let c = le16(e, 26);
         if le16(e, 20) != 0 {
             return false;
         }
         if is_svi(e) {
-            if fix {
-                e[0] = 0xE5;
-                let mut j = i;
-                while j > 0 && b[(j - 1) * 32 + 11] == 0x0F && b[(j - 1) * 32] != 0xE5 {
-                    j -= 1;
-                    b[j * 32] = 0xE5;
-                }
-            }
+            *svi = (if first == NONE { k } else { first }, k);
             continue;
         }
         if e[11] & 0x10 != 0 || c == 1 || c == 2 || c >= OLD_CL + 2 {
             return false; // a directory, or a cluster number out of place
         }
-        if fix && c != 0 {
-            let n = 2 * c - 4;
-            e[26] = n as u8;
-            e[27] = (n >> 8) as u8;
-        }
     }
     true
+}
+
+/// A bit per old cluster.
+struct Bits([u32; (OLD_CL as usize + 2).div_ceil(32)]);
+
+impl Bits {
+    fn get(&self, c: u32) -> bool {
+        self.0[c as usize / 32] & 1 << (c % 32) != 0
+    }
+    fn set(&mut self, c: u32) {
+        self.0[c as usize / 32] |= 1 << (c % 32);
+    }
 }
 
 /// Convert the volume if it is the FAT12 one. `bufs`: three 4 KiB blocks
@@ -160,9 +200,15 @@ pub fn run(dev: &mut dyn BlockDevice, bufs: &mut [[u8; BLK]; 3]) -> Res {
     // `a`): only those go to the new FAT, so the SVI directory's clusters
     // and lost clusters come out free. A chain that leaves the volume,
     // meets cluster 2, loops or crosses another: refuse.
-    let mut used = [0u32; (OLD_CL as usize + 2).div_ceil(32)];
+    // A file's new chain is as long as its size needs (at least one
+    // cluster): its last old cluster's second half is freed when the size
+    // ends in the first (`half`), a longer chain is cut (`last`: the end).
+    let mut used = Bits([0; (OLD_CL as usize + 2).div_ceil(32)]);
+    let mut half = Bits([0; (OLD_CL as usize + 2).div_ceil(32)]);
+    let mut last = Bits([0; (OLD_CL as usize + 2).div_ceil(32)]);
+    let (mut svi, mut lfn) = ((NONE, 0), NONE);
     for lba in 3..7 {
-        if !dev.read_block(lba, f1) || !root_block(f1, false) {
+        if !dev.read_block(lba, f1) || !root_block(f1, (lba - 3) * 128, &mut svi, &mut lfn, false) {
             return Res::Refused;
         }
         for e in f1.chunks(32) {
@@ -173,17 +219,27 @@ pub fn run(dev: &mut dyn BlockDevice, bufs: &mut [[u8; BLK]; 3]) -> Res {
                 continue;
             }
             let mut c = le16(e, 26);
+            let need = (le16(e, 28) | le16(e, 30) << 16).div_ceil(BLK as u32).max(1);
+            let mut have = 0;
             while c != 0 {
-                if !(3..OLD_CL + 2).contains(&c) || used[c as usize / 32] & 1 << (c % 32) != 0 {
+                if !(3..OLD_CL + 2).contains(&c) || used.get(c) {
                     return Res::Refused;
                 }
-                used[c as usize / 32] |= 1 << (c % 32);
+                used.set(c);
+                have += 2;
                 let v = fat12(a, c);
-                c = match v {
-                    0xFF8.. => 0,
-                    0 => return Res::Refused,
-                    v => v,
-                };
+                if have > need {
+                    half.set(c);
+                    break;
+                }
+                if have == need || v >= 0xFF8 {
+                    last.set(c);
+                    break;
+                }
+                if v == 0 {
+                    return Res::Refused;
+                }
+                c = v;
             }
         }
     }
@@ -193,7 +249,7 @@ pub fn run(dev: &mut dyn BlockDevice, bufs: &mut [[u8; BLK]; 3]) -> Res {
     let set = |f1: &mut [u8; BLK], f2: &mut [u8; BLK], n: u32, v: u32| {
         if n < 2048 { put16(f1, n, v) } else { put16(f2, n - 2048, v) }
     };
-    set(f1, f2, 0, 0xFFF8);
+    set(f1, f2, 0, 0xFF00 | (fat12(a, 0) & 0xFF));
     set(f1, f2, 1, 0xFFFF);
     // Block 4095: not in the old volume.
     set(f1, f2, NEW_CL + 1, 0xFFF7);
@@ -203,9 +259,11 @@ pub fn run(dev: &mut dyn BlockDevice, bufs: &mut [[u8; BLK]; 3]) -> Res {
         if v == 0xFF7 {
             set(f1, f2, n, 0xFFF7);
             set(f1, f2, n + 1, 0xFFF7);
-        } else if used[c as usize / 32] & 1 << (c % 32) != 0 {
+        } else if half.get(c) {
+            set(f1, f2, n, 0xFFFF);
+        } else if used.get(c) {
             set(f1, f2, n, n + 1);
-            set(f1, f2, n + 1, if v >= 0xFF8 { 0xFFFF } else { 2 * v - 4 });
+            set(f1, f2, n + 1, if last.get(c) { 0xFFFF } else { 2 * v - 4 });
         }
     }
     // Root: new 8..5 from old 6..3, translated.
@@ -213,7 +271,7 @@ pub fn run(dev: &mut dyn BlockDevice, bufs: &mut [[u8; BLK]; 3]) -> Res {
         if !dev.read_block(lba - 2, a) {
             return Res::Failed;
         }
-        root_block(a, true);
+        root_block(a, (lba - 5) * 128, &mut svi, &mut lfn, true);
         if !dev.write_block(lba, a) {
             return Res::Failed;
         }

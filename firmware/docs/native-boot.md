@@ -1890,7 +1890,8 @@ FATs, 2044 clusters), which no opendm40 disk writer takes ("No disk"). On
 the first boot it is made the DM40 FAT16 volume in place: the data blocks
 stay where they are (old cluster c = new clusters 2c-4, 2c-3), only blocks
 0..8 (boot sector, FATs, root) are rewritten, "System Volume Information"
-is dropped, the files are kept. Anything else on it (a subdirectory, a
+is dropped, the files are kept, each chain as long as its size needs.
+Anything else on it (a subdirectory, a
 broken chain): nothing is written. `DBG:FLASH?` last field: 0 not FAT12,
 1 refused, 2 converted, 3 failed. Host test:
 [`tools/fat16conv-test/run.sh`](../tools/fat16conv-test/run.sh) (optionally

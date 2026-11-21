@@ -236,6 +236,10 @@ fn read16(img: &Img) -> (fatren::Vol, BTreeMap<String, Vec<u8>>, Vec<u8>) {
             n += 1;
             assert!(n < 5000);
         }
+        // fsck.fat: the chain as long as the size needs (an empty file: none
+        // or one cluster).
+        let need = size.div_ceil(B);
+        assert!(n == need || (need == 0 && n <= 1), "{name}: {n} clusters for {size} B");
         data.truncate(size);
         out.insert(name, data);
     }
@@ -308,7 +312,42 @@ fn main() {
     t("bad cluster 60 bad", f(2 * 60 - 4) == 0xFFF7 && f(2 * 60 - 3) == 0xFFF7);
     t("block 4095 (cluster 4088) bad", f(4088) == 0xFFF7);
     t("old 2045 -> 4086, 4087", f(4086) == 4087 && f(4087) == 0xFFFF);
+    t("CONFIG (432 B, old 71): new 138 the end, 139 free", f(138) == 0xFFFF && f(139) == 0);
     t("FAT media", f(0) == 0xFFF8 && f(1) == 0xFFFF);
+    // 1b. The SVI entry first in root block 2, its long name at the end of
+    // block 1; media F0.
+    let mut img = fat12_image();
+    let (svi_at, lfn_at) = (3 * B + 32, 3 * B + 2 * 32);
+    let svi_e: Vec<u8> = img.d[3 * B + 3 * 32..3 * B + 4 * 32].to_vec();
+    let l2: Vec<u8> = img.d[svi_at..svi_at + 32].to_vec();
+    let l1: Vec<u8> = img.d[lfn_at..lfn_at + 32].to_vec();
+    for o in [svi_at, lfn_at, 3 * B + 3 * 32] {
+        img.d[o] = 0xE5;
+    }
+    let (b1, b2) = (4 * B, 5 * B);
+    img.d[b1 - 64..b1 - 32].copy_from_slice(&l2);
+    img.d[b1 - 32..b1].copy_from_slice(&l1);
+    img.d[b2..b2 + 32].copy_from_slice(&svi_e);
+    img.d[4 * B - 96] = 0xE5; // a deleted entry before them (no end marker in block 1)
+    for o in (3 * B + 9 * 32..4 * B - 96).step_by(32) {
+        if img.d[o] == 0 {
+            img.d[o] = 0xE5;
+        }
+    }
+    img.d[0x15] = 0xF0;
+    for fat in [B, 2 * B] {
+        img.d[fat] = 0xF0;
+    }
+    let r = conv(&mut img);
+    t(&format!("SVI across root blocks: converted ({r:?})"), r == Res::Done);
+    let (_, after, fat) = read16(&img);
+    t("SVI across root blocks: files same", files().iter().enumerate().all(|(i, (name, _, size))| {
+        after.get(&String::from_utf8_lossy(name).to_string()) == Some(&pattern(i as u32 + 1, *size as usize))
+    }));
+    let (n1, n2) = (6 * B, 7 * B);
+    t("SVI across root blocks: entry and both long-name entries deleted",
+      img.d[n2] == 0xE5 && img.d[n1 - 32] == 0xE5 && img.d[n1 - 64] == 0xE5);
+    t("media F0: FAT[0] FFF0", le16(&fat, 0) == 0xFFF0);
     // 2. Again: nothing.
     let r = conv(&mut img);
     t(&format!("second run NotFat12, no write ({r:?})"), r == Res::NotFat12 && img.writes.is_empty());
