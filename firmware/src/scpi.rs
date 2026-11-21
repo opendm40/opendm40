@@ -704,7 +704,9 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           total_ms,slices_frozen,blocks_erased, then the
 ///                           idle-time preparation (`prep_stats`): state (0
 ///                           waiting, 1 working, 2 ready, 3 off),
-///                           clusters_ready,erases_since_boot
+///                           clusters_ready,erases_since_boot, then the FAT12
+///                           conversion at boot (fat16conv.rs): 0 not FAT12,
+///                           1 refused, 2 converted, 3 failed
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
 ///                           as a crash (DBG:BOOT? crash word); opendm40 reboots
 ///   DBG:RESET               reboot opendm40 (SW reset)

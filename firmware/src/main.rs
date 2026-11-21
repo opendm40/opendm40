@@ -56,6 +56,7 @@ mod cring;
 mod scope;
 mod decode;
 mod hwtrig;
+mod fat16conv;
 mod scope_meas;
 mod scope_ui;
 mod scope_ch2;
@@ -1034,7 +1035,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         scpi.put_bytes(&t[..6]);
                         let (st, pp) = (screenshot::stats(), screenshot::prep_stats());
-                        for v in [msc::BlockDevice::block_count(&disk), disk.failed() as u32, st[0], st[1], st[2], st[3], pp[0], pp[1], pp[2]] {
+                        for v in [msc::BlockDevice::block_count(&disk), disk.failed() as u32, st[0], st[1], st[2], st[3], pp[0], pp[1], pp[2], fat16conv::last() as u32] {
                             scpi.put_bytes(b",");
                             let s = dmm::format(&mut t, v as f32, 0);
                             scpi.put_bytes(s.as_bytes());

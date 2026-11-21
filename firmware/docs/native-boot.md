@@ -1883,6 +1883,19 @@ never two live entries with the same name or a live entry on freed clusters.
 
 `fatren-dry-run` only reports.
 
+**The FAT12 disk of the later units** ([`src/fat16conv.rs`](../src/fat16conv.rs),
+before fatren). Units with the BoyaMicro BY25Q128ES come with a
+Windows-made FAT12 volume on the same 16 MiB (2 sectors per cluster, 1-block
+FATs, 2044 clusters), which no opendm40 disk writer takes ("No disk"). On
+the first boot it is made the DM40 FAT16 volume in place: the data blocks
+stay where they are (old cluster c = new clusters 2c-4, 2c-3), only blocks
+0..8 (boot sector, FATs, root) are rewritten, "System Volume Information"
+is dropped, the files are kept. Anything else on it (a subdirectory, a
+broken chain): nothing is written. `DBG:FLASH?` last field: 0 not FAT12,
+1 refused, 2 converted, 3 failed. Host test:
+[`tools/fat16conv-test/run.sh`](../tools/fat16conv-test/run.sh) (optionally
+with a real `SPIFLASH.BIN`).
+
 **Host test:** [`tools/fatren-test/run.sh`](../tools/fatren-test/run.sh). It uses mkfs.fat images in
 the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
 - **Rename** (update files are real packed images, `dm40fw.py pack`; the

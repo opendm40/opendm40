@@ -223,6 +223,9 @@ fn pre_main(dry: bool) {
     // whose update header equals the 0x08008000 marker the loader wrote (none
     // if the marker is not valid); any other dm40*.bin is staged and stays.
     // Before USB exists. No reset-cause gate (review 2026-10-13 H1).
+    // The later units' FAT12 disk made the DM40 FAT16 one (fat16conv.rs),
+    // before anything that writes the disk.
+    crate::fat16conv::boot();
     let marker = if boot::marker_valid() {
         let mut m = [0u8; 12];
         for (d, w) in m.chunks_mut(4).zip(boot::marker()) {

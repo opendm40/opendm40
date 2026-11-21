@@ -7,6 +7,14 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **"No disk" on newer units** (BoyaMicro BY25Q128ES SPI flash): they come
+  with a FAT12 disk, opendm40 needs the DM40 FAT16 one. The first boot
+  converts it in place and keeps the files (LOGO.JPG, CONFIG.BIN, ...);
+  screenshots, records, logs and saved settings then work. From
+  [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40).
+
 ## v0.4.1 (2026-11-06)
 
 A bug-fix release: an update or a restart from the scope or generator page
