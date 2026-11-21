@@ -57,5 +57,8 @@ Not included:
 - TC1746B6 divider network: maker not identified.
 - Hynitron CST touch controller (exact model unknown), Goodix GT1158, Jieli
   BP2A838: no official public datasheets found.
-- SGM3157, RUH30J51M, EL3H7, FMMT619, LT61-1xx transformers, the power-path
+- SGM3157: SG Micro, https://www.sg-micro.com/product/SGM3157 (not stored).
+- TPH2501 (3PEAK): https://en.sekorm.com/doc/1002961.html (not stored; no
+  3PEAK URL recorded).
+- RUH30J51M, EL3H7, FMMT619, LT61-1xx transformers, the power-path
   parts: not searched yet (markings from the BOM / chat reports only).

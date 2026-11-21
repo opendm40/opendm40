@@ -42,6 +42,15 @@ manual V1.5 ([ManualsLib](https://www.manualslib.com/manual/3720530/Alientek-Dm4
 [`firmware/docs/user-feedback.md`](../firmware/docs/user-feedback.md) (reports from the DM40 owners' Telegram chat [@S2084K](https://t.me/S2084K),
 cited by message number).
 
+Two teardown sources for the scope and generator parts:
+
+- [E1]: EEVblog's top-side photo of a V1.2 board with the shield cans off,
+  [Flickr 54962977145](https://www.flickr.com/photos/eevblog/54962977145) (6000 x 3376), from the
+  [EEVblog 1723 review](https://www.youtube.com/watch?v=VXbEidxkjAU).
+- [V1]: the video teardown [正点原子DM40C内部电路拆解](https://www.youtube.com/watch?v=bUCSSGHjC3g),
+  9:00..11:10: names each scope / generator chip with its datasheet; it does
+  not trace the circuit.
+
 ## Contents
 
 - [Block diagram](#block-diagram)
@@ -98,9 +107,9 @@ The same as text:
   (Hynitron 0x5A, plus 4 touch keys) on I2C2; [W25Q128JV](datasheets/winbond-w25q128jv-revI.pdf) 16 MiB (USB disk) on SPI1; Jieli BP2A838 BT
   (24 MHz crystal, PCB antenna) on UART4; buzzer PWM on TIM14 PA7; debug
   header: UART PA2 / PA3, SWD PA13 / PA14; scope: CHA jack -> /50 relay PC13, AC/DC
-  PE3, offset PC8 -> 4051 + op amp 8091 gain -> [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) 10-bit 50 MS/s on PB0..PB9, clocked by
+  PE3, offset PC8 -> 4051 + op amp GS8091 gain -> GS8591 driver -> [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) 10-bit 50 MS/s on PB0..PB9, clocked by
   PC6 at 50 MHz; generator: DAC0 PA4 or TIM12 PB14 -> SGM3157 (PB12) ->
-  output stage -> GEN jack; rails PE2 (to the isolated supplies) and PC4 (scope / generator).
+  TPH2501 buffer -> 49.9 ohm -> GEN jack (*inferred*, [Generator](#generator)); rails PE2 (to the isolated supplies) and PC4 (scope / generator).
 - Isolation barrier: CA-IS3741 carries SPI2
   (PC10..PC12 + CS PD2); optocouplers (2 x EL3H7, 2 x "174 F163H") carry the drive of PA9 / PA10 (relay)
   and PE0 / PE1 (shunt MOSFETs) (*inferred*); 2 x VPS8504B with LT61-117 /
@@ -156,8 +165,9 @@ scope, generator) shares one ground.
 | Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); one 10 A ceramic fuse for all shunts by the Alientek DM40 manual (not in the repo) |
 | Scope ADC | 3PEAK [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 in code ([`firmware/src/scope.rs`](../firmware/src/scope.rs)) |
 | Scope gain mux | [HC4051](datasheets/ti-cd74hc4051-schs122o.pdf) (header says "HCF4051") | BOM, `stock/re/analysis/scope_gen_v2_6.h` |
-| Scope op amp | "8091" (Gainsil [GS8091](datasheets/gainsil-gs8091.pdf)?) | BOM only, after gadefox in the EEVblog thread |
-| Generator path switch | SGM3157 SPDT | *inferred* from chat report [#24902](https://t.me/S2084K/24902); [`firmware/docs/dac-adc-paths.md`](../firmware/docs/dac-adc-paths.md) 1 |
+| Scope op amps | Gainsil [GS8091](datasheets/gainsil-gs8091.pdf) (350 MHz, marked "8091", next to the HC4051) and Gainsil [GS8591](https://www.gainsil.com/) (4.5 MHz zero-drift, marked "8591 UJK55", next to the 3PA1030, "buffer and driver before the ADC") | markings and roles named in the video teardown [V1] (9:00..11:10); "8591 UJK55" also in photo [E1] |
+| Other analog parts | 2 x 3PEAK [TPH2501](https://en.sekorm.com/doc/1002961.html) (250 MHz, ~200 V/us, rail-to-rail I/O, 2.5..5.5 V, marked "501PN"); 3PEAK TP1961 comparator ("961KC"); 3PEAK LMV321B op amp; SGMICRO SGM3204 charge pump (negative bias rail); Torex XC6219B LDO | named in [V1]; "501PN" and "961KC" also in [E1]. What each one drives is *inferred* ([Oscilloscope](#oscilloscope), [Generator](#generator)) |
+| Generator path switch | SGMICRO [SGM3157](https://www.sg-micro.com/product/SGM3157) SPDT, SC70-6, marked "3157" | marking in [E1] (inside the scope area, between the 3PA1030 and the MCU) and named in [V1]; that it is the generator switch is *inferred* from the placement and chat report [#24902](https://t.me/S2084K/24902) |
 | Charger | [TP4056](datasheets/toppower-tp4056-cn.pdf) (marked "TP4056 2413"), linear, 1 cell, not isolated (on VBUS) | marking in photo [charger-tp4056-and-power.jpg](photos/charger-tp4056-and-power.jpg); review |
 | Battery | LN425272 Li-ion polymer, 3.7 V, 2000 mAh, 7.4 Wh, 4.2 V charge limit, made 2025-02-10 by 东莞市立能电子科技有限公司, with protection PCB | label in [battery-ln425272-label.jpg](photos/battery-ln425272-label.jpg) |
 | Connectors | USB-C; two coaxial (MCX per BOM) jacks silkscreened CHA (scope) and GEN (generator); banana V/ohm, COM, A/mA/uA | photos; review ("coaxial, not BNC") |
@@ -634,7 +644,8 @@ sections by commit ("f80524f", "d8e249d", "519fb8a", "469f354", "6bc494a",
   - PE3: coupling, 1 = DC, 0 = AC.
   - PC8 = TIM3_CH3 (AF2) PWM ~10 kHz: vertical offset.
   - Trigger (stock only): DAC channel 2 on PA5 sets the level of an external
-    comparator (chip not identified) whose output goes to PA15 = TIM2_CH1
+    comparator (3PEAK TP1961, marked "961KC", *inferred*: [V1] names it "for
+    threshold, trigger or protection") whose output goes to PA15 = TIM2_CH1
     (AF1); the output is inverted and ~2 us late ([`firmware/src/hwtrig.rs`](../firmware/src/hwtrig.rs)).
 - Supply: PC4 rail (below). Ground: shared with USB and the MCU (*inferred*).
 - Connector: coaxial "CHA" (MCX per BOM); probe x1/x10 with compensation
@@ -648,11 +659,23 @@ sections by commit ("f80524f", "d8e249d", "519fb8a", "469f354", "6bc494a",
   off for sine / triangle / ramp, so an external buffer stage follows
   (*inferred*) ([`firmware/src/gen.rs`](../firmware/src/gen.rs), `stock/re/analysis/scope_gen_v2_6.h`).
 - PWM path (square above 50 kHz): TIM12_CH1 on PB14 (AF9), 200 MHz / D.
-- PB12 selects the path: 1 = PWM, 0 = DAC; the switch is the SGM3157
-  (*inferred* from a chat report). No attenuator or relay after it.
+- PB12 selects the path: 1 = PWM, 0 = DAC. The switch is the
+  [SGM3157](https://www.sg-micro.com/product/SGM3157) (pins 1 NO, 2 GND, 3 NC, 4 COM, 5 V+, 6 IN; IN = 1 connects
+  COM to NO, so PWM is on NO and the DAC on NC, *inferred*). Ron 6 ohm typ.
+  at 4.5 V, 300 MHz, ±50 mA, signal range GND - 0.3 V .. V+ + 0.3 V.
+- Output stage (*inferred* from the placement in [E1] and the parts in [V1],
+  not traced): a TPH2501 ("501PN") sits right next to the switch with a
+  49.9 ohm resistor ("68X", EIA-96) beside it; another 49.9 ohm sits at
+  the switch's pin 1. Likely chain: switch COM -> TPH2501 follower -> 49.9 ohm
+  -> GEN, i.e. ~50 ohm output impedance. The PWM square's edges, ~17..18 ns
+  at 3 V on the stock firmware ([EEVblog thread](https://www.eevblog.com/forum/testgear/alientek-dm40c-multimeter-(dm40a-dm40b-dm40c)/150/), reply #156), fit the
+  TPH2501 slew rate. No attenuator or relay. The output is DC-coupled:
+  the stock output had a fixed offset of Vpp / 2 (same thread, reply #138).
 - PA4 can be read back by ADC0 channel 4 (`DIAG:DAC?`).
-- Connector: coaxial "GEN". No protection: 12 V on the output killed the
-  switch in one chat report ([#24902](https://t.me/S2084K/24902)).
+- Connector: coaxial "GEN". 12 V on the output killed the switch in one chat
+  report ([#24902](https://t.me/S2084K/24902)); the switch and the TPH2501 are 5.5 V parts. A small
+  two-terminal part right of the GEN jack in [E1] may be an ESD diode on GEN
+  or on USB (not traced).
 - Spec (review): sine / triangle / sawtooth 1 Hz..50 kHz, square up to 10 MHz,
   0.5..3 V.
 
@@ -810,9 +833,10 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the
    buzzer is driven (PA7 and the HY3131 CMP pin) across the isolation.
-8. The scope trigger comparator chip; which of PB15 / PD12 / PD13 is the 4051
+8. That the TP1961 is the scope trigger comparator; which of PB15 / PD12 / PD13 is the 4051
    A / B / C; the exact gain resistors.
-9. The scope op amp ("8091") and the generator output stage after the SGM3157.
+9. The generator output stage: which TPH2501 and 49.9 ohm resistor are on the
+   path, and the output impedance (Vpp open vs into 50 ohm, not measured).
 10. The regulators and the power path parts in [charger-tp4056-and-power.jpg](photos/charger-tp4056-and-power.jpg).
 11. The debug headers' VCC pads: ~3.1 V while on, not the MCU supply
     directly; what sits between them is not traced.
