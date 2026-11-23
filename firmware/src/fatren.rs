@@ -1,4 +1,4 @@
-//! Rename the INSTALLED `dm40*.bin` on the SPI-flash FAT16 volume to
+//! Rename the INSTALLED `dm40*.bin` on the SPI-flash FAT volume to
 //! `_DM40PRV.BIN` so the FS-loader stops re-installing it.
 //!
 //! Why: in its install state the FS-loader (0x080a0000) installs the first
@@ -46,7 +46,8 @@
 //! through the BlockDevice (spiflash.rs: skip if unchanged, program without
 //! erase where possible, erase + program otherwise, read back), and is read
 //! back again here and compared. The volume is not touched unless the boot
-//! sector is a sane FAT16 with sector size == device block size (4096).
+//! sector is a sane FAT16, or a FAT12 whose entries fit one FAT block (the
+//! later units: `parse_bpb`), with sector size == device block size (4096).
 //!
 //! Host test: tools/fatren-test/run.sh (mkfs.fat image, mtools, fsck.fat).
 
@@ -74,7 +75,7 @@ pub enum Status {
     NotRun,
     /// No SPI flash / medium.
     NoMedium,
-    /// Boot sector does not look like the expected FAT16 volume; untouched.
+    /// Boot sector does not look like the expected FAT volume; untouched.
     BadBpb,
     /// No installed dm40*.bin in the root (staged ones may be there).
     Clean,

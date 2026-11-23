@@ -58,7 +58,7 @@
 //! clusters (FAT 1 written, FAT 2 or the entry not yet), and
 //! `finish_blocking` (power-off / reset paths) may stop a shot there.
 //! Every block write is read back; nothing is written unless the boot sector
-//! is the expected FAT16 volume.
+//! is the expected FAT volume.
 //!
 //! Frozen image, streamed from the panel: there is no frame buffer and no
 //! capture buffer; each data block's pixels are read from the panel's GRAM
@@ -156,7 +156,7 @@ const _: () = assert!(HDR_LEN % 2 == 0 && BLK % 2 == 0, "block edges fall betwee
 pub enum Shot {
     /// Written and verified as S%03u.BMP.
     Saved(u16),
-    /// No disk / not the expected FAT16 volume.
+    /// No disk / not the expected FAT volume.
     NoDisk,
     /// Root directory or disk full, or S000..S999 all taken.
     Full,

@@ -1,4 +1,4 @@
-//! Subdirectories on the SPI-flash FAT16 volume (the internal storage; it is
+//! Subdirectories on the SPI-flash FAT volume (the internal storage; it is
 //! no longer exported over USB in the native build, see vdisk.rs).
 //!
 //! Layout: the root keeps what the vendor FS-loader and the recovery need

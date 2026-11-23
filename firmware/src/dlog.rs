@@ -25,7 +25,7 @@
 //! `fmt_row` on both sides.
 //!
 //! Pure code (no hardware): the coder, `Gen` over any `Src`, `FatFile` over
-//! any `Raw` byte reader (FAT16 chain walking) and the root scan `scan`.
+//! any `Raw` byte reader (FAT16 / FAT12 chain walking) and the root scan `scan`.
 //! Device glue (the SPI reader, MMEM:DATA?, the refresh flag of vdisk.rs) at the end.
 //! Host tests: tools/dlog-test (round trip vs the old writer, truncation at
 //! every byte), tools/fatren-test (csvlog on a FAT image, fsck, dlog.py).
@@ -2011,14 +2011,14 @@ pub fn fast_rows<S: Src>(s: &mut S, w: &mut Win, c: &FChunk, p: &FPar, f: &mut d
     true
 }
 
-// ------------------------------------------------------------- FAT16 files
+// ------------------------------------------------------------- FAT files
 
 /// Raw bytes of the disk (SPI flash: byte address = block * 4096 + offset).
 pub trait Raw {
     fn read_at(&mut self, addr: u32, buf: &mut [u8]) -> bool;
 }
 
-/// FAT16 volume geometry in bytes.
+/// FAT16 / FAT12 volume geometry in bytes.
 #[derive(Clone, Copy, Debug)]
 pub struct Geo {
     pub fat: u32,

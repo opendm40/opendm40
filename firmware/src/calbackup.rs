@@ -1,5 +1,5 @@
 //! Write-once safety copy of the unit's irreplaceable data on the SPI-flash
-//! FAT16 volume (the USB disk, LUN 0): CALIB.BIN, BOOTDATA.BIN and UID.BIN,
+//! FAT volume (the USB disk, LUN 0): CALIB.BIN, BOOTDATA.BIN and UID.BIN,
 //! each written only when the root has no entry of that name, never
 //! overwritten, never deleted.
 //!
@@ -57,7 +57,7 @@
 //!      per touched root block;
 //!   5. re-read every written file through its new entry and compare.
 //! Every block write is verified by a read-back. The volume is not touched
-//! unless fatren::parse_bpb accepts it (FAT16, 4096-byte sectors = device
+//! unless fatren::parse_bpb accepts it (FAT16 or FAT12, 4096-byte sectors = device
 //! block, sane geometry).
 //!
 //! The same writer also keeps a general `write_file` (compare, new chain,
@@ -106,7 +106,7 @@ pub enum Status {
     /// Not run (yet).
     NotRun,
     NoMedium,
-    /// Boot sector is not the expected FAT16 volume; untouched.
+    /// Boot sector is not the expected FAT volume; untouched.
     BadBpb,
     /// Every file already there (safety copy: present, whatever its
     /// contents; `write_file`: equal): nothing written.
@@ -474,7 +474,7 @@ pub fn numbered_name(prefix: &[u8], n: u16, ext: &[u8; 3]) -> [u8; 11] {
 /// Lowest n in 0..=999 with no root entry `numbered_name(prefix, n, ext)`
 /// (any entry of that name counts, also a directory; deleted and LFN slots do
 /// not) - the stock screenshot naming "s%.3d.bmp", first free number. None:
-/// no medium, not the expected FAT16 volume, a read error, or all 1000 taken.
+/// no medium, not the expected FAT volume, a read error, or all 1000 taken.
 pub fn free_number(dev: &mut dyn BlockDevice, prefix: &[u8], ext: &[u8; 3]) -> Option<u16> {
     if !dev.present() || dev.block_size() as usize != BLK {
         return None;

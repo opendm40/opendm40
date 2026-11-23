@@ -208,7 +208,7 @@ pub enum State {
     Done,
     /// Disk or root directory full: what fitted is committed, recording ended.
     Full,
-    /// No disk / not the expected FAT16 volume.
+    /// No disk / not the expected FAT volume.
     NoDisk,
     /// A read / write failed, or the file changed under us: recording ended,
     /// the file holds what was committed before (at worst lost clusters).

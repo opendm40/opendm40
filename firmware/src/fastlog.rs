@@ -116,7 +116,7 @@ pub enum State {
     Done,
     /// Ended: the allocation (the free space) is full.
     Full,
-    /// No disk / not the expected FAT16 volume.
+    /// No disk / not the expected FAT volume.
     NoDisk,
     /// A read / write / erase failed, or the disk changed under us.
     Error,

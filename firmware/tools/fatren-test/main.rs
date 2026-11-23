@@ -932,6 +932,11 @@ fn set_entry(f: &mut [u8], fat12: bool, c: u32, val: u32) {
     f[o + 1] = (w >> 8) as u8;
 }
 
+/// Clusters a screenshot takes on an image (307266 bytes).
+fn shot_cl(b: &[u8]) -> usize {
+    307266usize.div_ceil(b[0x0D] as usize * 4096)
+}
+
 /// Free clusters of an image, first fit.
 fn free_clusters(b: &[u8]) -> Vec<u32> {
     let (_, _, n) = geo(b);
@@ -994,7 +999,7 @@ fn prep_cmd(a: &[String], img: &mut Img) {
             let mut used_same = true;
             let mut changed_free = 0;
             for blk in data as usize..img.d.len() / 4096 {
-                let c = blk as u32 - data + 2;
+                let c = (blk as u32 - data) / before[0x0D] as u32 + 2;
                 let o = blk * 4096;
                 if img.d[o..o + 4096] != before[o..o + 4096] {
                     if free.contains(&c) {
@@ -1004,7 +1009,7 @@ fn prep_cmd(a: &[String], img: &mut Img) {
                     }
                 }
             }
-            let want = free.len().min(76);
+            let want = free.len().min(shot_cl(&before));
             let blank = free[..want].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
             let p = screenshot::prep_stats();
             println!(
@@ -1033,9 +1038,9 @@ fn prep_cmd(a: &[String], img: &mut Img) {
             screenshot::take_result();
             let s = screenshot::stats();
             let free = free_clusters(&img.d);
-            let ready_before = free[..free.len().min(76)].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
+            let ready_before = free[..free.len().min(shot_cl(&img.d))].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
             let (st2, _) = prep_drive(img, &mut now, 1_000_000);
-            let ready_after = free[..free.len().min(76)].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
+            let ready_after = free[..free.len().min(shot_cl(&img.d))].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
             let p = screenshot::prep_stats();
             println!(
                 "prep state={} erases={} shot={:?} shot_erased={} no_compare={} next_blank_before={} state2={} found2={} erases2={} next_blank_after={}",
@@ -2066,8 +2071,8 @@ fn setfile_cmd(a: &[String], img: Img) {
         let (_, _, _, f, _, _, _) = setfile::info();
         check(f == setfile::FileState::Created, &format!("wrong-size file replaced ({f:?})"));
         let mut cl = [0u16; 2];
-        let (data, _, size, _) = calbackup::chain_of(im(), &setfile::NAME, &mut cl).unwrap();
-        let o = (data + cl[0] as u32 - 2) as usize * 4096;
+        let (data, spc, size, _) = calbackup::chain_of(im(), &setfile::NAME, &mut cl).unwrap();
+        let o = (data + (cl[0] as u32 - 2) * spc) as usize * 4096;
         let seeded = setfile::record(&im().d[o..o + 4096]).is_some_and(|(r, q)| q == 1 && r.words == words(1));
         check(size == setfile::SIZE && seeded, "the new file seeded from the backup SRAM: slot 0 seq 1");
         let r = setfile::pick(persist::load());
@@ -2089,8 +2094,9 @@ fn setfile_cmd(a: &[String], img: Img) {
     // The slots' blocks, from the file entry.
     let mut cl = [0u16; 2];
     let (data, spc, size, n) = calbackup::chain_of(im(), &setfile::NAME, &mut cl).unwrap();
-    check(size == setfile::SIZE && spc == 1 && n == 2, "file 8 KiB, 2 clusters of one block");
-    let lba = [data + cl[0] as u32 - 2, data + cl[1] as u32 - 2];
+    check(size == setfile::SIZE && spc as usize * n == 2, "file 8 KiB: 2 blocks (2 clusters of one block, or 1 of two)");
+    let at = |k: usize| data + (cl[k / spc as usize] as u32 - 2) * spc + (k % spc as usize) as u32;
+    let lba = [at(0), at(1)];
     let slot = |k: usize| -> Vec<u8> { im().d[lba[k] as usize * 4096..][..4096].to_vec() };
     let seq_of = |k: usize| setfile::decode(&slot(k)).map(|d| d.1);
     let wstart = im().writes.len();

@@ -1,5 +1,5 @@
 //! The settings' copy on the SPI disk: `_SETTING.BIN` in the root of the
-//! FAT16 volume, next to `_DM40PRV.BIN`. The live copy stays in the backup
+//! FAT volume, next to `_DM40PRV.BIN`. The live copy stays in the backup
 //! SRAM (persist.rs); that one is lost when the meter is switched off, this
 //! one is what the next power-on starts from.
 //!

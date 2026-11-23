@@ -7,6 +7,14 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **Newer units with a FAT12 internal disk** (BoyaMicro BY25Q128ES flash):
+  settings are kept over a power-off, and screenshots, records, logs and an
+  update copied onto the USB disk work. 0.4.1 accepted only the FAT16 disk
+  of the earlier units ("No disk"). The disk is used as it is, nothing is
+  reformatted.
+
 ## v0.4.1 (2026-11-06)
 
 A bug-fix release: an update or a restart from the scope or generator page
