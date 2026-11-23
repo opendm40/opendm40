@@ -1163,8 +1163,7 @@ mod prep {
     /// SE4K, waited for like the others). TPP = (mean, max) us.
     fn probe(j: &mut Job, d: &mut dyn Disk) -> Result<(), State> {
         let v = vol(j);
-        let cb = v.spc * BLK as u32;
-        let a = v.data_start * cb + (cl_of(j, j.ncl - 1) - 2) * cb;
+        let a = v.clba(cl_of(j, j.ncl - 1)) * BLK as u32;
         if j.i == 0 {
             let zeros = [0u8; 256];
             let (mut sum, mut max) = (0u32, 0u32);

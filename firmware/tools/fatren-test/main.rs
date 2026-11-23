@@ -1920,6 +1920,7 @@ fn fast(a: &[String], img: &mut Img) {
     let mut dur = n / rate + 2;
     let mut abandon = false;
     let mut ringdrop = false;
+    let mut probe = false;
     let mut k = 5;
     while k < a.len() {
         match a[k].as_str() {
@@ -1933,6 +1934,7 @@ fn fast(a: &[String], img: &mut Img) {
             }
             "abandon" => abandon = true,
             "ringdrop" => ringdrop = true,
+            "probe" => probe = true,
             x => panic!("fast: {x}?"),
         }
         k += 1;
@@ -1941,6 +1943,9 @@ fn fast(a: &[String], img: &mut Img) {
     let text = b"# fatren-test fast log\r\nt_s,raw,value_V,lost_before\r\n";
     let bytes = fastlog::plan_bytes(dur, rate, true);
     fastlog::begin(bytes, dur).expect("begin");
+    if probe {
+        fastlog::set_probe(); // the page-program probe at the end of Prep
+    }
     let mut ring: VecDeque<(u32, i32)> = VecDeque::new();
     let mut drained: Vec<(u32, i32)> = Vec::new();
     let (mut i, mut ring_drops, mut polls) = (0u32, 0u32, 0u64);

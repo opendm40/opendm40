@@ -1470,6 +1470,20 @@ grep -qE "^fast=Full file=Some\(0\) alloc=$((49152 * SPC)) " $W/q4 && echo "ok: 
 fsckok $IMGR
 fastok $IMGR FAST000.DLG prefix
 echo "ok: the full file decodes to a prefix of the samples"
+# the page-program probe (set_probe): programs and erases only the
+# allocation's last cluster; a file right after the 12 free clusters intact
+IMGT=$W/diskt.img
+cp $W/fastbase.img $IMGT
+FREE=$(fsck.fat -n $IMGT | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}')
+head -c $(( 12 * 4096 * SPC )) /dev/zero > $W/hole
+mcopy -i $IMGT $W/hole ::HOLE.DAT
+head -c $(( (FREE - 12) * 4096 * SPC )) /dev/urandom > $W/fill2
+mcopy -i $IMGT $W/fill2 ::FILL.DAT
+mdel -i $IMGT ::HOLE.DAT
+"$W/t" $IMGT fast 100000 9600 probe | tee $W/q9
+grep -qE "^fast=Full file=Some\(0\) alloc=$((49152 * SPC)) " $W/q9 || { echo "FAIL at line $LINENO"; exit 1; }
+mcopy -n -i $IMGT ::FILL.DAT $W/o && cmp $W/o $W/fill2 && echo "ok: the probe touched only the allocation (the next file intact)" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGT
 # power cut before every operation (block write / page program / erase)
 cp $W/fastbase.img $W/fcut0.img
 NOPS=$("$W/t" $W/fcut0.img fast 6000 4800 | grep -oE " ops=[0-9]+" | cut -d= -f2)

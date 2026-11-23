@@ -141,8 +141,17 @@ struct St {
     /// Sectors written (bit = sector of the cluster).
     map: u64,
     /// SPI cluster of each 4 KiB block (0 = none yet: its written sectors
-    /// were all zero).
+    /// were all zero); `HI` set: block 1 of that cluster (a committed
+    /// firmware file's odd block on a 2-blocks-per-cluster disk, `commit`).
     blk: [u16; BPC],
+}
+
+/// `St::blk`: the block is block 1 of the cluster.
+const HI: u16 = 0x8000;
+
+/// The SPI block a `St::blk` value names.
+fn blk_lba(v: &crate::fatren::Vol, b: u16) -> u32 {
+    v.clba((b & !HI) as u32) + (b >> 15) as u32
 }
 
 const REC0: Rec = Rec { slot: 0, e: [0; 32] };
@@ -381,7 +390,8 @@ pub fn staged_read(c: u32, s: u32, b: &mut [u8]) -> bool {
     let sc = st.blk[(s / SPB) as usize];
     if st.map & (1u64 << s) != 0 && sc != 0 {
         let mut d = dlog::disk();
-        let ok = dlog::geometry(&mut d).is_some_and(|g| d.read_at(g.data + (sc as u32 - 2) * g.cb + (s % SPB) * BS as u32, b));
+        let ok = dlog::geometry(&mut d)
+            .is_some_and(|g| d.read_at(g.data + ((sc & !HI) as u32 - 2) * g.cb + (sc >> 15) as u32 * BLK as u32 + (s % SPB) * BS as u32, b));
         if !ok {
             b.fill(0);
         }
@@ -873,12 +883,12 @@ fn stage(c: u32, s: u32, d: &[u8]) -> R {
             let o = (q as usize) * BS;
             buf[o..o + BS].fill(if w.st[i].map & (1u64 << (j as u32 * SPB + q)) != 0 { 0 } else { 0xFF });
         }
-    } else if !dev.read_block(v.clba(old as u32), buf) {
+    } else if !dev.read_block(blk_lba(&v, old), buf) {
         return Err(E_IO);
     }
     let o = (s % SPB) as usize * BS;
     buf[o..o + BS].copy_from_slice(&d[..BS]);
-    let lba = v.clba(sc as u32);
+    let lba = blk_lba(&v, sc);
     if !(dev.write_block(lba, buf) && crate::fatren::verify(dev, lba, buf, tmp)) {
         return Err(E_IO);
     }
@@ -1248,7 +1258,7 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
         let j = b % BPC;
         if w.st[i].blk[j] != 0 && w.st[i].ro & (1 << j) != 0 {
             // Parked in a temp file: copied into a free cluster.
-            let lba = v.clba(w.st[i].blk[j] as u32);
+            let lba = blk_lba(&v, w.st[i].blk[j]);
             if !dev.read_block(lba, buf) {
                 return false;
             }
@@ -1281,7 +1291,7 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
             let first = j as u32 * SPB;
             let m = (w.st[i].map >> first) & 0xFF;
             if m != 0xFF {
-                let lba = v.clba(w.st[i].blk[j] as u32);
+                let lba = blk_lba(&v, w.st[i].blk[j]);
                 if !dev.read_block(lba, buf) {
                     return false;
                 }
@@ -1298,21 +1308,27 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
         }
         cl[b] = w.st[i].blk[j];
     }
-    // More blocks per cluster (FAT12): file block k * spc + q goes into
-    // block q of the cluster of block k * spc (staged in its first block;
-    // the others' clusters stay free, never linked).
+    // Two blocks per cluster (FAT12): file block 2k + 1 goes into block 1
+    // of the cluster of block 2k (staged in its first block); its own
+    // cluster stays free, never linked, and the slot then names block 1 of
+    // the partner (`HI`: what the host reads back, `staged_read`).
     let spc = v.spc as usize;
+    if spc > 2 {
+        return false;
+    }
     let mut n = 0;
     for k in 0..nb.div_ceil(spc) {
-        let c = cl[k * spc] as u32;
+        let c = cl[k * spc];
         for q in 1..spc.min(nb - k * spc) {
-            if !dev.read_block(v.clba(cl[k * spc + q] as u32), buf) {
+            let b = k * spc + q;
+            if !dev.read_block(blk_lba(&v, cl[b]), buf) {
                 return false;
             }
-            let lba = v.clba(c) + q as u32;
+            let lba = blk_lba(&v, c | HI);
             if !(dev.write_block(lba, buf) && crate::fatren::verify(dev, lba, buf, tmp)) {
                 return false;
             }
+            w.st[chain[b / BPC] as usize].blk[b % BPC] = c | HI;
             crate::wdt::kick_if_feeding();
         }
         cl[n] = c as u16;
