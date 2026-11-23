@@ -1324,6 +1324,7 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
             }
             w.st[chain[b / BPC] as usize].blk[b % BPC] = c | HI;
             b += 1;
+            crate::wdt::kick_if_feeding();
         }
         cl[n] = c; // more than 2 blocks per cluster: commit_on refuses the count
         n += 1;
