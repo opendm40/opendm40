@@ -909,19 +909,45 @@ fn geo(b: &[u8]) -> (usize, u32, u32) {
     let rsvd = le16(0x0E);
     let data = rsvd + b[0x10] as u32 * le16(0x16) + le16(0x11) * 32 / 4096;
     let tot = if le16(0x13) != 0 { le16(0x13) } else { le16(0x20) | le16(0x22) << 16 };
-    (rsvd as usize * 4096, data, tot - data)
+    (rsvd as usize * 4096, data, (tot - data) / b[0x0D] as u32)
+}
+
+/// FAT 1 entry `c` of an image (FAT12 or FAT16, by the cluster count).
+fn fat_entry(b: &[u8], c: u32) -> u32 {
+    let (fat, _, n) = geo(b);
+    let o = fat + fatren::fat_off(n < 4085, c) as usize;
+    fatren::fat_dec(n < 4085, &b[o..o + 2], c)
+}
+
+/// Set FAT entry `c` in a FAT copy starting at `f[0]`.
+fn set_entry(f: &mut [u8], fat12: bool, c: u32, val: u32) {
+    let o = fatren::fat_off(fat12, c) as usize;
+    let w = f[o] as u32 | (f[o + 1] as u32) << 8;
+    let w = match (fat12, c & 1) {
+        (false, _) => val,
+        (true, 0) => (w & 0xF000) | (val & 0xFFF),
+        _ => (w & 0x000F) | (val & 0xFFF) << 4,
+    };
+    f[o] = w as u8;
+    f[o + 1] = (w >> 8) as u8;
+}
+
+/// Clusters a screenshot takes on an image (307266 bytes).
+fn shot_cl(b: &[u8]) -> usize {
+    307266usize.div_ceil(b[0x0D] as usize * 4096)
 }
 
 /// Free clusters of an image, first fit.
 fn free_clusters(b: &[u8]) -> Vec<u32> {
-    let (fat, _, n) = geo(b);
-    (2..n + 2).filter(|&c| b[fat + 2 * c as usize] == 0 && b[fat + 2 * c as usize + 1] == 0).collect()
+    let (_, _, n) = geo(b);
+    (2..n + 2).filter(|&c| fat_entry(b, c) == 0).collect()
 }
 
 fn cluster_blank(b: &[u8], c: u32) -> bool {
     let (_, data, _) = geo(b);
-    let o = (data + c - 2) as usize * 4096;
-    b[o..o + 4096].iter().all(|&x| x == 0xFF)
+    let spc = b[0x0D] as usize;
+    let o = (data as usize + (c as usize - 2) * spc) * 4096;
+    b[o..o + spc * 4096].iter().all(|&x| x == 0xFF)
 }
 
 /// Drive screenshot.rs's idle-time preparation (`prep_on`, 5 ms per main-
@@ -958,7 +984,7 @@ fn prep_drive(img: &mut Img, now: &mut u64, max: usize) -> (u32, usize) {
 ///        is written again with an erase, Saved.
 fn prep_cmd(a: &[String], img: &mut Img) {
     let mut now = 0u64;
-    let blk_of = |b: &[u8], c: u32| (geo(b).1 + c - 2) as usize * 4096;
+    let blk_of = |b: &[u8], c: u32| (geo(b).1 as usize + (c as usize - 2) * b[0x0D] as usize) * 4096;
     match a[3].as_str() {
         "run" => {
             if a.get(4).is_some_and(|x| x == "cut") {
@@ -973,7 +999,7 @@ fn prep_cmd(a: &[String], img: &mut Img) {
             let mut used_same = true;
             let mut changed_free = 0;
             for blk in data as usize..img.d.len() / 4096 {
-                let c = blk as u32 - data + 2;
+                let c = (blk as u32 - data) / before[0x0D] as u32 + 2;
                 let o = blk * 4096;
                 if img.d[o..o + 4096] != before[o..o + 4096] {
                     if free.contains(&c) {
@@ -983,7 +1009,7 @@ fn prep_cmd(a: &[String], img: &mut Img) {
                     }
                 }
             }
-            let want = free.len().min(76);
+            let want = free.len().min(shot_cl(&before));
             let blank = free[..want].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
             let p = screenshot::prep_stats();
             println!(
@@ -1012,9 +1038,9 @@ fn prep_cmd(a: &[String], img: &mut Img) {
             screenshot::take_result();
             let s = screenshot::stats();
             let free = free_clusters(&img.d);
-            let ready_before = free[..free.len().min(76)].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
+            let ready_before = free[..free.len().min(shot_cl(&img.d))].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
             let (st2, _) = prep_drive(img, &mut now, 1_000_000);
-            let ready_after = free[..free.len().min(76)].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
+            let ready_after = free[..free.len().min(shot_cl(&img.d))].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
             let p = screenshot::prep_stats();
             println!(
                 "prep state={} erases={} shot={:?} shot_erased={} no_compare={} next_blank_before={} state2={} found2={} erases2={} next_blank_after={}",
@@ -1046,16 +1072,17 @@ fn prep_cmd(a: &[String], img: &mut Img) {
                 if nobump {
                     m.d[o..o + 4096].fill(0xA5);
                     for f in 0..nf {
-                        m.d[fat + f * fsz + 2 * c as usize..fat + f * fsz + 2 * c as usize + 2].copy_from_slice(&[0xFF, 0xFF]);
+                        let fat12 = geo(&m.d).2 < 4085;
+                        set_entry(&mut m.d[fat + f * fsz..], fat12, c, 0xFFFF);
                     }
                 } else {
                     let mut b = vec![0xA5u8; 4096];
                     msc::BlockDevice::write_block(&mut m, o as u32 / 4096, &b);
                     for f in 0..nf {
-                        let lba = ((fat + f * fsz + 2 * c as usize) / 4096) as u32;
+                        let lba = ((fat + f * fsz) / 4096) as u32 + c / fatren::FPER;
                         msc::BlockDevice::read_block(&mut m, lba, &mut b);
-                        let i = (fat + f * fsz + 2 * c as usize) % 4096;
-                        b[i..i + 2].copy_from_slice(&[0xFF, 0xFF]);
+                        let v = fatren::parse_bpb(&m.d[..4096], 4096).unwrap();
+                        v.fat_wr(&mut b, c, 0xFFFF);
                         msc::BlockDevice::write_block(&mut m, lba, &b);
                     }
                 }
@@ -1517,9 +1544,10 @@ fn dir_blocks(b: &[u8]) -> Vec<u32> {
         }
         let mut c = e[26] as u32 | (e[27] as u32) << 8;
         let mut n = 0;
+        let _ = fat;
         while (2..0xFFF0).contains(&c) && n < 64 {
-            out.push(data + c - 2);
-            c = le16(fat + 2 * c as usize);
+            out.extend((0..b[0x0D] as u32).map(|k| data + (c - 2) * b[0x0D] as u32 + k));
+            c = fat_entry(b, c);
             n += 1;
         }
     }
@@ -1892,6 +1920,7 @@ fn fast(a: &[String], img: &mut Img) {
     let mut dur = n / rate + 2;
     let mut abandon = false;
     let mut ringdrop = false;
+    let mut probe = false;
     let mut k = 5;
     while k < a.len() {
         match a[k].as_str() {
@@ -1905,6 +1934,7 @@ fn fast(a: &[String], img: &mut Img) {
             }
             "abandon" => abandon = true,
             "ringdrop" => ringdrop = true,
+            "probe" => probe = true,
             x => panic!("fast: {x}?"),
         }
         k += 1;
@@ -1913,6 +1943,9 @@ fn fast(a: &[String], img: &mut Img) {
     let text = b"# fatren-test fast log\r\nt_s,raw,value_V,lost_before\r\n";
     let bytes = fastlog::plan_bytes(dur, rate, true);
     fastlog::begin(bytes, dur).expect("begin");
+    if probe {
+        fastlog::set_probe(); // the page-program probe at the end of Prep
+    }
     let mut ring: VecDeque<(u32, i32)> = VecDeque::new();
     let mut drained: Vec<(u32, i32)> = Vec::new();
     let (mut i, mut ring_drops, mut polls) = (0u32, 0u32, 0u64);
@@ -2043,8 +2076,8 @@ fn setfile_cmd(a: &[String], img: Img) {
         let (_, _, _, f, _, _, _) = setfile::info();
         check(f == setfile::FileState::Created, &format!("wrong-size file replaced ({f:?})"));
         let mut cl = [0u16; 2];
-        let (data, _, size, _) = calbackup::chain_of(im(), &setfile::NAME, &mut cl).unwrap();
-        let o = (data + cl[0] as u32 - 2) as usize * 4096;
+        let (data, spc, size, _) = calbackup::chain_of(im(), &setfile::NAME, &mut cl).unwrap();
+        let o = (data + (cl[0] as u32 - 2) * spc) as usize * 4096;
         let seeded = setfile::record(&im().d[o..o + 4096]).is_some_and(|(r, q)| q == 1 && r.words == words(1));
         check(size == setfile::SIZE && seeded, "the new file seeded from the backup SRAM: slot 0 seq 1");
         let r = setfile::pick(persist::load());
@@ -2066,8 +2099,9 @@ fn setfile_cmd(a: &[String], img: Img) {
     // The slots' blocks, from the file entry.
     let mut cl = [0u16; 2];
     let (data, spc, size, n) = calbackup::chain_of(im(), &setfile::NAME, &mut cl).unwrap();
-    check(size == setfile::SIZE && spc == 1 && n == 2, "file 8 KiB, 2 clusters of one block");
-    let lba = [data + cl[0] as u32 - 2, data + cl[1] as u32 - 2];
+    check(size == setfile::SIZE && spc as usize * n == 2, "file 8 KiB: 2 blocks (2 clusters of one block, or 1 of two)");
+    let at = |k: usize| data + (cl[k / spc as usize] as u32 - 2) * spc + (k % spc as usize) as u32;
+    let lba = [at(0), at(1)];
     let slot = |k: usize| -> Vec<u8> { im().d[lba[k] as usize * 4096..][..4096].to_vec() };
     let seq_of = |k: usize| setfile::decode(&slot(k)).map(|d| d.1);
     let wstart = im().writes.len();

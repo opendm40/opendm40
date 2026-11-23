@@ -1,5 +1,5 @@
 //! Write-once safety copy of the unit's irreplaceable data on the SPI-flash
-//! FAT16 volume (the USB disk, LUN 0): CALIB.BIN, BOOTDATA.BIN and UID.BIN,
+//! FAT volume (the USB disk, LUN 0): CALIB.BIN, BOOTDATA.BIN and UID.BIN,
 //! each written only when the root has no entry of that name, never
 //! overwritten, never deleted.
 //!
@@ -57,7 +57,7 @@
 //!      per touched root block;
 //!   5. re-read every written file through its new entry and compare.
 //! Every block write is verified by a read-back. The volume is not touched
-//! unless fatren::parse_bpb accepts it (FAT16, 4096-byte sectors = device
+//! unless fatren::parse_bpb accepts it (FAT16 or FAT12, 4096-byte sectors = device
 //! block, sane geometry).
 //!
 //! The same writer also keeps a general `write_file` (compare, new chain,
@@ -71,7 +71,7 @@
 
 #![allow(dead_code)]
 
-use crate::fatren::{free_chain, le16, le32, parse_bpb, sfn_is, verify, Vol};
+use crate::fatren::{free_chain, le16, le32, parse_bpb, sfn_is, verify, Vol, FPER};
 use crate::msc::BlockDevice;
 
 const BLK: usize = 4096;
@@ -106,7 +106,7 @@ pub enum Status {
     /// Not run (yet).
     NotRun,
     NoMedium,
-    /// Boot sector is not the expected FAT16 volume; untouched.
+    /// Boot sector is not the expected FAT volume; untouched.
     BadBpb,
     /// Every file already there (safety copy: present, whatever its
     /// contents; `write_file`: equal): nothing written.
@@ -474,7 +474,7 @@ pub fn numbered_name(prefix: &[u8], n: u16, ext: &[u8; 3]) -> [u8; 11] {
 /// Lowest n in 0..=999 with no root entry `numbered_name(prefix, n, ext)`
 /// (any entry of that name counts, also a directory; deleted and LFN slots do
 /// not) - the stock screenshot naming "s%.3d.bmp", first free number. None:
-/// no medium, not the expected FAT16 volume, a read error, or all 1000 taken.
+/// no medium, not the expected FAT volume, a read error, or all 1000 taken.
 pub fn free_number(dev: &mut dyn BlockDevice, prefix: &[u8], ext: &[u8; 3]) -> Option<u16> {
     if !dev.present() || dev.block_size() as usize != BLK {
         return None;
@@ -568,8 +568,7 @@ fn lba_of(v: &Vol, c: u32) -> u32 {
 
 /// FAT 1 entry `c`, with `fat`/`cur` as a one-block cache.
 fn fat_get(dev: &mut dyn BlockDevice, v: &Vol, c: u32, fat: &mut [u8; BLK], cur: &mut u32) -> Option<u32> {
-    let per = (BLK / 2) as u32;
-    let fb = c / per;
+    let fb = c / FPER;
     if fb >= v.fat_blocks {
         return None;
     }
@@ -579,7 +578,7 @@ fn fat_get(dev: &mut dyn BlockDevice, v: &Vol, c: u32, fat: &mut [u8; BLK], cur:
         }
         *cur = fb;
     }
-    Some(le16(fat, ((c % per) * 2) as usize))
+    Some(v.fat_rd(&fat[..], c))
 }
 
 /// Follow the chain of a file (`start`, `size` from its entry) through FAT 1.
@@ -812,7 +811,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], missing_only: bool) -> Resu
     }
 
     // 3. Chains in every FAT copy, one write per touched block and copy.
-    let per = (BLK / 2) as u32;
+    let per = FPER;
     for k in 0..v.nfats {
         let mut done = 0u32; // FAT blocks already written (bit = block, < 32)
         for &c0 in &cl[..need] {
@@ -828,9 +827,8 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], missing_only: bool) -> Resu
                 for i in 0..j.n {
                     let c = cl[j.first + i];
                     if c / per == fb {
-                        let next = if i + 1 == j.n { 0xFFFF } else { cl[j.first + i + 1] as u16 };
-                        let o = ((c % per) * 2) as usize;
-                        buf[o..o + 2].copy_from_slice(&next.to_le_bytes());
+                        let next = if i + 1 == j.n { 0xFFFF } else { cl[j.first + i + 1] };
+                        v.fat_wr(&mut buf[..], c, next);
                     }
                 }
             }

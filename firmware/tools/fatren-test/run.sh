@@ -4,6 +4,10 @@
 # count as the device, 4087). Update files are real packed images
 # (stock/dm40fw.py pack); the "marker" is the decoded 12-byte header of the
 # installed one (what the loader writes to 0x08008000).
+# FAT12=1: the same on the later units' FAT12 volume (BY25Q128ES: 2 blocks
+# per cluster, 2044 clusters; ci-tests.sh suite fatren-test-fat12); the
+# counts in clusters scale with SPC, the FAT block boundary cases are
+# skipped (one FAT block).
 # fatren (review 2026-10-13 H1: only the file equal to the marker is renamed):
 #   1. old _DM40PRV.BIN + dm40_v_2_6.bin (LFN, installed) + DM40FW.BIN (staged)
 #      + others: dry run, then live -> the installed file renamed, old backup
@@ -128,9 +132,17 @@ export MTOOLS_SKIP_CHECK=1
 echo "=== MMEM names: a directory prefix must be the file's own (csvlog::parse_path)"
 "$W/t" names | grep -v "^ok" || true
 "$W/t" names > /dev/null || { "$W/t" names | grep FAIL; echo "FAIL: names"; exit 1; }
+# FAT12=1: every image the later units' FAT12 volume (2 blocks per cluster);
+# directory sizes in clusters scale with it (SPC).
+SPC=1; [ -n "$FAT12" ] && SPC=2
+NCL=$((76 / SPC))                                      # clusters of a screenshot
 mkimg() {
     rm -f $1; truncate -s 16M $1                       # sparse (/tmp quota, see save() in main.rs)
-    mkfs.fat -F 16 -S 4096 -s 1 -f 2 -r 512 -R 1 -n "ATK-DM40" $1 >/dev/null
+    if [ -n "$FAT12" ]; then                           # the later units' disk (BY25Q128ES)
+        mkfs.fat -F 12 -S 4096 -s 2 -f 2 -r 512 -R 1 -h 0 -M 0xF8 -n "ATK-DM40" $1 >/dev/null
+    else
+        mkfs.fat -F 16 -S 4096 -s 1 -f 2 -r 512 -R 1 -n "ATK-DM40" $1 >/dev/null
+    fi
 }
 FW=../../../stock/dm40fw.py
 # mkfw <body> <out.bin>: pack a body into an update file (--pad: whole
@@ -327,10 +339,16 @@ bps, spc, rsvd, nf, rootn, tot16, fsz, tot32 = (struct.unpack_from('<H', d, 0x0B
     struct.unpack_from('<H', d, 0x13)[0], struct.unpack_from('<H', d, 0x16)[0], struct.unpack_from('<I', d, 0x20)[0])
 data = rsvd + nf * fsz + rootn * 32 // bps
 clusters = ((tot16 or tot32) - data) // spc
-print(sum(1 for c in range(2, clusters + 2) if struct.unpack_from('<H', d, rsvd * bps + 2 * c)[0] == 0))
+def ent(c):  # FAT12 below 4085 clusters
+    if clusters >= 4085:
+        return struct.unpack_from('<H', d, rsvd * bps + 2 * c)[0]
+    w = struct.unpack_from('<H', d, rsvd * bps + c * 3 // 2)[0]
+    return w >> 4 if c & 1 else w & 0xFFF
+print(sum(1 for c in range(2, clusters + 2) if ent(c) == 0), spc * bps)
 PY
 )
-head -c $(( (FREE - 3) * 4096 )) /dev/zero > $W/fill
+set -- $FREE; FREE=$1; CB=$2
+head -c $(( (FREE - 3) * CB )) /dev/zero > $W/fill
 mcopy -i $IMG9 $W/fill ::FILL.DAT
 "$W/t" $IMG9 backup $W/src | tee $W/b9
 grep -q "backup=NoSpace written=0x000" $W/b9 && grep -q "changed blocks: \[\]" $W/b9 && echo "ok: NOSPACE, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
@@ -614,17 +632,25 @@ import struct, sys
 d = open(sys.argv[1], 'rb').read()
 name, want = sys.argv[2].ljust(11).encode(), int(sys.argv[3])
 rsvd, nf, fsz, rootn = struct.unpack_from('<H', d, 0x0E)[0], d[0x10], struct.unpack_from('<H', d, 0x16)[0], struct.unpack_from('<H', d, 0x11)[0]
+spc = d[0x0D]
 root = (rsvd + nf * fsz) * 4096
 data = root + rootn * 32
+fat12 = (4096 - (data // 4096)) // spc < 4085
+def ent(c):
+    if not fat12:
+        return struct.unpack_from('<H', d, rsvd * 4096 + 2 * c)[0]
+    w = struct.unpack_from('<H', d, rsvd * 4096 + c * 3 // 2)[0]
+    w = w >> 4 if c & 1 else w & 0xFFF
+    return w | 0xF000 if w >= 0xFF0 else w
 ents = [d[root + 32 * i: root + 32 * i + 32] for i in range(rootn)]
 e = [e for e in ents if e[:11] == name and e[0] != 0xE5]
 assert len(e) == 1 and e[0][11] & 0x10, e
 c = start = struct.unpack_from('<H', e[0], 0x1A)[0]
 chain = []
 while c < 0xFFF8:
-    chain.append(c); c = struct.unpack_from('<H', d, rsvd * 4096 + 2 * c)[0]
+    chain.append(c); c = ent(c)
 assert len(chain) == want, chain
-b = data + (start - 2) * 4096
+b = data + (start - 2) * spc * 4096
 assert d[b:b + 11] == b'.          ' and struct.unpack_from('<H', d, b + 0x1A)[0] == start
 assert d[b + 32:b + 43] == b'..         ' and struct.unpack_from('<H', d, b + 32 + 0x1A)[0] == 0
 print('%s: %d clusters %s' % (sys.argv[2], len(chain), chain[:3]))
@@ -637,7 +663,7 @@ cp $IMGD $W/dirbase.img
 "$W/t" $IMGD fatdir boot | tee $W/d1
 grep -q "fatdir boot ok=0x7 created=0x7 failed=0x0" $W/d1 && echo "ok: LOGS SHOTS SCOPE created" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGD
-for n in LOGS SHOTS SCOPE; do dirok $IMGD $n 8; done
+for n in LOGS SHOTS SCOPE; do dirok $IMGD $n $((8 / SPC)); done
 NWD=$(grep -oE "writes=[0-9]+" $W/d1 | cut -d= -f2)
 "$W/t" $IMGD fatdir boot | tee $W/d2
 grep -q "fatdir boot ok=0x7 created=0x0 failed=0x0" $W/d2 && grep -q "changed blocks: \[\]" $W/d2 && echo "ok: second boot: nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
@@ -658,7 +684,7 @@ for k in $(seq 0 $((NWD - 1))); do
     "$W/t" $W/cut.img fatdir boot > $W/dc2
     grep -q "fatdir boot ok=0x7 " $W/dc2 || { cat $W/dc2; echo "FAIL: boot after cut $k"; exit 1; }
     dircutok $W/cut.img "boot after cut $k"
-    for n in LOGS SHOTS SCOPE; do dirok $W/cut.img $n 8 >/dev/null; done
+    for n in LOGS SHOTS SCOPE; do dirok $W/cut.img $n $((8 / SPC)) >/dev/null; done
 done
 echo "ok: $NWD cut points of the first boot: fsck at worst lost clusters / FAT 1 ahead, the next boot completes the three directories"
 echo "--- grow a one-cluster directory (mtools mmd) with files in it"
@@ -672,7 +698,7 @@ dirok $IMGG LOGS 1
 "$W/t" $IMGG fatdir ensure LOGS | tee $W/g1d
 grep -q "fatdir ensure ok clusters=" $W/g1d && echo "ok: ensure LOGS: grown" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGG
-dirok $IMGG LOGS 8
+dirok $IMGG LOGS $((8 / SPC))
 mcopy -n -i $IMGG ::LOGS/KEEP.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: files in the grown directory intact" || { echo "FAIL at line $LINENO"; exit 1; }
 NWG=$(grep -oE "writes=[0-9]+" $W/g1d | cut -d= -f2)
 for k in $(seq 0 $((NWG - 1))); do
@@ -682,7 +708,7 @@ for k in $(seq 0 $((NWG - 1))); do
     mcopy -n -i $W/cut.img ::LOGS/KEEP.BIN $W/o && cmp -s $W/o $W/keep.bin || { echo "FAIL: grow cut $k: KEEP.BIN"; exit 1; }
     "$W/t" $W/cut.img fatdir ensure LOGS > $W/dc2
     dircutok $W/cut.img "grow after cut $k"
-    dirok $W/cut.img LOGS 8 >/dev/null
+    dirok $W/cut.img LOGS $((8 / SPC)) >/dev/null
 done
 echo "ok: $NWG cut points of a grow: fsck at worst lost clusters / FAT 1 ahead, files intact, the next ensure completes it"
 echo "--- slots across directory clusters, numbering over the root + the directory"
@@ -848,7 +874,7 @@ shotcutok() {
     local rc=0
     fsck.fat -n $1 > $W/fsck.out 2>&1 || rc=$?
     [ $rc -le 1 ] || { cat $W/fsck.out; echo "FAIL: fsck rc=$rc ($2)"; exit 1; }
-    if grep -vE "^fsck.fat|files, .*clusters|^$|Leaving filesystem unchanged|FATs differ but appear to be intact|Using first FAT|Reclaimed 76 unused clusters \(311296 bytes\)" $W/fsck.out | grep -q .; then
+    if grep -vE "^fsck.fat|files, .*clusters|^$|Leaving filesystem unchanged|FATs differ but appear to be intact|Using first FAT|Reclaimed [0-9]+ unused clusters \(311296 bytes\)" $W/fsck.out | grep -q .; then
         cat $W/fsck.out; echo "FAIL: unexpected fsck finding ($2)"; exit 1
     fi
 }
@@ -860,7 +886,7 @@ for k in $(seq 0 $NS); do
         grep -q "erased_meta_pages=\[\]" $W/sc || { cat $W/sc; echo "FAIL: $mode after slice $k: erased FAT / root page"; exit 1; }
         [ $mode = abort ] && { grep -qE "busy=false" $W/sc || { cat $W/sc; echo "FAIL: abort $k left the shot busy"; exit 1; }; }
         shotcutok $W/cut.img "$mode $k"
-        grep -q "Reclaimed 76" $W/fsck.out && nlost=$((nlost + 1))
+        grep -q "(311296 bytes)" $W/fsck.out && nlost=$((nlost + 1))
     done
 done
 echo "ok: $((NS + 1)) cut points x (cut, abort): no FAT / root page ever erased, fsck at worst 76 lost clusters / FAT 1 ahead ($nlost cases)"
@@ -882,12 +908,12 @@ mcopy -i $IMGP $W/keep.bin ::KEEP.BIN
 mdel -i $IMGP ::OLD.BIN
 cp $IMGP $W/prepbase.img
 "$W/t" $IMGP prep run | tee $W/p1
-grep -q "state=2 found=76 erases=76 .* meta_same=true used_same=true changed_free=76 blank_first=76/76 " $W/p1 && echo "ok: ready: 76 erases, the first 76 free clusters blank, FAT / root / directories / allocated clusters unchanged" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "state=2 found=$NCL erases=76 .* meta_same=true used_same=true changed_free=76 blank_first=$NCL/$NCL " $W/p1 && echo "ok: ready: 76 erases, the first 76 free clusters blank, FAT / root / directories / allocated clusters unchanged" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGP
-"$W/t" $IMGP prep run | grep -q "state=2 found=76 erases=0 .* changed_free=0 " && echo "ok: again (a reboot): all blank, nothing erased" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGP prep run | grep -q "state=2 found=$NCL erases=0 .* changed_free=0 " && echo "ok: again (a reboot): all blank, nothing erased" || { echo "FAIL at line $LINENO"; exit 1; }
 cp $W/prepbase.img $IMGP
 "$W/t" $IMGP prep shot | tee $W/p2
-grep -q "state=2 erases=76 shot=Saved(0) shot_erased=0 no_compare=76 next_blank_before=0 state2=2 found2=76 erases2=76 next_blank_after=76" $W/p2 && echo "ok: the shot after it erased no data block (76 programmed without the compare); the next 76 prepared afterwards" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "state=2 erases=76 shot=Saved(0) shot_erased=0 no_compare=76 next_blank_before=0 state2=2 found2=$NCL erases2=76 next_blank_after=$NCL" $W/p2 && echo "ok: the shot after it erased no data block (76 programmed without the compare); the next 76 prepared afterwards" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGP
 bmpok $IMGP SHOTS/S000.BMP
 cp $W/prepbase.img $IMGP
@@ -902,7 +928,7 @@ for k in 0 1 2 38 75; do
     "$W/t" $W/pcut.img prep run cut $k > $W/pc
     grep -q "meta_same=true used_same=true .* dead=true" $W/pc || { cat $W/pc; echo "FAIL: prep cut $k"; exit 1; }
     fsckok $W/pcut.img > /dev/null
-    "$W/t" $W/pcut.img prep run | grep -q "state=2 found=76 erases=$((76 - k)) .* blank_first=76/76 " || { echo "FAIL: prep after cut $k"; exit 1; }
+    "$W/t" $W/pcut.img prep run | grep -q "state=2 found=$NCL erases=$((76 - k)) .* blank_first=$NCL/$NCL " || { echo "FAIL: prep after cut $k"; exit 1; }
 done
 echo "ok: power cut before erase 0 / 1 / 2 / 38 / 75: fsck clean, metadata and files unchanged; the next boot erases the rest"
 # A sector whose erase a power cut interrupted may read blank and still not
@@ -926,10 +952,10 @@ done
 # refused (Full) as before, nothing written.
 cp $W/prepbase.img $IMGP
 FREE=$(fsck.fat -n $IMGP | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}')
-head -c $(( (FREE - 20) * 4096 )) /dev/zero > $W/fill
+head -c $(( (FREE - 20) * 4096 * SPC )) /dev/zero > $W/fill
 mcopy -i $IMGP $W/fill ::FILL.DAT
 "$W/t" $IMGP prep run | tee $W/p5
-grep -q "state=2 found=20 erases=20 .* used_same=true changed_free=20 blank_first=20/20 free=20 " $W/p5 && echo "ok: 20 free clusters: all 20 prepared, nothing else touched" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "state=2 found=20 erases=$((20 * SPC)) .* used_same=true changed_free=$((20 * SPC)) blank_first=20/20 free=20 " $W/p5 && echo "ok: 20 free clusters: all 20 prepared, nothing else touched" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGP shot | grep -q "shot=Full" && echo "ok: the shot is still refused (Disk full)" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGP
 
@@ -1007,7 +1033,7 @@ cp $IMGC $W/csvbase.img
 grep -q "csv=Done file=Some(0) rows=3000 bytes=25523 committed=25523 dropped=0 medium_changed=true result=true" $W/c1 && echo "ok: 3000 rows recorded and committed as LOG000.DLG" || { echo "FAIL at line $LINENO"; exit 1; }
 grep -q "LOG:CSV? -> 3,0,3000,25523,25523,0" $W/c1 && echo "ok: LOG:CSV? reply" || { echo "FAIL at line $LINENO"; exit 1; }
 grep -q "session_flag=false" $W/c1 && grep -q "data_max_per_block=1 " $W/c1 && echo "ok: host writes allowed again; no data block erased twice (tail rewrites program-only)" || { echo "FAIL at line $LINENO"; exit 1; }
-grep -q "erases: fat=14 dir=8 data=7" $W/c1 && echo "ok: 8 commits = 8 LOGS/ block erases, 7 clusters = 2 x 7 FAT erases" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "erases: fat=$((2 * ((7 + SPC - 1) / SPC))) dir=8 data=7" $W/c1 && echo "ok: 8 commits = 8 LOGS/ block erases, 7 clusters = 2 x 7 FAT erases" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGC
 csvok $IMGC LOGS/LOG000.DLG 3000 full
 # The pre-DLG writer's LOG000.CSV of the same 3000 push() calls (76028 bytes,
@@ -1054,7 +1080,7 @@ cp $W/csvbase.img $IMGI
 "$W/t" $IMGI csv ival 1 1 50 | tee $W/i3
 grep -q "ival=Done file=Some(0) rows=5 " $W/i3 && grep -qE "end_ms=600[0-9]{3}$" $W/i3 && echo "ok: no reading after 5 s: the duration still ends it at 600 s (poll)" || { echo "FAIL at line $LINENO"; exit 1; }
 F=$(grep -o "^free=[0-9]*" $W/i3 | cut -d= -f2)
-FS=$(( $(fsck.fat -n $IMGI | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}') * 4096 ))
+FS=$(( $(fsck.fat -n $IMGI | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}') * 4096 * SPC ))
 E1=$(( F / 2 / 3600 > 1193 ? 1193 : F / 2 / 3600 ))
 [ "$F" = "$FS" ] && grep -qE "est_1s=$E1 est_every=$(( F / 2 / 36000 )) cap=1193" $W/i3 && echo "ok: free bytes == fsck's free clusters x 4096 ($F); estimate 2 B/row, capped at 1193 h" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGI csv ival 0 0 200 | grep -q "ival=Done file=Some(1) rows=190 " && echo "ok: every-reading mode (index 0): one row per reading" || { echo "FAIL at line $LINENO"; exit 1; }
@@ -1114,6 +1140,8 @@ fsckok $IMGH
 csvok $IMGH LOGS/LOG000.DLG 2000 gap | tee $W/c4p
 grep -qE "[1-9][0-9]* skipped" $W/c4p && echo "ok: the row after the gap carries GAP" || { echo "FAIL at line $LINENO"; exit 1; }
 
+# FAT12 has one FAT block: no boundary to cross.
+[ -z "$FAT12" ] && {
 echo "--- chain across the FAT 1 block boundary (clusters 2045..2048: link in block 0 written last)"
 IMGB=$W/diskb.img
 cp $W/csvbase.img $IMGB
@@ -1148,6 +1176,7 @@ for e in entries(logs[0]):
 else:
     sys.exit(1)
 PY
+}
 
 # cutsweep <base> <rows>: power cut before every block write (and a
 # program-only write cut half way) of a recording on a copy of <base>.
@@ -1182,21 +1211,21 @@ cutsweep() {
 }
 echo "--- power cut before every block write"
 cutsweep $W/csvbase.img 1500
-echo "--- power cut before every block write, chain across the FAT block boundary"
-cutsweep $W/fatbase.img 1500
+[ -z "$FAT12" ] && { echo "--- power cut before every block write, chain across the FAT block boundary"; cutsweep $W/fatbase.img 1500; }
 
 echo "--- nearly full disk"
 IMGF=$W/diskf.img
 cp $W/csvbase.img $IMGF
 FREE=$(fsck.fat -n $IMGF | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}')
-head -c $(( (FREE - 5) * 4096 )) /dev/zero > $W/fill
+LEFT=$(( (5 + SPC - 1) / SPC ))                         # clusters left: 20 / 24 KiB < the 25.5 KB
+head -c $(( (FREE - LEFT) * 4096 * SPC )) /dev/zero > $W/fill
 mcopy -i $IMGF $W/fill ::FILL.DAT
 "$W/t" $IMGF csv rec 3000 | tee $W/c5
 grep -q "csv=Full file=Some(0)" $W/c5 && echo "ok: disk full ends the recording (Full)" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGF
 csvok $IMGF LOGS/LOG000.DLG 3000 prefix
 SZ=$(mdir -i $IMGF ::LOGS | grep LOG000 | awk '{print $3}')
-[ $SZ = 20480 ] && echo "ok: the 5 free clusters filled ($SZ bytes); the chunk cut at the end is a torn tail, skipped by the reader" || { echo "FAIL at line $LINENO"; exit 1; }
+[ $SZ = $((LEFT * SPC * 4096)) ] && echo "ok: the 5 free clusters filled ($SZ bytes); the chunk cut at the end is a torn tail, skipped by the reader" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "--- gallery"
 mcopy -i $IMGS $W/keep.bin "::Log_with_a_long_name.dlg"
@@ -1207,10 +1236,11 @@ grep -q "list n=5 total=5" $W/g1 && grep -qE "  LOG000.DLG 255[0-9][0-9] Csv" $W
 F0=$(grep -o "free=[0-9]*" $W/g1 | cut -d= -f2)
 L0=$(grep "  LOG000.DLG" $W/g1 | awk '{print $2}')
 "$W/t" $IMGS csv cat | tee $W/g0
-grep -qx "cat=$((16740352 - F0)),$F0,\"LOG_WI~1.DLG,BIN,9000\",\"LOGS/LOG000.DLG,BIN,$L0\",\"SHOTS/S000.BMP,BIN,307266\",\"SHOTS/S001.BMP,BIN,307266\",\"SHOTS/S002.BMP,BIN,307266\"" $W/g0 && echo "ok: MMEM:CAT? text (root legacy file, then LOGS/, SHOTS/ with their directory)" || { echo "FAIL at line $LINENO"; exit 1; }
-[ $F0 = $(( $(fsck.fat -n $IMGS | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}') * 4096 )) ] && echo "ok: free bytes = fsck free clusters" || { echo "FAIL at line $LINENO"; exit 1; }
+DISK=$(( SPC == 1 ? 4087 * 4096 : 2044 * 8192 ))          # the clusters' bytes
+grep -qx "cat=$((DISK - F0)),$F0,\"LOG_WI~1.DLG,BIN,9000\",\"LOGS/LOG000.DLG,BIN,$L0\",\"SHOTS/S000.BMP,BIN,307266\",\"SHOTS/S001.BMP,BIN,307266\",\"SHOTS/S002.BMP,BIN,307266\"" $W/g0 && echo "ok: MMEM:CAT? text (root legacy file, then LOGS/, SHOTS/ with their directory)" || { echo "FAIL at line $LINENO"; exit 1; }
+[ $F0 = $(( $(fsck.fat -n $IMGS | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}') * 4096 * SPC )) ] && echo "ok: free bytes = fsck free clusters" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGS csv del LOG000.DLG | tee $W/g2
-grep -q "del=Ok(())" $W/g2 && grep -q "free=$((F0 + 7 * 4096)) " $W/g2 && echo "ok: LOG000.DLG deleted, its 7 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "del=Ok(())" $W/g2 && grep -q "free=$((F0 + (7 + SPC - 1) / SPC * SPC * 4096)) " $W/g2 && echo "ok: LOG000.DLG deleted, its 7 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
 "$W/t" $IMGS csv del log_wi~1.dlg | grep -q "del=Ok(())" && echo "ok: long-named file deleted" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
@@ -1433,13 +1463,27 @@ fsckok $IMGQ
 IMGR=$W/diskr.img
 cp $W/fastbase.img $IMGR
 FREE=$(fsck.fat -n $IMGR | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}')
-head -c $(( (FREE - 12) * 4096 )) /dev/zero > $W/fill
+head -c $(( (FREE - 12) * 4096 * SPC )) /dev/zero > $W/fill
 mcopy -i $IMGR $W/fill ::FILL.DAT
 "$W/t" $IMGR fast 100000 9600 | tee $W/q4
-grep -qE "^fast=Full file=Some\(0\) alloc=49152 " $W/q4 && echo "ok: 12 free clusters: allocated all, the session ended Full" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -qE "^fast=Full file=Some\(0\) alloc=$((49152 * SPC)) " $W/q4 && echo "ok: 12 free clusters: allocated all, the session ended Full" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGR
 fastok $IMGR FAST000.DLG prefix
 echo "ok: the full file decodes to a prefix of the samples"
+# the page-program probe (set_probe): programs and erases only the
+# allocation's last cluster; a file right after the 12 free clusters intact
+IMGT=$W/diskt.img
+cp $W/fastbase.img $IMGT
+FREE=$(fsck.fat -n $IMGT | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}')
+head -c $(( 12 * 4096 * SPC )) /dev/zero > $W/hole
+mcopy -i $IMGT $W/hole ::HOLE.DAT
+head -c $(( (FREE - 12) * 4096 * SPC )) /dev/urandom > $W/fill2
+mcopy -i $IMGT $W/fill2 ::FILL.DAT
+mdel -i $IMGT ::HOLE.DAT
+"$W/t" $IMGT fast 100000 9600 probe | tee $W/q9
+grep -qE "^fast=Full file=Some\(0\) alloc=$((49152 * SPC)) " $W/q9 || { echo "FAIL at line $LINENO"; exit 1; }
+mcopy -n -i $IMGT ::FILL.DAT $W/o && cmp $W/o $W/fill2 && echo "ok: the probe touched only the allocation (the next file intact)" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGT
 # power cut before every operation (block write / page program / erase)
 cp $W/fastbase.img $W/fcut0.img
 NOPS=$("$W/t" $W/fcut0.img fast 6000 4800 | grep -oE " ops=[0-9]+" | cut -d= -f2)

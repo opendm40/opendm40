@@ -1,4 +1,4 @@
-//! Subdirectories on the SPI-flash FAT16 volume (the internal storage; it is
+//! Subdirectories on the SPI-flash FAT volume (the internal storage; it is
 //! no longer exported over USB in the native build, see vdisk.rs).
 //!
 //! Layout: the root keeps what the vendor FS-loader and the recovery need
@@ -158,7 +158,7 @@ fn fat_get(dev: &mut dyn BlockDevice, v: &Vol, c: u32, fat: &mut [u8; BLK], cur:
         }
         *cur = fb;
     }
-    Some(le16(fat, ((c % FPER) * 2) as usize))
+    Some(v.fat_rd(&fat[..], c))
 }
 
 /// The directory view of the chain starting at `start`.
@@ -257,11 +257,10 @@ fn fat_set(dev: &mut dyn BlockDevice, v: &Vol, ents: &[(u32, u16)], want: Option
                 return Err(Err::Io);
             }
             for &(c, val) in ents.iter().filter(|&&(c, _)| c / FPER == fb) {
-                let o = ((c % FPER) * 2) as usize;
-                if k == 0 && want.is_some_and(|w| !w(le16(&buf[..], o))) {
+                if k == 0 && want.is_some_and(|w| !w(v.fat_rd(&buf[..], c))) {
                     return Err(Err::Io); // changed since the scan
                 }
-                buf[o..o + 2].copy_from_slice(&val.to_le_bytes());
+                v.fat_wr(&mut buf[..], c, val as u32);
             }
             if !(dev.write_block(lba, buf) && verify(dev, lba, buf, tmp)) {
                 return Err(Err::Io);

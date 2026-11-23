@@ -116,7 +116,7 @@ pub enum State {
     Done,
     /// Ended: the allocation (the free space) is full.
     Full,
-    /// No disk / not the expected FAT16 volume.
+    /// No disk / not the expected FAT volume.
     NoDisk,
     /// A read / write / erase failed, or the disk changed under us.
     Error,
@@ -494,7 +494,7 @@ pub fn begin(bytes: u32, dur_s: u32) -> Result<(), &'static str> {
     j.state = State::Prep;
     j.ph = Ph::Bpb;
     j.dur_us = dur_s as u64 * 1_000_000;
-    j.need = bytes.div_ceil(BLK as u32);
+    j.need = bytes.div_ceil(BLK as u32); // blocks; clusters from `bpb` on
     Ok(())
 }
 
@@ -602,7 +602,7 @@ pub fn status() -> Status {
     Status {
         state: j.state,
         file: j.has_file.then_some(j.n),
-        alloc: j.enc.cap.max(j.ncl * BLK as u32),
+        alloc: j.enc.cap.max(j.ncl * j.v.as_ref().map_or(1, |v| v.spc) * BLK as u32),
         bytes: j.enc.wr,
         rows: j.enc.rows,
         pct: j.pct,
@@ -1025,9 +1025,7 @@ mod prep {
             Err(crate::fatdir::Err::Io) => return Err(State::Error),
             Err(_) => return Err(State::Full),
         };
-        if v.spc != 1 {
-            return Err(State::NoDisk); // 1 cluster = 1 block on this disk
-        }
+        j.need = j.need.div_ceil(v.spc); // FAT12: 2 blocks per cluster
         j.v = Some(v);
         j.cur = NONE;
         j.i = 0;
@@ -1101,7 +1099,7 @@ mod prep {
             }
             j.cur = fb;
         }
-        Some(le16(fat, ((c % FPER) * 2) as usize))
+        Some(v.fat_rd(&fat[..], c))
     }
 
     /// One FAT 1 block of free clusters into the extents.
@@ -1165,8 +1163,7 @@ mod prep {
     /// SE4K, waited for like the others). TPP = (mean, max) us.
     fn probe(j: &mut Job, d: &mut dyn Disk) -> Result<(), State> {
         let v = vol(j);
-        let cb = BLK as u32;
-        let a = v.data_start * cb + (cl_of(j, j.ncl - 1) - 2) * cb;
+        let a = v.clba(cl_of(j, j.ncl - 1)) * BLK as u32;
         if j.i == 0 {
             let zeros = [0u8; 256];
             let (mut sum, mut max) = (0u32, 0u32);
@@ -1204,22 +1201,25 @@ mod prep {
         Ok(())
     }
 
-    /// Clusters `i..` that are consecutive in the chain (in one extent).
-    fn run_left(j: &Job, mut i: u32) -> u32 {
-        for &(_, n) in &j.ext[..j.next] {
-            if i < n {
-                return n - i;
+    /// Erase sector `u` (4 KiB) of the allocation: its flash byte address
+    /// and the sectors from it to its extent's end (an extent's clusters
+    /// are consecutive, so are their blocks).
+    fn sec_at(j: &Job, v: &crate::fatren::Vol, mut u: u32) -> (u32, u32) {
+        for &(c, n) in &j.ext[..j.next] {
+            let k = n * v.spc;
+            if u < k {
+                return ((v.clba(c) + u) * BLK as u32, k - u);
             }
-            i -= n;
+            u -= k;
         }
-        0
+        (0, 0)
     }
 
-    /// One blank check or erase step.
+    /// One blank check or erase step, per 4 KiB erase sector (`ei`, of
+    /// ncl * spc).
     fn erase(j: &mut Job, d: &mut dyn Disk) -> Result<(), State> {
         let v = vol(j);
-        let cb = BLK as u32;
-        let base = v.data_start * cb; // byte address of cluster 2
+        let units = j.ncl * v.spc;
         if j.erasing {
             if d.nor().busy() {
                 if cyc().wrapping_sub(j.t_op) > OP_TIMEOUT_CYC {
@@ -1232,7 +1232,7 @@ mod prep {
             j.group = 0;
             j.dirty = false;
         }
-        if j.ei >= j.ncl {
+        if j.ei >= units {
             j.pct = 100;
             j.fat_k = 0;
             j.fat_fb = 0;
@@ -1240,19 +1240,17 @@ mod prep {
             j.i = 0;
             return Ok(());
         }
-        j.pct = (j.ei as u64 * 100 / j.ncl as u64) as u8;
-        // A group = an aligned 64 KiB block of 16 clusters, all ours.
+        j.pct = (j.ei as u64 * 100 / units as u64) as u8;
+        // A group = an aligned 64 KiB block of 16 sectors, all ours.
         if j.group == 0 {
-            let c = cl_of(j, j.ei);
-            let a = base + (c - 2) * cb;
-            j.group = if a % 0x1_0000 == 0 && run_left(j, j.ei) >= 16 { 16 } else { 1 };
+            let (a, left) = sec_at(j, &v, j.ei);
+            j.group = if a % 0x1_0000 == 0 && left >= 16 { 16 } else { 1 };
             j.dirty = false;
             j.i = 0; // clusters of the group checked
         }
         if j.i < j.group {
-            // Blank check of one cluster (a 4 KiB read).
-            let c = cl_of(j, j.ei + j.i);
-            let a = base + (c - 2) * cb;
+            // Blank check of one sector (a 4 KiB read).
+            let a = sec_at(j, &v, j.ei + j.i).0;
             let buf = &mut blocks()[2];
             if !d.nor().read(a, &mut buf[..]) {
                 return Err(State::Error);
@@ -1273,8 +1271,7 @@ mod prep {
             j.group = 0;
             return Ok(());
         }
-        let c = cl_of(j, j.ei);
-        d.nor().erase(base + (c - 2) * cb, j.group == 16);
+        d.nor().erase(sec_at(j, &v, j.ei).0, j.group == 16);
         j.wrote = true;
         j.erasing = true;
         j.t_op = cyc();
@@ -1319,8 +1316,7 @@ mod prep {
                 if c / FPER != fb {
                     continue;
                 }
-                let o = ((c % FPER) * 2) as usize;
-                let old = le16(&buf[..], o);
+                let old = v.fat_rd(&buf[..], c);
                 let want = if trim {
                     if fi + 1 < j.used {
                         cl_of(j, fi + 1)
@@ -1344,7 +1340,7 @@ mod prep {
                 if first && old != expect {
                     return Err(State::Error);
                 }
-                buf[o..o + 2].copy_from_slice(&(want as u16).to_le_bytes());
+                v.fat_wr(&mut buf[..], c, want);
             }
             k += n;
         }
@@ -1376,7 +1372,7 @@ mod prep {
             e[x..x + 2].copy_from_slice(&DATE.to_le_bytes());
         }
         e[0x1A..0x1C].copy_from_slice(&(j.ext[0].0 as u16).to_le_bytes());
-        e[0x1C..0x20].copy_from_slice(&(j.ncl * BLK as u32).to_le_bytes());
+        e[0x1C..0x20].copy_from_slice(&(j.ncl * v.spc * BLK as u32).to_le_bytes());
         if !(d.write_block(lba, &buf[..]) && verify(d, lba, buf, tmp)) {
             return Err(State::Error);
         }
@@ -1396,7 +1392,7 @@ mod prep {
         }
         let v = vol(j);
         let fifo = &mut crate::csvlog::lend_fifo()[..];
-        j.enc = FastEnc::new(&j.ext[..j.next], v.data_start * BLK as u32, BLK as u32, fifo.len(), h.par.p_us());
+        j.enc = FastEnc::new(&j.ext[..j.next], v.data_start * BLK as u32, v.spc * BLK as u32, fifo.len(), h.par.p_us());
         let n = crate::dlog::file_header(crate::dlog::KIND_FAST, h.unit, &h.text[..h.text.len().min(512)], &mut j.hdr[..crate::dlog::FHDR + 512]);
         j.hdr[n..n + crate::dlog::FAST_PAR].copy_from_slice(&h.par.bytes());
         j.hdr_n = (n + crate::dlog::FAST_PAR) as u16;
@@ -1424,7 +1420,7 @@ mod prep {
         }
         let o = ((j.slot % PER) * 32) as usize;
         let e = &mut buf[o..o + 32];
-        if e[..11] != numbered_name(b"FAST", j.n, b"DLG")[..] || le16(e, 0x1A) != j.ext[0].0 || le32(e, 0x1C) != j.ncl * BLK as u32 {
+        if e[..11] != numbered_name(b"FAST", j.n, b"DLG")[..] || le16(e, 0x1A) != j.ext[0].0 || le32(e, 0x1C) != j.ncl * v.spc * BLK as u32 {
             return Err(State::Error);
         }
         let size = j.enc.wr;
@@ -1432,7 +1428,7 @@ mod prep {
         if !(d.write_block(lba, &buf[..]) && verify(d, lba, buf, tmp)) {
             return Err(State::Error);
         }
-        j.used = size.div_ceil(BLK as u32).max(1);
+        j.used = size.div_ceil(v.spc * BLK as u32).max(1);
         if j.used >= j.ncl {
             return finish_ok(j);
         }

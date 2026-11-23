@@ -242,7 +242,7 @@ is exposed.
 | [`src/boot.rs`](../src/boot.rs) | shim decision `shim()`, key-hold gesture, PA2 entry `loader_pa2()`, reset flags, power-key pin, power hold on/off, backup-SRAM words, loader marker check + `zero_marker()` (FMC), `DBG:BOOT?` text |
 | [`src/native.rs`](../src/native.rs) | after the shim: `.data`/`.bss` init, `pre_main` + `main` |
 | [`src/board.rs`](../src/board.rs) | board bring-up (everything the stock firmware used to do before opendm40 ran) |
-| [`src/fatren.rs`](../src/fatren.rs) | FAT16 root-directory edits: rename the installed image, remove a leftover `DM40RCVR.BIN` (the trigger file of an earlier build) |
+| [`src/fatren.rs`](../src/fatren.rs) | FAT16 / FAT12 root-directory edits: rename the installed image, remove a leftover `DM40RCVR.BIN` (the trigger file of an earlier build) |
 | [`src/clock.rs`](../src/clock.rs) | `init_core(Src)`: measured stock values, bounded waits, IRC16M fallback, no FLASH_ACR write |
 | [`src/wdt.rs`](../src/wdt.rs) | `start::fwdgt()` (shim); `powered_off()` (end of the app's power-off) |
 | [`src/scpi.rs`](../src/scpi.rs) | `DBG:BOOT?`; `DBG:UPDATE`: zero the marker + reset; `DBG:LOADER` = `DBG:RECOVER`: PA2 entry |
@@ -1848,7 +1848,15 @@ first), after:
 - 1–2 FATs;
 - the root a whole number of sectors;
 - total sectors ≤ device;
-- FAT16 by cluster count (4085..65524), with the FAT covering every cluster.
+- FAT16 by cluster count (4085..65524), with the FAT covering every cluster;
+  or FAT12 (fewer than 4085 clusters) whose entries fit the first FAT block
+  (at most 2046 clusters). The units with the BoyaMicro BY25Q128ES flash come
+  with such a volume, made by Windows: 2 sectors per cluster, 1-sector FATs,
+  2044 clusters. Every disk writer handles both (`Vol::fat12`,
+  `fat_rd` / `fat_wr`; the raw readers `dlog::fat_off` / `fat_dec`); with 2
+  blocks per cluster, the settings file's two slots are the two blocks of
+  one cluster, and a host's staged update blocks are paired into clusters
+  at the commit (vwrite.rs `commit`).
 
 **Steps.** The order means an interruption leaves at worst lost clusters,
 never two live entries with the same name or a live entry on freed clusters.
@@ -1884,7 +1892,9 @@ never two live entries with the same name or a live entry on freed clusters.
 `fatren-dry-run` only reports.
 
 **Host test:** [`tools/fatren-test/run.sh`](../tools/fatren-test/run.sh). It uses mkfs.fat images in
-the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
+the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters;
+`FAT12=1` runs it all on the later units' FAT12 volume (suite
+`fatren-test-fat12`).
 - **Rename** (update files are real packed images, `dm40fw.py pack`; the
   marker passed to the test is the decoded header of the installed one):
   - dry run writes nothing;

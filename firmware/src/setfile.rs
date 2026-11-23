@@ -1,5 +1,5 @@
 //! The settings' copy on the SPI disk: `_SETTING.BIN` in the root of the
-//! FAT16 volume, next to `_DM40PRV.BIN`. The live copy stays in the backup
+//! FAT volume, next to `_DM40PRV.BIN`. The live copy stays in the backup
 //! SRAM (persist.rs); that one is lost when the meter is switched off, this
 //! one is what the next power-on starts from.
 //!
@@ -267,13 +267,13 @@ fn locate(dev: &mut dyn BlockDevice) -> Option<bool> {
     if size != SIZE {
         return None;
     }
-    // One erase sector per slot, each its own: one 4 KiB block per cluster
-    // (this volume: mkfs -s 1); else no file copy.
-    if spc != 1 || n != SLOTS {
+    // One erase sector (4 KiB block) per slot, each its own: slot k is the
+    // file's block k (FAT16: a cluster each; FAT12: both in one cluster).
+    if spc as usize * n != SLOTS {
         return Some(false);
     }
-    for (l, &c) in st().lba.iter_mut().zip(cl.iter()) {
-        *l = data + c as u32 - 2;
+    for (k, l) in st().lba.iter_mut().enumerate() {
+        *l = data + (cl[k / spc as usize] as u32 - 2) * spc + (k % spc as usize) as u32;
     }
     Some(true)
 }

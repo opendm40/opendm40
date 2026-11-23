@@ -1,4 +1,4 @@
-//! Rename the INSTALLED `dm40*.bin` on the SPI-flash FAT16 volume to
+//! Rename the INSTALLED `dm40*.bin` on the SPI-flash FAT volume to
 //! `_DM40PRV.BIN` so the FS-loader stops re-installing it.
 //!
 //! Why: in its install state the FS-loader (0x080a0000) installs the first
@@ -46,7 +46,8 @@
 //! through the BlockDevice (spiflash.rs: skip if unchanged, program without
 //! erase where possible, erase + program otherwise, read back), and is read
 //! back again here and compared. The volume is not touched unless the boot
-//! sector is a sane FAT16 with sector size == device block size (4096).
+//! sector is a sane FAT16, or a FAT12 whose entries fit one FAT block (the
+//! later units: `parse_bpb`), with sector size == device block size (4096).
 //!
 //! Host test: tools/fatren-test/run.sh (mkfs.fat image, mtools, fsck.fat).
 
@@ -74,7 +75,7 @@ pub enum Status {
     NotRun,
     /// No SPI flash / medium.
     NoMedium,
-    /// Boot sector does not look like the expected FAT16 volume; untouched.
+    /// Boot sector does not look like the expected FAT volume; untouched.
     BadBpb,
     /// No installed dm40*.bin in the root (staged ones may be there).
     Clean,
@@ -140,12 +141,23 @@ pub(crate) struct Vol {
     pub root_entries: u32,
     /// Data clusters (valid cluster numbers 2..=clusters + 1).
     pub clusters: u32,
+    /// FAT12 (the later units' disk, `parse_bpb`): entries of 12 bits, all
+    /// in the first FAT block. Read and write them with `fat_rd` / `fat_wr`.
+    pub fat12: bool,
     /// Directory view (src/fatdir.rs): 0 = the root directory; else a
     /// subdirectory whose cluster chain is `dcl[..dn]` (`dblocks` /
     /// `dentries` / `dlba` address either one). `parse_bpb` gives the root.
     pub dn: u8,
     pub dcl: [u16; DIR_MAX_CL],
 }
+
+// The raw readers' FAT entry helpers (dlog.rs: its host tests have no
+// fatren).
+pub(crate) use crate::dlog::{fat_dec, fat_off};
+
+/// FAT entries per 4 KiB FAT block (FAT16); `c / FPER` is entry `c`'s
+/// block on either FAT type (`Vol::fat12`).
+pub(crate) const FPER: u32 = (BLK / 2) as u32;
 
 /// Clusters of a subdirectory at most (src/fatdir.rs; 16 x 4 KiB = 2048
 /// entries on this disk).
@@ -176,6 +188,29 @@ impl Vol {
     #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
     pub fn clba(&self, c: u32) -> u32 {
         self.data_start + (c - 2) * self.spc
+    }
+    /// FAT entry `c` from its FAT block `b` (`c / FPER`, FPER = 2048: a
+    /// FAT12 volume has all its entries in block 0), as FAT16 values: a
+    /// FAT12 0xFF0.. (reserved, bad 0xFF7, end of chain 0xFF8..) reads
+    /// 0xFFF0.., so `>= 0xFFF8` is the end of a chain on either.
+    #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
+    #[inline(never)]
+    pub fn fat_rd(&self, b: &[u8], c: u32) -> u32 {
+        let o = fat_off(self.fat12, c) % BLK as u32;
+        fat_dec(self.fat12, &b[o as usize..], c)
+    }
+    /// Set FAT entry `c` in its FAT block `b` to `v` (a FAT16 value; FAT12
+    /// keeps its low 12 bits and the neighbour's half byte).
+    #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
+    #[inline(never)]
+    pub fn fat_wr(&self, b: &mut [u8], c: u32, v: u32) {
+        // FAT16: the 16 bits at 2c; FAT12: 12 bits at 3c / 2, shifted by 4
+        // for an odd c (the neighbour keeps its half byte).
+        let (sh, m) = if self.fat12 { ((c & 1) * 4, 0xFFF) } else { (0, 0xFFFF) };
+        let o = (fat_off(self.fat12, c) % BLK as u32) as usize;
+        let w = (le16(b, o) & !(m << sh)) | (v & m) << sh;
+        b[o] = w as u8;
+        b[o + 1] = (w >> 8) as u8;
     }
     /// The root view of the same volume.
     #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
@@ -229,7 +264,15 @@ pub(crate) fn parse_bpb(b: &[u8], dev_blocks: u32) -> Option<Vol> {
     }
     let clusters = (tot - data_start) / spc;
     // FAT16 by the cluster-count rule, and the FAT must cover every cluster.
-    if !(4085..65525).contains(&clusters) || fatsz * bps / 2 < clusters + 2 {
+    // FAT12 (the later units: 2 blocks per cluster, 2044 clusters) only
+    // when its entries fit the first FAT block as FAT16's would (at most
+    // FPER), so `c / FPER` is the block on both.
+    let fat12 = clusters < 4085;
+    if fat12 {
+        if clusters + 2 > FPER || (clusters + 2) * 3 / 2 + 1 > bps {
+            return None;
+        }
+    } else if clusters >= 65525 || fatsz * bps / 2 < clusters + 2 {
         return None;
     }
     Some(Vol {
@@ -242,6 +285,7 @@ pub(crate) fn parse_bpb(b: &[u8], dev_blocks: u32) -> Option<Vol> {
         root_blocks,
         root_entries,
         clusters,
+        fat12,
         dn: 0,
         dcl: [0; DIR_MAX_CL],
     })
@@ -436,9 +480,7 @@ fn flush(dev: &mut dyn BlockDevice, v: &Vol, fb: u32, bits: &[u32; BLK / 2 / 32]
         for (w, &word) in bits.iter().enumerate() {
             for b in 0..32 {
                 if word & (1 << b) != 0 {
-                    let o = (w * 32 + b) * 2;
-                    buf[o] = 0;
-                    buf[o + 1] = 0;
+                    v.fat_wr(&mut buf[..], fb * FPER + (w * 32 + b) as u32, 0);
                 }
             }
         }
@@ -455,7 +497,7 @@ fn flush(dev: &mut dyn BlockDevice, v: &Vol, fb: u32, bits: &[u32; BLK / 2 / 32]
 /// Freeing only clears bits (1 -> 0), so the FAT blocks are programmed
 /// without an erase.
 pub(crate) fn free_chain(dev: &mut dyn BlockDevice, v: &Vol, start: u32, fat1: &mut [u8; BLK], buf: &mut [u8; BLK], tmp: &mut [u8; BLK]) -> (bool, u32) {
-    let per = (BLK / 2) as u32;
+    let per = FPER;
     let max = v.clusters + 1; // highest valid cluster number
     let mut bits = [0u32; BLK / 2 / 32];
     let mut cur_fb = u32::MAX;
@@ -481,7 +523,7 @@ pub(crate) fn free_chain(dev: &mut dyn BlockDevice, v: &Vol, start: u32, fat1: &
             }
         }
         let i = (c % per) as usize;
-        let next = le16(fat1, i * 2);
+        let next = v.fat_rd(&fat1[..], c);
         if next == 0 {
             break; // already free (e.g. looped back into a freed cluster)
         }

@@ -16,10 +16,10 @@ cd "$(dirname "$0")"
 ROOT=$(cd ../.. && pwd)
 SUITES="accuracy-test bargraph-test bt-scpi-test cring-test dbgsrc-test decode-test dlog-test fft-test gen-test
 autooff-test logfmt-test meter-test scpi-test scpi-msg-test sinc-test ch2-test touch-test trig-test
-ui-render gallery-test fatren-test font-matrix stock-ui"
+ui-render gallery-test fatren-test fatren-test-fat12 font-matrix stock-ui"
 # Start order: the long ones first (seconds on a GitHub runner, 2026-10-25:
 # ui-render 275, fatren-test 231, dlog-test 52, font-matrix 33, the rest < 10).
-LONG="ui-render fatren-test dlog-test font-matrix"
+LONG="ui-render fatren-test fatren-test-fat12 dlog-test font-matrix"
 [ $# -gt 0 ] && SUITES="$*"
 JOBS=${JOBS:-$(nproc)}
 OUT=$(mktemp -d)
@@ -41,7 +41,11 @@ run() {
     *) args= ;;
     esac
     t0=$(date +%s)
-    "./$s/run.sh" $args
+    case $s in
+    # fatren-test on the later units' FAT12 disk (2 blocks per cluster).
+    fatren-test-fat12) FAT12=1 ./fatren-test/run.sh ;;
+    *) "./$s/run.sh" $args ;;
+    esac
     rc=$?
     echo "$rc $(( $(date +%s) - t0 ))" > "$OUT/$s.rc"
     return $rc

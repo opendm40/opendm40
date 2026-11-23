@@ -25,7 +25,7 @@
 //! `fmt_row` on both sides.
 //!
 //! Pure code (no hardware): the coder, `Gen` over any `Src`, `FatFile` over
-//! any `Raw` byte reader (FAT16 chain walking) and the root scan `scan`.
+//! any `Raw` byte reader (FAT16 / FAT12 chain walking) and the root scan `scan`.
 //! Device glue (the SPI reader, MMEM:DATA?, the refresh flag of vdisk.rs) at the end.
 //! Host tests: tools/dlog-test (round trip vs the old writer, truncation at
 //! every byte), tools/fatren-test (csvlog on a FAT image, fsck, dlog.py).
@@ -2011,14 +2011,14 @@ pub fn fast_rows<S: Src>(s: &mut S, w: &mut Win, c: &FChunk, p: &FPar, f: &mut d
     true
 }
 
-// ------------------------------------------------------------- FAT16 files
+// ------------------------------------------------------------- FAT files
 
 /// Raw bytes of the disk (SPI flash: byte address = block * 4096 + offset).
 pub trait Raw {
     fn read_at(&mut self, addr: u32, buf: &mut [u8]) -> bool;
 }
 
-/// FAT16 volume geometry in bytes.
+/// FAT16 / FAT12 volume geometry in bytes.
 #[derive(Clone, Copy, Debug)]
 pub struct Geo {
     pub fat: u32,
@@ -2027,6 +2027,36 @@ pub struct Geo {
     pub data: u32,
     pub cb: u32,
     pub clusters: u32,
+    /// FAT12 (fatren.rs `Vol::fat12`: fewer than 4085 clusters).
+    pub fat12: bool,
+}
+
+/// Byte offset of FAT entry `c` in the FAT: its two bytes there hold it
+/// (`fat_dec`). For the raw readers (dlog.rs, screenshot.rs `prep_step`).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+pub fn fat_off(fat12: bool, c: u32) -> u32 {
+    if fat12 { c * 3 / 2 } else { c * 2 }
+}
+
+/// FAT entry `c` from the two bytes at `fat_off` (`b[0..2]`), as a FAT16
+/// value (FAT12 0xFF0.. reads 0xFFF0..).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+pub fn fat_dec(fat12: bool, b: &[u8], c: u32) -> u32 {
+    let w = b[0] as u32 | (b[1] as u32) << 8;
+    if !fat12 {
+        return w;
+    }
+    let v = w >> ((c & 1) * 4) & 0xFFF;
+    if v >= 0xFF0 { v | 0xF000 } else { v }
+}
+
+impl Geo {
+    /// FAT 1 entry `c` (FAT16 values, fatren.rs `fat_dec`).
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    fn fat_next(&self, raw: &mut dyn Raw, c: u32) -> Option<u32> {
+        let mut b = [0u8; 2];
+        raw.read_at(self.fat + fat_off(self.fat12, c), &mut b).then(|| fat_dec(self.fat12, &b, c))
+    }
 }
 
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
@@ -2048,7 +2078,7 @@ pub fn geometry(raw: &mut dyn Raw) -> Option<Geo> {
     let root = (rsvd + nfats * fatsz) * bps;
     let data = root + re * 32;
     let clusters = (tot * bps).saturating_sub(data) / (spc * bps);
-    Some(Geo { fat: rsvd * bps, root, root_entries: re, data, cb: spc * bps, clusters })
+    Some(Geo { fat: rsvd * bps, root, root_entries: re, data, cb: spc * bps, clusters, fat12: clusters < 4085 })
 }
 
 /// One root file as a `Src` (follows its FAT 1 chain; caches the position).
@@ -2067,11 +2097,10 @@ impl<R: Raw> FatFile<R> {
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn next(&mut self, c: u32) -> Option<u32> {
-        let mut b = [0u8; 2];
-        if c < 2 || c > self.g.clusters + 1 || !self.raw.read_at(self.g.fat + c * 2, &mut b) {
+        if c < 2 || c > self.g.clusters + 1 {
             return None;
         }
-        let n = le16(&b, 0);
+        let n = self.g.fat_next(&mut self.raw, c)?;
         (2..0xFFF0).contains(&n).then_some(n)
     }
 }
@@ -2186,11 +2215,9 @@ pub fn each_entry<F: FnMut(&[u8; 32]) -> bool>(raw: &mut dyn Raw, g: &Geo, start
         if cl == 0 {
             return true;
         }
-        let mut b = [0u8; 2];
-        if !raw.read_at(g.fat + cl * 2, &mut b) {
+        let Some(next) = g.fat_next(raw, cl) else {
             return false;
-        }
-        let next = le16(&b, 0);
+        };
         hops += 1;
         if !(2..=g.clusters + 1).contains(&next) || hops >= 64 {
             return true;
