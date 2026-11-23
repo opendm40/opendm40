@@ -144,7 +144,7 @@ scope, generator) shares one ground.
 
 | Function | Part | Source |
 |---|---|---|
-| MCU | GigaDevice [GD32F427VGT6](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf), Cortex-M4F, LQFP100 | marking `GD32F427 VGT6` in photo [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg); review; BOM |
+| MCU | GigaDevice [GD32F427VGT6](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf), Cortex-M4F, LQFP100; on some units [GD32F470VGT6](datasheets/gigadevice-gd32f470xx-datasheet-rev2.2.pdf) ([MCU and clocks](#mcu-and-clocks)) | marking `GD32F427 VGT6` in photo [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg); review; BOM. `GD32F470 VGT6` in the photo of [#328](https://github.com/opendm40/opendm40/issues/328) |
 | MCU crystal | 25.000 MHz | photo ([main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg), crystal next to the SPI flash) and PLL read back ([`firmware/src/clock.rs`](../firmware/src/clock.rs)). The community BOM says 26 MHz (contradiction, see [Unknowns](#unknowns)) |
 | SPI flash | Winbond [W25Q128JV](datasheets/winbond-w25q128jv-revI.pdf), 16 MiB | code ([`firmware/src/spiflash.rs`](../firmware/src/spiflash.rs), JEDEC check at boot); BOM. The BOM calls it QSPI: the chip can do quad I/O, but the board wires it as a plain 4-wire SPI ([SPI flash](#spi-flash-usb-disk)) |
 | LCD controller | [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) (ID read 0x9488) | ID 0x9488 read by `board::init` ([`firmware/TODO.md`](../firmware/TODO.md) T1); stock init sequence `stock/re/analysis/lcd_buzzer_v2_6.h`. Not in the BOM |
@@ -184,8 +184,28 @@ Small SOT-23 / SOT-89 / MSOP parts in [charger-tp4056-and-power.jpg](photos/char
 *MCU area: GD32F427VGT6, SPI flash, 25 MHz crystal, Bluetooth chip with 24 MHz crystal and antenna, CA-IS3741HW, LT61 transformers, USB-C, debug pads.*
 
 - [GD32F427VGT6](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf): Cortex-M4F, 1 MB internal flash, 256 KB SRAM as 64 KB TCM
-  (0x10000000) + 128 KB SRAM0/1 (0x20000000) + 64 KB ADDSRAM (0x20020000).
-  (`stock/re/ANALYSIS.md` 4: dump sizes and stack top).
+  (0x10000000) + 112 KB SRAM0 (0x20000000) + 16 KB SRAM1 (0x2001C000) + 64 KB SRAM2 (0x20020000)
+  (datasheet memory map; `stock/re/ANALYSIS.md` 4: dump sizes and stack top). No ADDSRAM
+  ([`firmware/docs/hidden-memory.md`](../firmware/docs/hidden-memory.md)).
+- Some units have a **GD32F470VGT6** instead (photo in [#328](https://github.com/opendm40/opendm40/issues/328),
+  date code AC2611; [datasheet](datasheets/gigadevice-gd32f470xx-datasheet-rev2.2.pdf)). Same LQFP100 pinout
+  and power pins; the F470 has everything the F427 has, plus:
+
+  | | GD32F427VG | GD32F470VG | Source |
+  |---|---|---|---|
+  | AHB / APB1 / APB2 max | 200 / 50 / 100 MHz | 240 / 60 / 120 MHz | datasheets, table 4-3 |
+  | Flash: zero-wait code area + data area | 512 + 512 KB | 768 + 256 KB | table 2-1 |
+  | SRAM | 256 KB | 512 KB: the above + ADDSRAM from 0x20030000 | table 2-1, memory map |
+  | TLI (RGB LCD controller), IPA (2D accelerator) | — | yes | table 2-1 |
+  | SPI / UART | 3 / 2 | 5 / 4 | table 2-1 |
+  | Option bits DBS (two 512 KB banks, sectors 12..19 in the upper half), DRP | — | yes, factory value 0 | GD32F4xx user manual Rev 3.3, FMC_OBCTL0 |
+  | Start-up time | 130..150 ms | 190..215 ms | table 4-5 |
+
+  Both have the 4 KB page erase (user manual 2.3.4). The stock firmware (application v2.6..v2.8,
+  ROM bootloader, FS-loader) uses none of the F470-only blocks, writes no option bytes and reads no
+  chip-ID register; it runs the PLL at 200 MHz (`stock/re/docs/gd32f470-stock-check.md`). opendm40
+  runs on the F470 unit of #328. How much of the ADDSRAM the VG has: 256 KB by table 2-1
+  (*inferred*: 512 KB total minus the 256 KB above).
 - HXTAL 25 MHz, PLL M=25 N=400 P=2 -> 200 MHz SYSCLK / HCLK; APB1 50 MHz,
   timer kernel clocks 200 MHz (TIMPRE). RCU_PLL read back on the device
   ([`firmware/src/clock.rs`](../firmware/src/clock.rs), [`firmware/src/genplan.rs`](../firmware/src/genplan.rs)).
@@ -207,6 +227,11 @@ MOSI PC3 (AF5), CS PE4 (GPIO, active low), mode 3. The stock runs it at
 FAT16 volume with 4096-byte sectors: the USB disk of the meter
 ([`firmware/src/spiflash.rs`](../firmware/src/spiflash.rs), `stock/re/analysis/spiflash_v2_6.h`). The FS-loader also uses it for
 updates.
+
+Other chips on later units: BoyaMicro BY25Q128ES (user report, [#327](https://github.com/opendm40/opendm40/pull/327)) and
+NOR-MEM NM25Q128EVBSIG (photo in [#328](https://github.com/opendm40/opendm40/issues/328), the GD32F470 unit). Both units
+reported a disk opendm40 could not write; for the BY25Q128ES the cause is a FAT12 volume (#327). The JEDEC ID of the
+NM25Q128 and its unit's volume format are *unknown*.
 
 ## LCD
 
@@ -357,7 +382,9 @@ scope and generator ground (*inferred*).
 
 ## Bluetooth
 
-- Module / chip: Jieli BP2A838-20A2 (BOM and the photo), own 24 MHz crystal, PCB meander antenna at the board edge
+- Module / chip: Jieli BP2A838-20A2 (BOM and the photo; `BP3F030-28A2` on the GD32F470 unit of
+  [#328](https://github.com/opendm40/opendm40/issues/328): Jieli marks the part after the dash, the rest is a
+  serial / lot code, [chip markings](https://kagaimiq.github.io/jielie/chips/chip-marks.html)), own 24 MHz crystal, PCB meander antenna at the board edge
   ([main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg)). Classic SPP (RFCOMM channel 1,
   [`docs/bt-protocol.md`](../docs/bt-protocol.md)) and BLE ([`firmware/src/bt.rs`](../firmware/src/bt.rs)).
 - UART4: TX PA0, RX PA1 (AF8), 115200 8N1, no RTS/CTS ([`bt.rs`](../firmware/src/bt.rs)).
@@ -861,3 +888,6 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 17. What differs on Hardware V1.2: one unit reports it with the same V4.0
     loader code; this unit reports V1.1 (`0x080A4011`, `0x080A4012`).
 18. The LCD controller on units with hardware version `03` ([LCD](#lcd)).
+19. GD32F470 units: their DBS option bit (factory value 0; the stock FS-loader erases by sector
+    number, which DBS = 1 would change), whether their ADDSRAM, IPA and TLI respond, and what else
+    differs on that board.
