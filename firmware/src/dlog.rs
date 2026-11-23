@@ -2046,7 +2046,7 @@ pub fn fat_dec(fat12: bool, b: &[u8], c: u32) -> u32 {
     if !fat12 {
         return w;
     }
-    let v = if c & 1 != 0 { w >> 4 } else { w & 0xFFF };
+    let v = w >> ((c & 1) * 4) & 0xFFF;
     if v >= 0xFF0 { v | 0xF000 } else { v }
 }
 

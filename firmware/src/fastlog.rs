@@ -602,7 +602,7 @@ pub fn status() -> Status {
     Status {
         state: j.state,
         file: j.has_file.then_some(j.n),
-        alloc: j.enc.cap.max(j.ncl * j.v.map_or(1, |v| v.spc) * BLK as u32),
+        alloc: j.enc.cap.max(j.ncl * j.v.as_ref().map_or(1, |v| v.spc) * BLK as u32),
         bytes: j.enc.wr,
         rows: j.enc.rows,
         pct: j.pct,
@@ -1201,21 +1201,18 @@ mod prep {
         Ok(())
     }
 
-    /// Clusters `i..` that are consecutive in the chain (in one extent).
-    fn run_left(j: &Job, mut i: u32) -> u32 {
-        for &(_, n) in &j.ext[..j.next] {
-            if i < n {
-                return n - i;
+    /// Erase sector `u` (4 KiB) of the allocation: its flash byte address
+    /// and the sectors from it to its extent's end (an extent's clusters
+    /// are consecutive, so are their blocks).
+    fn sec_at(j: &Job, v: &crate::fatren::Vol, mut u: u32) -> (u32, u32) {
+        for &(c, n) in &j.ext[..j.next] {
+            let k = n * v.spc;
+            if u < k {
+                return ((v.clba(c) + u) * BLK as u32, k - u);
             }
-            i -= n;
+            u -= k;
         }
-        0
-    }
-
-    /// Flash byte address of erase sector `u` (4 KiB) of the allocation:
-    /// block `u % spc` of file cluster `u / spc`.
-    fn sec_addr(j: &Job, v: &crate::fatren::Vol, u: u32) -> u32 {
-        (v.clba(cl_of(j, u / v.spc)) + u % v.spc) * BLK as u32
+        (0, 0)
     }
 
     /// One blank check or erase step, per 4 KiB erase sector (`ei`, of
@@ -1246,15 +1243,14 @@ mod prep {
         j.pct = (j.ei as u64 * 100 / units as u64) as u8;
         // A group = an aligned 64 KiB block of 16 sectors, all ours.
         if j.group == 0 {
-            let a = sec_addr(j, &v, j.ei);
-            let left = run_left(j, j.ei / v.spc) * v.spc - j.ei % v.spc;
+            let (a, left) = sec_at(j, &v, j.ei);
             j.group = if a % 0x1_0000 == 0 && left >= 16 { 16 } else { 1 };
             j.dirty = false;
             j.i = 0; // clusters of the group checked
         }
         if j.i < j.group {
             // Blank check of one sector (a 4 KiB read).
-            let a = sec_addr(j, &v, j.ei + j.i);
+            let a = sec_at(j, &v, j.ei + j.i).0;
             let buf = &mut blocks()[2];
             if !d.nor().read(a, &mut buf[..]) {
                 return Err(State::Error);
@@ -1275,7 +1271,7 @@ mod prep {
             j.group = 0;
             return Ok(());
         }
-        d.nor().erase(sec_addr(j, &v, j.ei), j.group == 16);
+        d.nor().erase(sec_at(j, &v, j.ei).0, j.group == 16);
         j.wrote = true;
         j.erasing = true;
         j.t_op = cyc();

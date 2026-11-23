@@ -194,6 +194,7 @@ impl Vol {
     /// FAT12 0xFF0.. (reserved, bad 0xFF7, end of chain 0xFF8..) reads
     /// 0xFFF0.., so `>= 0xFFF8` is the end of a chain on either.
     #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
+    #[inline(never)]
     pub fn fat_rd(&self, b: &[u8], c: u32) -> u32 {
         let o = fat_off(self.fat12, c) % BLK as u32;
         fat_dec(self.fat12, &b[o as usize..], c)
@@ -201,16 +202,13 @@ impl Vol {
     /// Set FAT entry `c` in its FAT block `b` to `v` (a FAT16 value; FAT12
     /// keeps its low 12 bits and the neighbour's half byte).
     #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
+    #[inline(never)]
     pub fn fat_wr(&self, b: &mut [u8], c: u32, v: u32) {
-        if !self.fat12 {
-            let o = ((c % FPER) * 2) as usize;
-            b[o] = v as u8;
-            b[o + 1] = (v >> 8) as u8;
-            return;
-        }
-        let o = (c * 3 / 2) as usize;
-        let v = v & 0xFFF;
-        let w = if c & 1 != 0 { (le16(b, o) & 0x000F) | v << 4 } else { (le16(b, o) & 0xF000) | v };
+        // FAT16: the 16 bits at 2c; FAT12: 12 bits at 3c / 2, shifted by 4
+        // for an odd c (the neighbour keeps its half byte).
+        let (sh, m) = if self.fat12 { ((c & 1) * 4, 0xFFF) } else { (0, 0xFFFF) };
+        let o = (fat_off(self.fat12, c) % BLK as u32) as usize;
+        let w = (le16(b, o) & !(m << sh)) | (v & m) << sh;
         b[o] = w as u8;
         b[o + 1] = (w >> 8) as u8;
     }

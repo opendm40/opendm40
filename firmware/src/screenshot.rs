@@ -1080,18 +1080,20 @@ fn prep_step(d: &mut dyn crate::fastlog::Disk) {
                 p.st = Pp::Ready;
                 return;
             }
-            // FAT12: entries c .. c + n in 3n / 2 + 2 bytes from c's.
+            // The entries from c's on that the 2 * PREP_FAT_RD bytes hold
+            // (bytes past the FAT end are read, never decoded).
             let mut e = [0u8; 2 * PREP_FAT_RD];
-            let n = ((p.last + 1 - p.c) as usize).min(if p.fat12 { PREP_FAT_RD * 4 / 3 - 2 } else { PREP_FAT_RD });
             let o0 = fat_off(p.fat12, p.c);
-            let len = (fat_off(p.fat12, p.c + n as u32 - 1) - o0 + 2) as usize;
-            if !d.nor().read(p.fat_start * blk + o0, &mut e[..len]) {
+            if !d.nor().read(p.fat_start * blk + o0, &mut e) {
                 p.st = Pp::Off;
                 return;
             }
-            for _ in 0..n {
-                let c = p.c;
-                if fat_dec(p.fat12, &e[(fat_off(p.fat12, c) - o0) as usize..], c) == 0 {
+            while p.c <= p.last {
+                let k = (fat_off(p.fat12, p.c) - o0) as usize;
+                if k + 2 > e.len() {
+                    break;
+                }
+                if fat_dec(p.fat12, &e[k..], p.c) == 0 {
                     p.b = 0;
                     p.off = 0;
                     p.erased = false;

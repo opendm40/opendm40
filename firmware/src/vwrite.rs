@@ -150,6 +150,7 @@ struct St {
 const HI: u16 = 0x8000;
 
 /// The SPI block a `St::blk` value names.
+#[inline(never)]
 fn blk_lba(v: &crate::fatren::Vol, b: u16) -> u32 {
     v.clba((b & !HI) as u32) + (b >> 15) as u32
 }
@@ -1312,26 +1313,19 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
     // of the cluster of block 2k (staged in its first block); its own
     // cluster stays free, never linked, and the slot then names block 1 of
     // the partner (`HI`: what the host reads back, `staged_read`).
-    let spc = v.spc as usize;
-    if spc > 2 {
-        return false;
-    }
-    let mut n = 0;
-    for k in 0..nb.div_ceil(spc) {
-        let c = cl[k * spc];
-        for q in 1..spc.min(nb - k * spc) {
-            let b = k * spc + q;
-            if !dev.read_block(blk_lba(&v, cl[b]), buf) {
-                return false;
-            }
+    let (mut n, mut b) = (0, 0);
+    while b < nb {
+        let c = cl[b];
+        b += 1;
+        if v.spc == 2 && b < nb {
             let lba = blk_lba(&v, c | HI);
-            if !(dev.write_block(lba, buf) && crate::fatren::verify(dev, lba, buf, tmp)) {
+            if !(dev.read_block(blk_lba(&v, cl[b]), buf) && dev.write_block(lba, buf) && crate::fatren::verify(dev, lba, buf, tmp)) {
                 return false;
             }
             w.st[chain[b / BPC] as usize].blk[b % BPC] = c | HI;
-            crate::wdt::kick_if_feeding();
+            b += 1;
         }
-        cl[n] = c as u16;
+        cl[n] = c; // more than 2 blocks per cluster: commit_on refuses the count
         n += 1;
     }
     crate::upload::commit_on(dev, &cl[..n], size).is_ok()
