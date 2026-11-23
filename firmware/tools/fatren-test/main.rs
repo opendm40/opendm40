@@ -909,19 +909,40 @@ fn geo(b: &[u8]) -> (usize, u32, u32) {
     let rsvd = le16(0x0E);
     let data = rsvd + b[0x10] as u32 * le16(0x16) + le16(0x11) * 32 / 4096;
     let tot = if le16(0x13) != 0 { le16(0x13) } else { le16(0x20) | le16(0x22) << 16 };
-    (rsvd as usize * 4096, data, tot - data)
+    (rsvd as usize * 4096, data, (tot - data) / b[0x0D] as u32)
+}
+
+/// FAT 1 entry `c` of an image (FAT12 or FAT16, by the cluster count).
+fn fat_entry(b: &[u8], c: u32) -> u32 {
+    let (fat, _, n) = geo(b);
+    let o = fat + fatren::fat_off(n < 4085, c) as usize;
+    fatren::fat_dec(n < 4085, &b[o..o + 2], c)
+}
+
+/// Set FAT entry `c` in a FAT copy starting at `f[0]`.
+fn set_entry(f: &mut [u8], fat12: bool, c: u32, val: u32) {
+    let o = fatren::fat_off(fat12, c) as usize;
+    let w = f[o] as u32 | (f[o + 1] as u32) << 8;
+    let w = match (fat12, c & 1) {
+        (false, _) => val,
+        (true, 0) => (w & 0xF000) | (val & 0xFFF),
+        _ => (w & 0x000F) | (val & 0xFFF) << 4,
+    };
+    f[o] = w as u8;
+    f[o + 1] = (w >> 8) as u8;
 }
 
 /// Free clusters of an image, first fit.
 fn free_clusters(b: &[u8]) -> Vec<u32> {
-    let (fat, _, n) = geo(b);
-    (2..n + 2).filter(|&c| b[fat + 2 * c as usize] == 0 && b[fat + 2 * c as usize + 1] == 0).collect()
+    let (_, _, n) = geo(b);
+    (2..n + 2).filter(|&c| fat_entry(b, c) == 0).collect()
 }
 
 fn cluster_blank(b: &[u8], c: u32) -> bool {
     let (_, data, _) = geo(b);
-    let o = (data + c - 2) as usize * 4096;
-    b[o..o + 4096].iter().all(|&x| x == 0xFF)
+    let spc = b[0x0D] as usize;
+    let o = (data as usize + (c as usize - 2) * spc) * 4096;
+    b[o..o + spc * 4096].iter().all(|&x| x == 0xFF)
 }
 
 /// Drive screenshot.rs's idle-time preparation (`prep_on`, 5 ms per main-
@@ -958,7 +979,7 @@ fn prep_drive(img: &mut Img, now: &mut u64, max: usize) -> (u32, usize) {
 ///        is written again with an erase, Saved.
 fn prep_cmd(a: &[String], img: &mut Img) {
     let mut now = 0u64;
-    let blk_of = |b: &[u8], c: u32| (geo(b).1 + c - 2) as usize * 4096;
+    let blk_of = |b: &[u8], c: u32| (geo(b).1 as usize + (c as usize - 2) * b[0x0D] as usize) * 4096;
     match a[3].as_str() {
         "run" => {
             if a.get(4).is_some_and(|x| x == "cut") {
@@ -1046,16 +1067,17 @@ fn prep_cmd(a: &[String], img: &mut Img) {
                 if nobump {
                     m.d[o..o + 4096].fill(0xA5);
                     for f in 0..nf {
-                        m.d[fat + f * fsz + 2 * c as usize..fat + f * fsz + 2 * c as usize + 2].copy_from_slice(&[0xFF, 0xFF]);
+                        let fat12 = geo(&m.d).2 < 4085;
+                        set_entry(&mut m.d[fat + f * fsz..], fat12, c, 0xFFFF);
                     }
                 } else {
                     let mut b = vec![0xA5u8; 4096];
                     msc::BlockDevice::write_block(&mut m, o as u32 / 4096, &b);
                     for f in 0..nf {
-                        let lba = ((fat + f * fsz + 2 * c as usize) / 4096) as u32;
+                        let lba = ((fat + f * fsz) / 4096) as u32 + c / fatren::FPER;
                         msc::BlockDevice::read_block(&mut m, lba, &mut b);
-                        let i = (fat + f * fsz + 2 * c as usize) % 4096;
-                        b[i..i + 2].copy_from_slice(&[0xFF, 0xFF]);
+                        let v = fatren::parse_bpb(&m.d[..4096], 4096).unwrap();
+                        v.fat_wr(&mut b, c, 0xFFFF);
                         msc::BlockDevice::write_block(&mut m, lba, &b);
                     }
                 }
@@ -1517,9 +1539,10 @@ fn dir_blocks(b: &[u8]) -> Vec<u32> {
         }
         let mut c = e[26] as u32 | (e[27] as u32) << 8;
         let mut n = 0;
+        let _ = fat;
         while (2..0xFFF0).contains(&c) && n < 64 {
-            out.push(data + c - 2);
-            c = le16(fat + 2 * c as usize);
+            out.extend((0..b[0x0D] as u32).map(|k| data + (c - 2) * b[0x0D] as u32 + k));
+            c = fat_entry(b, c);
             n += 1;
         }
     }

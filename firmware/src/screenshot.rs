@@ -94,7 +94,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::calbackup::{self, crc32_upd};
 use crate::diskbuf;
 use crate::fatdir;
-use crate::fatren::{le16, parse_bpb, sfn_is, Vol};
+use crate::fatren::{fat_dec, fat_off, parse_bpb, sfn_is, Vol};
 use crate::lcd;
 use crate::msc::{BlockDevice, Step};
 
@@ -626,7 +626,7 @@ impl Job {
             }
             self.cur = fb;
         }
-        Some(le16(fat, ((c % FPER) * 2) as usize))
+        Some(v.fat_rd(&fat[..], c))
     }
 
     /// Free clusters, first fit, from the entries of one FAT 1 block.
@@ -764,12 +764,11 @@ impl Job {
                 if c / FPER != self.fat_fb {
                     continue;
                 }
-                let o = ((c % FPER) * 2) as usize;
-                if self.fat_k == 0 && le16(&buf[..], o) != 0 {
+                if self.fat_k == 0 && v.fat_rd(&buf[..], c) != 0 {
                     return Some(Shot::Error); // taken since the scan
                 }
                 let next = cl.get(i + 1).copied().unwrap_or(0xFFFF);
-                buf[o..o + 2].copy_from_slice(&next.to_le_bytes());
+                v.fat_wr(&mut buf[..], c, next as u32);
             }
             self.filled = true;
             return None; // the write from the next pass (one block read per pass)
@@ -936,6 +935,7 @@ struct Prep {
     gen: u32,
     t_gen: u64,
     fat_start: u32,
+    fat12: bool,
     data_start: u32,
     spc: u32,
     last: u32,
@@ -956,6 +956,7 @@ const PREP0: Prep = Prep {
     gen: 0,
     t_gen: 0,
     fat_start: 0,
+    fat12: false,
     data_start: 0,
     spc: 1,
     last: 0,
@@ -1065,6 +1066,7 @@ fn prep_step(d: &mut dyn crate::fastlog::Disk) {
                 return;
             };
             p.fat_start = v.fat_start;
+            p.fat12 = v.fat12;
             p.data_start = v.data_start;
             p.spc = v.spc;
             p.last = v.clusters + 1;
@@ -1078,14 +1080,18 @@ fn prep_step(d: &mut dyn crate::fastlog::Disk) {
                 p.st = Pp::Ready;
                 return;
             }
+            // FAT12: entries c .. c + n in 3n / 2 + 2 bytes from c's.
             let mut e = [0u8; 2 * PREP_FAT_RD];
-            let n = ((p.last + 1 - p.c) as usize).min(PREP_FAT_RD);
-            if !d.nor().read(p.fat_start * blk + p.c * 2, &mut e[..2 * n]) {
+            let n = ((p.last + 1 - p.c) as usize).min(if p.fat12 { PREP_FAT_RD * 4 / 3 - 2 } else { PREP_FAT_RD });
+            let o0 = fat_off(p.fat12, p.c);
+            let len = (fat_off(p.fat12, p.c + n as u32 - 1) - o0 + 2) as usize;
+            if !d.nor().read(p.fat_start * blk + o0, &mut e[..len]) {
                 p.st = Pp::Off;
                 return;
             }
-            for k in 0..n {
-                if le16(&e, 2 * k) == 0 {
+            for _ in 0..n {
+                let c = p.c;
+                if fat_dec(p.fat12, &e[(fat_off(p.fat12, c) - o0) as usize..], c) == 0 {
                     p.b = 0;
                     p.off = 0;
                     p.erased = false;
@@ -1108,11 +1114,11 @@ fn prep_step(d: &mut dyn crate::fastlog::Disk) {
                     // Still free? (FAT 1 re-read in this step: nothing ran
                     // since, so the erase can only hit a free cluster.)
                     let mut e = [0u8; 2];
-                    if !d.nor().read(p.fat_start * blk + p.c * 2, &mut e) {
+                    if !d.nor().read(p.fat_start * blk + fat_off(p.fat12, p.c), &mut e) {
                         p.st = Pp::Off;
                         return;
                     }
-                    if le16(&e, 0) != 0 {
+                    if fat_dec(p.fat12, &e, p.c) != 0 {
                         p.st = Pp::Start;
                         return;
                     }

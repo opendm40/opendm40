@@ -71,7 +71,7 @@
 
 #![allow(dead_code)]
 
-use crate::fatren::{free_chain, le16, le32, parse_bpb, sfn_is, verify, Vol};
+use crate::fatren::{free_chain, le16, le32, parse_bpb, sfn_is, verify, Vol, FPER};
 use crate::msc::BlockDevice;
 
 const BLK: usize = 4096;
@@ -568,8 +568,7 @@ fn lba_of(v: &Vol, c: u32) -> u32 {
 
 /// FAT 1 entry `c`, with `fat`/`cur` as a one-block cache.
 fn fat_get(dev: &mut dyn BlockDevice, v: &Vol, c: u32, fat: &mut [u8; BLK], cur: &mut u32) -> Option<u32> {
-    let per = (BLK / 2) as u32;
-    let fb = c / per;
+    let fb = c / FPER;
     if fb >= v.fat_blocks {
         return None;
     }
@@ -579,7 +578,7 @@ fn fat_get(dev: &mut dyn BlockDevice, v: &Vol, c: u32, fat: &mut [u8; BLK], cur:
         }
         *cur = fb;
     }
-    Some(le16(fat, ((c % per) * 2) as usize))
+    Some(v.fat_rd(&fat[..], c))
 }
 
 /// Follow the chain of a file (`start`, `size` from its entry) through FAT 1.
@@ -812,7 +811,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], missing_only: bool) -> Resu
     }
 
     // 3. Chains in every FAT copy, one write per touched block and copy.
-    let per = (BLK / 2) as u32;
+    let per = FPER;
     for k in 0..v.nfats {
         let mut done = 0u32; // FAT blocks already written (bit = block, < 32)
         for &c0 in &cl[..need] {
@@ -828,9 +827,8 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], missing_only: bool) -> Resu
                 for i in 0..j.n {
                     let c = cl[j.first + i];
                     if c / per == fb {
-                        let next = if i + 1 == j.n { 0xFFFF } else { cl[j.first + i + 1] as u16 };
-                        let o = ((c % per) * 2) as usize;
-                        buf[o..o + 2].copy_from_slice(&next.to_le_bytes());
+                        let next = if i + 1 == j.n { 0xFFFF } else { cl[j.first + i + 1] };
+                        v.fat_wr(&mut buf[..], c, next);
                     }
                 }
             }

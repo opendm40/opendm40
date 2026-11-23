@@ -224,7 +224,7 @@ impl<'a> Io<'a> {
             }
             self.ftag = fb;
         }
-        Some(le16(&self.fat[..], ((c % FPER) * 2) as usize))
+        Some(self.v.fat_rd(&self.fat[..], c))
     }
 
     /// Whether `c`'s FAT entry is in the cached block.

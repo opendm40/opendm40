@@ -130,7 +130,11 @@ echo "=== MMEM names: a directory prefix must be the file's own (csvlog::parse_p
 "$W/t" names > /dev/null || { "$W/t" names | grep FAIL; echo "FAIL: names"; exit 1; }
 mkimg() {
     rm -f $1; truncate -s 16M $1                       # sparse (/tmp quota, see save() in main.rs)
-    mkfs.fat -F 16 -S 4096 -s 1 -f 2 -r 512 -R 1 -n "ATK-DM40" $1 >/dev/null
+    if [ -n "$FAT12" ]; then                           # the later units' disk (BY25Q128ES)
+        mkfs.fat -F 12 -S 4096 -s 2 -f 2 -r 512 -R 1 -h 0 -M 0xF8 -n "ATK-DM40" $1 >/dev/null
+    else
+        mkfs.fat -F 16 -S 4096 -s 1 -f 2 -r 512 -R 1 -n "ATK-DM40" $1 >/dev/null
+    fi
 }
 FW=../../../stock/dm40fw.py
 # mkfw <body> <out.bin>: pack a body into an update file (--pad: whole

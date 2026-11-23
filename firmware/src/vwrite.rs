@@ -860,10 +860,9 @@ fn stage(c: u32, s: u32, d: &[u8]) -> R {
     if !dev.read_block(0, tmp) {
         return Err(E_IO);
     }
+    // A block is staged in the first block of a free cluster of its own
+    // (FAT12, 2 blocks per cluster: `commit` pairs them up).
     let v = crate::fatren::parse_bpb(&tmp[..], dev.block_count()).ok_or(E_IO)?;
-    if v.spc != 1 {
-        return Err(E_IO);
-    }
     let old = w.st[i].blk[j];
     let ro = w.st[i].ro & (1 << j) != 0;
     let sc = if old == 0 || ro { crate::upload::next_free(dev, &v, &mut w.hint, fat).map_err(|_| E_REFUSED)? } else { old };
@@ -1015,7 +1014,7 @@ fn park(dev: &mut dyn BlockDevice) -> bool {
         let mut name = *b"_VHOST00TMP";
         name[6] = b'0' + w.parks / 10;
         name[7] = b'0' + w.parks % 10;
-        if crate::upload::link_named(dev, &cl[..n], (n * BLK) as u32, &name, 0x06).is_err() {
+        if crate::upload::link_named(dev, &cl[..n], &name, 0x06).is_err() {
             return false;
         }
         w.parks += 1;
@@ -1299,7 +1298,27 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
         }
         cl[b] = w.st[i].blk[j];
     }
-    crate::upload::commit_on(dev, &cl[..nb], size).is_ok()
+    // More blocks per cluster (FAT12): file block k * spc + q goes into
+    // block q of the cluster of block k * spc (staged in its first block;
+    // the others' clusters stay free, never linked).
+    let spc = v.spc as usize;
+    let mut n = 0;
+    for k in 0..nb.div_ceil(spc) {
+        let c = cl[k * spc] as u32;
+        for q in 1..spc.min(nb - k * spc) {
+            if !dev.read_block(v.clba(cl[k * spc + q] as u32), buf) {
+                return false;
+            }
+            let lba = v.clba(c) + q as u32;
+            if !(dev.write_block(lba, buf) && crate::fatren::verify(dev, lba, buf, tmp)) {
+                return false;
+            }
+            crate::wdt::kick_if_feeding();
+        }
+        cl[n] = c as u16;
+        n += 1;
+    }
+    crate::upload::commit_on(dev, &cl[..n], size).is_ok()
 }
 
 /// The host session ended (Allow, bus reset, or a lockless host's quiet

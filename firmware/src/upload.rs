@@ -40,7 +40,7 @@
 
 use crate::calbackup;
 use crate::diskbuf;
-use crate::fatren::{self, le16, parse_bpb, verify};
+use crate::fatren::{self, parse_bpb, verify};
 use crate::msc::BlockDevice;
 
 const BLK: usize = 4096;
@@ -281,7 +281,7 @@ pub(crate) fn next_free(dev: &mut dyn BlockDevice, v: &crate::fatren::Vol, hint:
             }
             cur = fb;
         }
-        let free = le16(&fat[..], ((*hint % FPER) * 2) as usize) == 0;
+        let free = v.fat_rd(&fat[..], *hint) == 0;
         *hint += 1;
         if free {
             return Ok((*hint - 1) as u16);
@@ -358,19 +358,19 @@ fn end_inner(dev: &mut dyn BlockDevice) -> R<(u32, u32)> {
 /// every other dm40*.bin in the root is deleted (fatren::delete_updates),
 /// then the chain and the entry DM40FW.BIN as at END.
 pub fn commit_on(dev: &mut dyn BlockDevice, cl: &[u16], size: u32) -> R<()> {
-    if cl.is_empty() || cl.len() > MAXCL || !(128..=MAX).contains(&size) || (size as usize).div_ceil(BLK) != cl.len() {
+    if cl.is_empty() || cl.len() > MAXCL || !(128..=MAX).contains(&size) {
         return Err("Illegal parameter value");
     }
     let [buf, tmp, _] = diskbuf::blocks();
-    if fatren::delete_updates(dev, buf, tmp).is_none() {
-        return Err(E_IO);
-    }
     if !dev.read_block(0, tmp) {
         return Err(E_IO);
     }
     let v = parse_bpb(&tmp[..], dev.block_count()).ok_or(E_IO)?;
-    if v.spc != 1 {
-        return Err(E_IO); // one 4 KiB block per cluster (the stock disk)
+    if size.div_ceil(v.spc * BLK as u32) as usize != cl.len() {
+        return Err("Illegal parameter value");
+    }
+    if fatren::delete_updates(dev, buf, tmp).is_none() {
+        return Err(E_IO);
     }
     let r = link_and_enter(dev, &v, cl, size, &NAME, 0x20);
     #[cfg(feature = "vdisk")]
@@ -379,18 +379,19 @@ pub fn commit_on(dev: &mut dyn BlockDevice, cl: &[u16], size: u32) -> R<()> {
 }
 
 /// A file of the free clusters `cl` (already written, any order) in the
-/// root: the chain, then the entry `name` (`attr`). vwrite.rs parks a host
-/// session's data this way (hidden system temp files).
-pub(crate) fn link_named(dev: &mut dyn BlockDevice, cl: &[u16], size: u32, name: &[u8; 11], attr: u8) -> R<()> {
+/// root, whole clusters long: the chain, then the entry `name` (`attr`).
+/// vwrite.rs parks a host session's data this way (hidden system temp
+/// files; it keeps its own map of which block holds what).
+pub(crate) fn link_named(dev: &mut dyn BlockDevice, cl: &[u16], name: &[u8; 11], attr: u8) -> R<()> {
     let tmp = &mut diskbuf::blocks()[2];
     if !dev.read_block(0, tmp) {
         return Err(E_IO);
     }
     let v = parse_bpb(&tmp[..], dev.block_count()).ok_or(E_IO)?;
-    if v.spc != 1 || cl.is_empty() {
+    if cl.is_empty() {
         return Err(E_IO);
     }
-    link_and_enter(dev, &v, cl, size, name, attr)
+    link_and_enter(dev, &v, cl, cl.len() as u32 * v.spc * BLK as u32, name, attr)
 }
 
 /// The chain `cl` in every FAT copy (FAT 1 first; per copy one write per
@@ -407,12 +408,11 @@ fn link_and_enter(dev: &mut dyn BlockDevice, v: &crate::fatren::Vol, cl: &[u16],
                 return Err(E_IO);
             }
             while i < cl.len() && cl[i] as u32 / FPER == fb {
-                let o = ((cl[i] as u32 % FPER) * 2) as usize;
-                if k == 0 && le16(&fat[..], o) != 0 {
+                if k == 0 && v.fat_rd(&fat[..], cl[i] as u32) != 0 {
                     return Err(E_IO); // taken since (cannot happen: we own the disk)
                 }
                 let next = cl.get(i + 1).copied().unwrap_or(0xFFFF);
-                fat[o..o + 2].copy_from_slice(&next.to_le_bytes());
+                v.fat_wr(&mut fat[..], cl[i] as u32, next as u32);
                 i += 1;
             }
             if !(dev.write_block(lba, fat) && verify(dev, lba, fat, tmp)) {

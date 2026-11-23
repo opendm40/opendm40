@@ -917,7 +917,7 @@ impl Job {
             }
             self.cur = fb;
         }
-        Some(le16(fat, ((c % FPER) * 2) as usize))
+        Some(v.fat_rd(&fat[..], c))
     }
 
     /// The cluster holding TAIL (the chain's last, linked or new).
@@ -1055,12 +1055,11 @@ impl Job {
                 if c / FPER != fb {
                     return true;
                 }
-                let o = ((c % FPER) * 2) as usize;
-                let old = le16(&buf[..], o);
+                let old = v.fat_rd(&buf[..], c);
                 if first && (if want_free { old != 0 } else { old < 0xFFF8 }) {
                     return false; // changed since the scan / the last commit
                 }
-                buf[o..o + 2].copy_from_slice(&(val as u16).to_le_bytes());
+                v.fat_wr(&mut buf[..], c, val);
                 true
             };
             for i in 0..self.nnew {
@@ -1382,7 +1381,7 @@ fn free_in(disk: &mut dyn BlockDevice, v: &Vol, buf: &mut [u8; BLK]) -> Result<u
                 return Err(GErr::Error);
             }
         }
-        if le16(&buf[..], ((c % FPER) * 2) as usize) == 0 {
+        if v.fat_rd(&buf[..], c) == 0 {
             free += 1;
         }
     }
